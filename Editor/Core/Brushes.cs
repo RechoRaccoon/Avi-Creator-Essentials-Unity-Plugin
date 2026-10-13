@@ -161,10 +161,11 @@ namespace AviCreatorEssentials
             }));
             s_Tips.Add(MakeProcedural("Heart", (x, y) =>
             {
-                float px = x * 1.25f, py = y * 1.25f + 0.15f;
-                float a = px * px + py * py - 1f;
-                float v = a * a * a - px * px * py * py * py;
-                return Mathf.Clamp01(-v * 25f);
+                // Signed distance to a heart (two round lobes meeting in a point), so the tip and the dip between
+                // the lobes stay solid. The heart spans y 0..1.1 in its own units; scale it to fill the tip.
+                const float s = 0.68f;
+                float d = HeartDistance(new Vector2(x * s, y * s + 0.55f));
+                return Mathf.Clamp01(-d / s * 40f + 0.5f);
             }));
 
             LoadUserTips();
@@ -242,6 +243,16 @@ namespace AviCreatorEssentials
             var tip = MakeTip(Path.GetFileNameWithoutExtension(path), values, size, false);
             tip.filePath = path;
             return tip;
+        }
+
+        /// <summary>Signed distance to a heart with its point at the origin and lobes reaching about y = 1.1 (after Inigo Quilez).</summary>
+        static float HeartDistance(Vector2 p)
+        {
+            p.x = Mathf.Abs(p.x);
+            if (p.y + p.x > 1f) return (p - new Vector2(0.25f, 0.75f)).magnitude - Mathf.Sqrt(2f) / 4f;
+            float a = (p - new Vector2(0f, 1f)).sqrMagnitude;
+            float b = (p - Vector2.one * (0.5f * Mathf.Max(p.x + p.y, 0f))).sqrMagnitude;
+            return Mathf.Sqrt(Mathf.Min(a, b)) * Mathf.Sign(p.x - p.y);
         }
 
         static float Lum(Color32 c) => (c.r * 0.299f + c.g * 0.587f + c.b * 0.114f) / 255f;

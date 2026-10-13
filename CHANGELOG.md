@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- Fixed the brush tips showing up twice in the Brush panel after Unity reloaded scripts.
+- The Heart brush is a complete heart, with a sharp point and a clean dip between the lobes.
+
 ## 0.6.0
 
 - Transform tool (V): pick up part of a paint layer and move it. In the texture view, draw a shape around what to move, or click a color to take every touching pixel of that color (click on the model in the 3D view). The piece floats above the layer: drag it, pull corners to scale (Shift stretches freely), edges to stretch, the top handle to rotate (Shift snaps to 15°). Enter puts it down, Esc puts everything back.

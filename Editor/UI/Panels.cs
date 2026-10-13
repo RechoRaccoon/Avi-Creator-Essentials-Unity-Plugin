@@ -252,8 +252,11 @@ namespace AviCreatorEssentials
 
         void RebuildTips()
         {
+            // Read the list before clearing: the first read loads the library, which raises Changed and calls this
+            // method again. Clearing first let that inner call fill the row and this one add every tip a second time.
+            var tips = BrushLibrary.Tips;
             m_Tips.Clear();
-            foreach (var tip in BrushLibrary.Tips)
+            foreach (var tip in tips)
             {
                 var t = tip;
                 var tile = new VisualElement { tooltip = tip.name + (tip.builtIn ? "" : "  (right-click to delete)"), userData = tip.name };
