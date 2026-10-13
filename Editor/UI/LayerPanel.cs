@@ -341,7 +341,7 @@ namespace AviCreatorEssentials
             var info = W.Column("ap-layer-info");
             var name = W.Text(layer.name, "ap-layer-name");
             info.Add(name);
-            string sub = layer.kind == LayerKind.Fill ? "Fill" : layer.kind == LayerKind.Image ? (layer.placement != null && layer.placement.projected ? "Image · projected" : "Image") :
+            string sub = layer.kind == LayerKind.Fill ? "Fill" : layer.kind == LayerKind.Image ? (layer.IsFloating ? "Floating · Enter applies, Esc cancels" : layer.placement != null && layer.placement.projected ? "Image · projected" : "Image") :
                 layer.kind == LayerKind.Adjustment ? (layer.adjMode == AdjustMode.Recolor ? "Recolor" : layer.adjMode == AdjustMode.Match ? (layer.refValid ? "Match colors" : "Match colors · no reference yet") : "Hue / saturation") :
                 "Paint";
             if (layer.blend != LayerBlendMode.Normal) sub += " · " + s_BlendNames[(int)layer.blend];

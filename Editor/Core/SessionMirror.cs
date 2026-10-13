@@ -223,6 +223,129 @@ namespace AviCreatorEssentials
                 : "Mirrored " + label.ToLowerInvariant() + " as a new layer on top. Erase the parts you want to keep different, or delete the layer to undo.";
         }
 
+        // ------------------------------------------------------------------ symmetry for the 2D view
+
+        /// <summary>Finds, for a point on the texture, the texture point on the mirrored side of the rest-pose model.</summary>
+        class UVMirrorMap
+        {
+            public TextureSet set;
+            public int axis, uvChannel;
+            public List<Tri> tris;
+            public TriGrid grid;
+            public float maxDist;
+            const int N = 128;
+            readonly List<int>[] m_UVCells = new List<int>[N * N];
+
+            public UVMirrorMap(List<Tri> tris, Vector3 min, Vector3 max)
+            {
+                this.tris = tris;
+                grid = new TriGrid(tris, min, max);
+                maxDist = Mathf.Max(0.002f, (max - min).magnitude * 0.03f);
+                for (int i = 0; i < tris.Count; i++)
+                {
+                    var t = tris[i];
+                    var lo = Vector2.Min(t.ua, Vector2.Min(t.ub, t.uc));
+                    var hi = Vector2.Max(t.ua, Vector2.Max(t.ub, t.uc));
+                    if (hi.x - lo.x > 1f || hi.y - lo.y > 1f) continue;
+                    int x0 = Mathf.FloorToInt(lo.x * N), x1 = Mathf.FloorToInt(hi.x * N);
+                    int y0 = Mathf.FloorToInt(lo.y * N), y1 = Mathf.FloorToInt(hi.y * N);
+                    for (int y = y0; y <= y1; y++)
+                    for (int x = x0; x <= x1; x++)
+                    {
+                        int k = ((y % N) + N) % N * N + ((x % N) + N) % N;
+                        (m_UVCells[k] ?? (m_UVCells[k] = new List<int>())).Add(i);
+                    }
+                }
+            }
+
+            /// <summary>The triangle under a texture point and the point's barycentric weights in it.</summary>
+            public bool Locate(Vector2 uv, out int tri, out Vector3 bary)
+            {
+                tri = -1;
+                bary = default;
+                var f = new Vector2(uv.x - Mathf.Floor(uv.x), uv.y - Mathf.Floor(uv.y));
+                var list = m_UVCells[Mathf.Clamp((int)(f.y * N), 0, N - 1) * N + Mathf.Clamp((int)(f.x * N), 0, N - 1)];
+                if (list == null) return false;
+                foreach (int i in list)
+                {
+                    var t = tris[i];
+                    // Triangles may sit in another UV tile; compare in the tile the triangle uses.
+                    var p = f + new Vector2(Mathf.Floor(t.ua.x), Mathf.Floor(t.ua.y));
+                    float area = Cross2(t.ub - t.ua, t.uc - t.ua);
+                    if (Mathf.Abs(area) < 1e-12f) continue;
+                    float wa = Cross2(t.ub - p, t.uc - p) / area;
+                    float wb = Cross2(t.uc - p, t.ua - p) / area;
+                    float wc = 1f - wa - wb;
+                    const float eps = -1e-4f;
+                    if (wa < eps || wb < eps || wc < eps) continue;
+                    tri = i;
+                    bary = new Vector3(wa, wb, wc);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        UVMirrorMap m_UVMirror;
+
+        /// <summary>
+        /// Where a texture point lands when mirrored across the avatar (the same symmetry the 3D brush uses), found
+        /// through the rest-pose model so it works whatever the UV layout. False when the point isn't on the model or
+        /// the other side has no surface there.
+        /// </summary>
+        public bool MirrorUV(TextureSet set, int axis, Vector2 uv, out Vector2 mirrored)
+        {
+            mirrored = uv;
+            if (set == null) return false;
+            axis = Mathf.Clamp(axis, 0, 2);
+            var map = m_UVMirror;
+            if (map == null || map.set != set || map.axis != axis || map.uvChannel != set.uvChannel)
+            {
+                map = BuildUVMirror(set, axis);
+                m_UVMirror = map;
+            }
+            if (map == null || !map.Locate(uv, out int ti, out var b)) return false;
+            var t = map.tris[ti];
+            var P = t.a * b.x + t.b * b.y + t.c * b.z;
+            P[axis] = -P[axis];
+            if (!map.grid.Closest(P, map.maxDist * 0.1f, out int mi, out var mb) &&
+                !map.grid.Closest(P, map.maxDist, out mi, out mb)) return false;
+            var m = map.tris[mi];
+            mirrored = m.ua * mb.x + m.ub * mb.y + m.uc * mb.z;
+            return true;
+        }
+
+        UVMirrorMap BuildUVMirror(TextureSet set, int axis)
+        {
+            meshes.EnsureRestMeshes();
+            var tris = new List<Tri>();
+            var bmin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            var bmax = -bmin;
+            foreach (var u in set.users)
+            {
+                if (u.renderer < 0 || u.renderer >= meshes.entries.Count) continue;
+                var e = meshes.entries[u.renderer];
+                if (e.restMesh == null || u.submesh >= e.SubmeshCount) continue;
+                var v = e.restMesh.vertices;
+                var uv = e.GetUVs(set.uvChannel);
+                if (uv == null || uv.Length != v.Length) continue;
+                var idx = e.submeshIndices[u.submesh];
+                for (int i = 0; i + 2 < idx.Length; i += 3)
+                {
+                    var t = MakeTri(v, uv, idx[i], idx[i + 1], idx[i + 2]);
+                    tris.Add(t);
+                    bmin = Vector3.Min(bmin, Vector3.Min(t.a, Vector3.Min(t.b, t.c)));
+                    bmax = Vector3.Max(bmax, Vector3.Max(t.a, Vector3.Max(t.b, t.c)));
+                }
+            }
+            if (tris.Count == 0) return null;
+            // The mirrored side may stick out past the original bounds; make the grid cover both.
+            var mmin = bmin; var mmax = bmax;
+            mmin[axis] = Mathf.Min(bmin[axis], -bmax[axis]);
+            mmax[axis] = Mathf.Max(bmax[axis], -bmin[axis]);
+            return new UVMirrorMap(tris, mmin, mmax) { set = set, axis = axis, uvChannel = set.uvChannel };
+        }
+
         static Tri MakeTri(Vector3[] v, Vector2[] uv, int i0, int i1, int i2)
         {
             var t = new Tri { a = v[i0], b = v[i1], c = v[i2] };

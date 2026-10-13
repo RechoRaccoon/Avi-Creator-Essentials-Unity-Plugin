@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- Transform tool (V): pick up part of a paint layer and move it. In the texture view, draw a shape around what to move, or click a color to take every touching pixel of that color (click on the model in the 3D view). The piece floats above the layer: drag it, pull corners to scale (Shift stretches freely), edges to stretch, the top handle to rotate (Shift snaps to 15°). Enter puts it down, Esc puts everything back.
+- Warp: switch the Transform tool to Warp for a 3 × 3 grid of points that bend and distort the piece.
+- The Transform panel can also pick up the UV selection or the whole layer, keep the original (copy), flip, and reset the warp. Leaving the tool applies the piece.
+- Symmetry now works in the texture view too: strokes drawn in 2D are repeated on the other side of the model, found through the 3D mesh so it works with any UV layout.
+
 ## 0.5.6
 
 - Alt+middle-drag pans in the 3D view again (it orbited in 0.5.5), so middle-drag pans with or without Alt.

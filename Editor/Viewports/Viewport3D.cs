@@ -22,6 +22,7 @@ namespace AviCreatorEssentials
             Gizmo,
             BoneMove,
             Select,
+            Transform,
         }
 
         enum ImageDrag
@@ -370,6 +371,9 @@ namespace AviCreatorEssentials
                 case Drag.BoneMove:
                     DragBoneMove();
                     break;
+                case Drag.Transform:
+                    DragTransform();
+                    break;
                 case Drag.Select:
                     if (ctx.selectLasso && Vector2.Distance(m_SelPoints[m_SelPoints.Count - 1], m_Mouse) > 3f) m_SelPoints.Add(m_Mouse);
                     break;
@@ -494,6 +498,9 @@ namespace AviCreatorEssentials
                     break;
                 case PaintTool.Image:
                     BeginImageDrag(shift, ctrl);
+                    break;
+                case PaintTool.Transform:
+                    BeginTransform();
                     break;
                 case PaintTool.Select:
                     m_Drag = Drag.Select;
@@ -855,6 +862,80 @@ namespace AviCreatorEssentials
                 s.Select(set, tris, m_SelOp, ctx.selectIslands);
             }
             m_SelPoints.Clear();
+            ctx.Render();
+        }
+
+        // ------------------------------------------------------------------ transform tool
+
+        Vector2 m_TfStartCenter;
+        Vector2 m_TfStartUV;
+
+        bool HitUV(Vector2 local, TextureSet set, out Vector2 uv)
+        {
+            uv = default;
+            if (set == null || !Raycast(local, out var h)) return false;
+            var s = ctx.session;
+            if (s.SetForUser(h.entry, h.submesh, set.property) != set) return false;
+            uv = s.meshes.entries[h.entry].InterpolateUV(h, set.uvChannel);
+            return true;
+        }
+
+        /// <summary>
+        /// In the 3D view the Transform tool picks up a similar-color area with a click and slides the floating piece
+        /// over the model by dragging it; scaling, rotating and warping happen in the texture view.
+        /// </summary>
+        void BeginTransform()
+        {
+            var s = ctx.session;
+            if (!Raycast(m_Mouse, out var h)) return;
+            var hitSet = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
+            if (hitSet == null) return;
+            if (hitSet != s.ActiveSet) s.ActiveSet = hitSet;
+            var set = hitSet;
+            if (!set.initialized) s.InitializeSet(set);
+            var uv = s.meshes.entries[h.entry].InterpolateUV(h, set.uvChannel);
+            var layer = set.ActiveLayer;
+            var p = layer != null && layer.kind == LayerKind.Image ? layer.placement : null;
+            if (p != null && !p.projected && !p.wrap)
+            {
+                var d = new Vector2((uv.x - p.uvCenter.x) * set.width, (uv.y - p.uvCenter.y) * set.height);
+                float rad = -p.rotation * Mathf.Deg2Rad;
+                float cs = Mathf.Cos(rad), sn = Mathf.Sin(rad);
+                var r = new Vector2(d.x * cs - d.y * sn, d.x * sn + d.y * cs);
+                if (Mathf.Abs(r.x) <= p.uvSize.x * 0.5f * set.width && Mathf.Abs(r.y) <= p.uvSize.y * 0.5f * set.height)
+                {
+                    m_TfStartCenter = p.uvCenter;
+                    m_TfStartUV = uv;
+                    m_ImageLayer = layer;
+                    m_ImageSet = set;
+                    m_Drag = Drag.Transform;
+                    return;
+                }
+                if (!layer.IsFloating)
+                {
+                    ctx.ShowHint("Drag the image to move it. To move painted pixels, select a paint layer first.");
+                    return;
+                }
+                s.ApplyFloating(set, layer);
+            }
+            var active = set.ActiveLayer;
+            if (active == null || active.kind != LayerKind.Paint || set.editingMask)
+            {
+                ctx.ShowHint("Transform: select a paint layer, then click a color to pick it up (draw a shape around it in the texture view).");
+                ctx.Render();
+                return;
+            }
+            var msg = s.Lift(set, active, s.ColorMask(set, uv, ctx.transformTolerance, ctx.transformContiguous), ctx.transformCopy);
+            ctx.ShowHint(msg ?? "Drag the piece over the model to move it. Scale, rotate and warp it in the texture view. Enter applies, Esc cancels.");
+            ctx.Render();
+        }
+
+        void DragTransform()
+        {
+            if (m_ImageLayer == null || m_ImageLayer.placement == null) return;
+            if (!HitUV(m_Mouse, m_ImageSet, out var uv)) return;
+            var c = m_TfStartCenter + (uv - m_TfStartUV);
+            ctx.session.EditPlacement(m_ImageSet, m_ImageLayer, "move", pl => pl.uvCenter = c);
             ctx.Render();
         }
 
@@ -1269,7 +1350,7 @@ namespace AviCreatorEssentials
                     Circle(p, m_DragStart, inner, new Color(1f, 0.85f, 0.4f, 0.8f), 1f);
                 }
             }
-            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select)
+            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select || ctx.Tool == PaintTool.Transform)
             {
                 var c = m_Mouse;
                 var col = Color.white;
@@ -1361,6 +1442,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Fill: hudRight.text = "Fill  ·  " + ObjectNames.NicifyVariableName(ctx.fillMode.ToString()); break;
                 case PaintTool.Picker: hudRight.text = "Color picker"; break;
                 case PaintTool.Image: hudRight.text = "Image  ·  drag to move, Shift scale, Ctrl rotate"; break;
+                case PaintTool.Transform: hudRight.text = "Transform  ·  click a color to pick it up, drag it to move, Enter applies"; break;
                 case PaintTool.Select: hudRight.text = "Select " + (ctx.selectIslands ? "UV islands" : "polygons") + "  ·  Shift add, Ctrl remove"; break;
             }
         }

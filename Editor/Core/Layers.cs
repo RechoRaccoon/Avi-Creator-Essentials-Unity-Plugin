@@ -84,9 +84,38 @@ namespace AviCreatorEssentials
 
         public float Aspect => image != null && image.width > 0 ? image.height / (float)image.width : 1f;
 
+        // warp grid (UV placement): offsets of a 3 x 3 grid of control points, in the image's own -1..1 box
+        // units, so the bend moves, scales and rotates with the image. Index = row * 3 + column, bottom row first.
+        public Vector2[] warp;
+
+        public bool HasWarp
+        {
+            get
+            {
+                if (warp == null || warp.Length != 9) return false;
+                foreach (var w in warp)
+                    if (w.sqrMagnitude > 1e-10f) return true;
+                return false;
+            }
+        }
+
+        /// <summary>Where a point of the image's -1..1 box ends up after the warp (still in box units).</summary>
+        public Vector2 Warp(Vector2 local)
+        {
+            if (warp == null || warp.Length != 9) return local;
+            // Quadratic interpolation through the 3 x 3 control points, so each handle sits exactly on the image.
+            float u0 = local.x * (local.x - 1f) * 0.5f, u1 = 1f - local.x * local.x, u2 = local.x * (local.x + 1f) * 0.5f;
+            float v0 = local.y * (local.y - 1f) * 0.5f, v1 = 1f - local.y * local.y, v2 = local.y * (local.y + 1f) * 0.5f;
+            var o = (warp[0] * u0 + warp[1] * u1 + warp[2] * u2) * v0
+                  + (warp[3] * u0 + warp[4] * u1 + warp[5] * u2) * v1
+                  + (warp[6] * u0 + warp[7] * u1 + warp[8] * u2) * v2;
+            return local + o;
+        }
+
         public ImagePlacement Clone()
         {
             var c = (ImagePlacement)MemberwiseClone();
+            if (warp != null) c.warp = (Vector2[])warp.Clone();
             return c;
         }
     }
@@ -105,6 +134,12 @@ namespace AviCreatorEssentials
         public RenderTexture mask;               // optional
         public bool maskEnabled = true;
         public ImagePlacement placement;         // image layers
+
+        // Transform tool: a piece lifted off a paint layer floats as an image layer until it is applied back.
+        public PaintLayer liftedFrom;            // the paint layer it came from (not saved)
+        public RenderTexture liftSnapshot;       // that layer's pixels before the lift, for Cancel (null when copied)
+
+        public bool IsFloating => kind == LayerKind.Image && liftedFrom != null;
 
         // adjustment layers (work on everything below them, inside their mask)
         public AdjustMode adjMode;
@@ -140,6 +175,7 @@ namespace AviCreatorEssentials
         {
             APUtil.Release(ref content);
             APUtil.Release(ref mask);
+            APUtil.Release(ref liftSnapshot);
             if (matchLut != null)
             {
                 Object.DestroyImmediate(matchLut);

@@ -42,6 +42,7 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 | Orbit / pan / zoom | Right-drag / middle-drag (or Shift+right-drag) / scroll |
 | Brush size | **[** **]**, Ctrl+scroll (down grows), or Ctrl+right-drag |
 | Quick color | Right-click (without dragging) for a color wheel with your recent colors |
+| Move part of a layer | **V**, draw around it (or click a color), drag / scale / rotate / warp, **Enter** to apply |
 | Steadier lines | Brush → Stabilizer: set the intensity, Smooth or Rope mode |
 | Opacity | **1** … **0** |
 | Fill an area | **G**, then click a UV island, mesh part, material or similar color |

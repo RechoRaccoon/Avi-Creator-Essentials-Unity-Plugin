@@ -18,6 +18,7 @@ namespace AviCreatorEssentials
             ImageScale,
             ImageRotate,
             Select,
+            Transform,
         }
 
         Vector2 m_Center = new Vector2(0.5f, 0.5f);
@@ -181,6 +182,9 @@ namespace AviCreatorEssentials
                     case PaintTool.Image:
                         BeginImageDrag();
                         break;
+                    case PaintTool.Transform:
+                        BeginTransform(shift);
+                        break;
                     case PaintTool.Select:
                         m_Drag = Drag.Select;
                         m_SelOp = shift ? SelectOp.Add : ctrl ? SelectOp.Subtract : SelectOp.Replace;
@@ -232,6 +236,9 @@ namespace AviCreatorEssentials
                 case Drag.ImageRotate:
                     DragImage();
                     break;
+                case Drag.Transform:
+                    DragTransform(evt.shiftKey);
+                    break;
                 case Drag.Select:
                     if (ctx.selectLasso)
                     {
@@ -260,6 +267,7 @@ namespace AviCreatorEssentials
             else if (m_Drag == Drag.Picker) ctx.colors.Use(ctx.primary);
             else if (m_Drag == Drag.BrushSize) ctx.NotifyBrushChanged();
             else if (m_Drag == Drag.Select) FinishSelect();
+            else if (m_Drag == Drag.Transform) EndTransform();
             m_Drag = Drag.None;
             m_PointerId = -1;
             rightClickPending = false;
@@ -336,6 +344,34 @@ namespace AviCreatorEssentials
             if (b.followStroke) angle += Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
             float strength = b.flow * (b.pressureOpacity ? pressure : 1f) * (1f - b.opacityJitter * (float)m_Rng.NextDouble());
             m_Dabs.Add(new Dab2D { uv = TexelToUV(texel), radiusPx = r, angle = angle * Mathf.Deg2Rad, strength = strength });
+            if (b.symmetry) EmitMirrored(texel, r, angle * Mathf.Deg2Rad, strength);
+        }
+
+        /// <summary>
+        /// Symmetry in the texture view: the dab is repeated where the mirrored point of the model sits on the texture,
+        /// just like the 3D brush. Size and angle follow the other side's texture layout.
+        /// </summary>
+        void EmitMirrored(Vector2 texel, float r, float angle, float strength)
+        {
+            var s = ctx.session;
+            var set = m_StrokeSet ?? Set;
+            int axis = ctx.brush.symmetryAxis;
+            if (!s.MirrorUV(set, axis, TexelToUV(texel), out var muv)) return;
+            float eps = Mathf.Max(1f, r * 0.5f);
+            var side = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * eps;
+            float mr = r, mAngle = angle;
+            if (s.MirrorUV(set, axis, TexelToUV(texel + side), out var muv2))
+            {
+                var d = UVToTexel(muv2) - UVToTexel(muv);
+                float len = d.magnitude;
+                if (len > 1e-4f && len < eps * 8f)
+                {
+                    mr = r * Mathf.Clamp(len / eps, 0.25f, 4f);
+                    mAngle = Mathf.Atan2(d.y, d.x);
+                }
+            }
+            if ((UVToTexel(muv) - texel).sqrMagnitude < 0.25f) return;
+            m_Dabs.Add(new Dab2D { uv = muv, radiusPx = mr, angle = mAngle, strength = strength });
         }
 
         void Flush()
@@ -613,6 +649,251 @@ namespace AviCreatorEssentials
             ctx.Render();
         }
 
+        // ================================================================== transform tool
+
+        enum TfOp { Lasso, Move, Scale, Stretch, Rotate, Warp }
+        TfOp m_TfOp;
+        int m_TfHandle;                 // corner / edge / warp point index
+        ImagePlacement m_TfStart;       // placement when the drag began
+        readonly List<Vector2> m_TfPoints = new List<Vector2>();
+
+        static readonly Vector2[] s_Corners = { new Vector2(-1, -1), new Vector2(1, -1), new Vector2(1, 1), new Vector2(-1, 1) };
+        static readonly Vector2[] s_Edges = { new Vector2(0, -1), new Vector2(1, 0), new Vector2(0, 1), new Vector2(-1, 0) };
+
+        static Vector2 WarpNode(int k) => new Vector2(k % 3 - 1, k / 3 - 1);
+
+        /// <summary>A point of the image's -1..1 box (optionally bent by its warp) in view coordinates.</summary>
+        Vector2 BoxToLocal(ImagePlacement p, Vector2 box, bool warped)
+        {
+            var w = warped ? p.Warp(box) : box;
+            var c = UVToTexel(p.uvCenter);
+            float hx = p.uvSize.x * 0.5f * TexW, hy = p.uvSize.y * 0.5f * TexH;
+            float rad = p.rotation * Mathf.Deg2Rad;
+            float cs = Mathf.Cos(rad), sn = Mathf.Sin(rad);
+            var o = new Vector2(w.x * hx, w.y * hy);
+            return UVToLocal(TexelToUV(c + new Vector2(o.x * cs - o.y * sn, o.x * sn + o.y * cs)));
+        }
+
+        /// <summary>A view point in the image's (unwarped) -1..1 box coordinates.</summary>
+        Vector2 LocalToBox(ImagePlacement p, Vector2 local)
+        {
+            var d = UVToTexel(LocalToUV(local)) - UVToTexel(p.uvCenter);
+            float rad = -p.rotation * Mathf.Deg2Rad;
+            float cs = Mathf.Cos(rad), sn = Mathf.Sin(rad);
+            var r = new Vector2(d.x * cs - d.y * sn, d.x * sn + d.y * cs);
+            float hx = Mathf.Max(1e-5f, p.uvSize.x * 0.5f * TexW), hy = Mathf.Max(1e-5f, p.uvSize.y * 0.5f * TexH);
+            return new Vector2(r.x / hx, r.y / hy);
+        }
+
+        Vector2 TfRotateHandle(ImagePlacement p)
+        {
+            var top = BoxToLocal(p, new Vector2(0, 1), true);
+            var dir = top - BoxToLocal(p, Vector2.zero, true);
+            if (dir.sqrMagnitude < 1e-4f) dir = Vector2.down;
+            return top + dir.normalized * 22f;
+        }
+
+        void BeginTransform(bool shift)
+        {
+            var s = ctx.session;
+            var set = Set;
+            var p = ActiveUVImage(out var layer);
+            if (p != null)
+            {
+                m_TfStart = p.Clone();
+                if (ctx.transformWarp)
+                {
+                    for (int k = 0; k < 9; k++)
+                        if (Vector2.Distance(m_Mouse, BoxToLocal(p, WarpNode(k), true)) < 9f) { StartTf(TfOp.Warp, k); return; }
+                }
+                else
+                {
+                    if (Vector2.Distance(m_Mouse, TfRotateHandle(p)) < 9f) { StartTf(TfOp.Rotate, 0); return; }
+                    for (int k = 0; k < 4; k++)
+                        if (Vector2.Distance(m_Mouse, BoxToLocal(p, s_Corners[k], true)) < 9f) { StartTf(TfOp.Scale, k); return; }
+                    for (int k = 0; k < 4; k++)
+                        if (Vector2.Distance(m_Mouse, BoxToLocal(p, s_Edges[k], true)) < 9f) { StartTf(TfOp.Stretch, k); return; }
+                }
+                var b = LocalToBox(p, m_Mouse);
+                if (Mathf.Abs(b.x) <= 1f && Mathf.Abs(b.y) <= 1f) { StartTf(TfOp.Move, 0); return; }
+                if (!layer.IsFloating)
+                {
+                    ctx.ShowHint("Drag inside the image to move it. To move painted pixels, select a paint layer first.");
+                    return;
+                }
+                // Clicking outside the piece puts it down; the same click starts the next lift.
+                s.ApplyFloating(set, layer);
+                ctx.Render();
+            }
+            var active = set.ActiveLayer;
+            if (active == null || active.kind != LayerKind.Paint || set.editingMask)
+            {
+                ctx.ShowHint("Transform: select a paint layer, then drag a shape around what to move, or click a color.");
+                return;
+            }
+            m_TfPoints.Clear();
+            m_TfPoints.Add(m_Mouse);
+            StartTf(TfOp.Lasso, 0);
+        }
+
+        void StartTf(TfOp op, int handle)
+        {
+            m_TfOp = op;
+            m_TfHandle = handle;
+            m_Drag = Drag.Transform;
+        }
+
+        void DragTransform(bool shift)
+        {
+            if (m_TfOp == TfOp.Lasso)
+            {
+                if (Vector2.Distance(m_TfPoints[m_TfPoints.Count - 1], m_Mouse) > 3f) m_TfPoints.Add(m_Mouse);
+                return;
+            }
+            var p = ActiveUVImage(out var layer);
+            if (p == null || m_TfStart == null) return;
+            var s = ctx.session;
+            var st = m_TfStart;
+            switch (m_TfOp)
+            {
+                case TfOp.Move:
+                {
+                    var d = LocalToUV(m_Mouse) - LocalToUV(m_DragStart);
+                    s.EditPlacement(Set, layer, "move", pl => pl.uvCenter = st.uvCenter + d);
+                    break;
+                }
+                case TfOp.Scale:
+                {
+                    var b = LocalToBox(st, m_Mouse);
+                    var c = s_Corners[m_TfHandle];
+                    Vector2 size;
+                    if (shift)
+                    {
+                        // Shift: stretch freely.
+                        size = new Vector2(st.uvSize.x * Mathf.Max(0.01f, b.x * c.x), st.uvSize.y * Mathf.Max(0.01f, b.y * c.y));
+                    }
+                    else
+                    {
+                        float k = Mathf.Max(0.01f, Vector2.Dot(b, c) / 2f);
+                        size = st.uvSize * k;
+                    }
+                    s.EditPlacement(Set, layer, "scale", pl => pl.uvSize = size);
+                    break;
+                }
+                case TfOp.Stretch:
+                {
+                    var b = LocalToBox(st, m_Mouse);
+                    var e = s_Edges[m_TfHandle];
+                    var size = st.uvSize;
+                    if (e.x != 0f) size.x = st.uvSize.x * Mathf.Max(0.01f, b.x * e.x);
+                    else size.y = st.uvSize.y * Mathf.Max(0.01f, b.y * e.y);
+                    s.EditPlacement(Set, layer, "scale", pl => pl.uvSize = size);
+                    break;
+                }
+                case TfOp.Rotate:
+                {
+                    var center = UVToLocal(st.uvCenter);
+                    float a0 = Mathf.Atan2(-(m_DragStart.y - center.y), m_DragStart.x - center.x) * Mathf.Rad2Deg;
+                    float a1 = Mathf.Atan2(-(m_Mouse.y - center.y), m_Mouse.x - center.x) * Mathf.Rad2Deg;
+                    float rot = st.rotation + Mathf.DeltaAngle(a0, a1);
+                    if (shift) rot = Mathf.Round(rot / 15f) * 15f;
+                    s.EditPlacement(Set, layer, "rotate", pl => pl.rotation = Mathf.Repeat(rot + 180f, 360f) - 180f);
+                    break;
+                }
+                case TfOp.Warp:
+                {
+                    var d = LocalToBox(st, m_Mouse) - LocalToBox(st, m_DragStart);
+                    int k = m_TfHandle;
+                    s.EditPlacement(Set, layer, "warp", pl =>
+                    {
+                        pl.warp = st.warp != null && st.warp.Length == 9 ? (Vector2[])st.warp.Clone() : new Vector2[9];
+                        pl.warp[k] += d;
+                    });
+                    break;
+                }
+            }
+            ctx.Render();
+        }
+
+        void EndTransform()
+        {
+            if (m_TfOp != TfOp.Lasso) return;
+            var s = ctx.session;
+            var set = Set;
+            string msg;
+            float travelled = 0f;
+            for (int i = 1; i < m_TfPoints.Count; i++) travelled += Vector2.Distance(m_TfPoints[i - 1], m_TfPoints[i]);
+            if (m_TfPoints.Count < 3 || travelled < 6f)
+            {
+                // A click picks up the area of similar color under the cursor.
+                var mask = s.ColorMask(set, LocalToUV(m_DragStart), ctx.transformTolerance, ctx.transformContiguous);
+                msg = s.Lift(set, set.ActiveLayer, mask, ctx.transformCopy);
+            }
+            else
+            {
+                var poly = new List<Vector2>();
+                foreach (var pt in m_TfPoints) poly.Add(LocalToUV(pt));
+                msg = s.Lift(set, set.ActiveLayer, APSession.PolygonMask(set, poly), ctx.transformCopy);
+            }
+            m_TfPoints.Clear();
+            if (msg != null) ctx.ShowHint(msg);
+            else ctx.ShowHint("Drag to move, corners scale (Shift: stretch), edges stretch, top handle rotates. Enter applies, Esc cancels.");
+            ctx.Render();
+        }
+
+        void DrawTransform(Painter2D p)
+        {
+            if (m_Drag == Drag.Transform && m_TfOp == TfOp.Lasso && m_TfPoints.Count > 1)
+            {
+                var pts = new List<Vector2>(m_TfPoints) { m_Mouse };
+                var arr = pts.ToArray();
+                Polyline(p, arr, arr.Length, true, new Color(0, 0, 0, 0.6f), 3f);
+                Polyline(p, arr, arr.Length, true, new Color(1f, 0.85f, 0.4f, 1f), 1.25f);
+                return;
+            }
+            var img = ActiveUVImage(out _);
+            if (img == null) return;
+            var accent = new Color(1f, 0.85f, 0.4f, 1f);
+            // Warped outline: the box edge sampled along its length.
+            const int seg = 12;
+            var outline = new Vector2[seg * 4];
+            for (int e = 0; e < 4; e++)
+            for (int i = 0; i < seg; i++)
+                outline[e * seg + i] = BoxToLocal(img, Vector2.Lerp(s_Corners[e], s_Corners[(e + 1) % 4], i / (float)seg), true);
+            Polyline(p, outline, outline.Length, true, new Color(0, 0, 0, 0.5f), 3f);
+            Polyline(p, outline, outline.Length, true, accent, 1.25f);
+            void Handle(Vector2 at, Color c)
+            {
+                Disc(p, at, 5f, new Color(0, 0, 0, 0.6f));
+                Disc(p, at, 4f, c);
+            }
+            if (ctx.transformWarp)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    var row = new Vector2[seg + 1];
+                    var col = new Vector2[seg + 1];
+                    for (int i = 0; i <= seg; i++)
+                    {
+                        float t = i / (float)seg * 2f - 1f;
+                        row[i] = BoxToLocal(img, new Vector2(t, j - 1), true);
+                        col[i] = BoxToLocal(img, new Vector2(j - 1, t), true);
+                    }
+                    Polyline(p, row, row.Length, false, new Color(1f, 0.85f, 0.4f, 0.45f), 1f);
+                    Polyline(p, col, col.Length, false, new Color(1f, 0.85f, 0.4f, 0.45f), 1f);
+                }
+                for (int k = 0; k < 9; k++) Handle(BoxToLocal(img, WarpNode(k), true), Color.white);
+            }
+            else
+            {
+                foreach (var c in s_Corners) Handle(BoxToLocal(img, c, true), Color.white);
+                foreach (var e in s_Edges) Handle(BoxToLocal(img, e, true), new Color(0.85f, 0.85f, 0.85f, 1f));
+                var rh = TfRotateHandle(img);
+                Line(p, BoxToLocal(img, new Vector2(0, 1), true), rh, accent, 1.25f);
+                Handle(rh, accent);
+            }
+        }
+
         // ================================================================== overlay
 
         readonly Vector2[] m_Box = new Vector2[4];
@@ -649,6 +930,8 @@ namespace AviCreatorEssentials
                 Disc(p, rh, 5.5f, new Color(0, 0, 0, 0.6f));
                 Disc(p, rh, 4.5f, new Color(0.35f, 0.8f, 1f, 1f));
             }
+
+            if (ctx.Tool == PaintTool.Transform && !ctx.PoseMode) DrawTransform(p);
 
             if (m_Drag == Drag.Select)
             {
@@ -691,8 +974,11 @@ namespace AviCreatorEssentials
                     var mc = UVToLocal(new Vector2(1f - uv.x, uv.y));
                     Circle(p, mc, r, new Color(1, 1, 1, 0.4f), 1f);
                 }
+                if (ctx.brush.symmetry && m_Drag != Drag.BrushSize && ctx.session.MirrorUV(set, ctx.brush.symmetryAxis, LocalToUV(center), out var symUV))
+                    Circle(p, UVToLocal(symUV), r, new Color(1, 1, 1, 0.4f), 1f);
             }
-            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select)
+            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select ||
+                     (ctx.Tool == PaintTool.Transform && ActiveUVImage(out _) == null))
             {
                 var c = m_Mouse;
                 Line(p, c + new Vector2(-9, 0), c + new Vector2(-3, 0), Color.white, 1.5f);

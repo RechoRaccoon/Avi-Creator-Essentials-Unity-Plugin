@@ -665,6 +665,7 @@ namespace AviCreatorEssentials
                 T(PaintTool.Picker, IconKind.Picker, "Color picker (I). Shift-click picks the secondary color.");
                 T(PaintTool.Image, IconKind.Image, "Image (T) — move, scale and rotate image layers");
                 T(PaintTool.Select, IconKind.Select, "Select UV islands or polygons (S). Painting then stays inside the selection.");
+                T(PaintTool.Transform, IconKind.Move, "Transform (V) — pick up part of a layer (draw around it, or click a color) and move, scale, rotate or warp it");
             }
             else
             {
@@ -774,7 +775,7 @@ namespace AviCreatorEssentials
             }
             m_MeshesPanel?.Rebuild();
             var title = m_BrushSection?.Q<Label>(className: "ap-section-title");
-            if (title != null) title.text = m_Ctx.Tool == PaintTool.Fill ? "Fill" : m_Ctx.Tool == PaintTool.Select ? "Select" : "Brush";
+            if (title != null) title.text = m_Ctx.Tool == PaintTool.Fill ? "Fill" : m_Ctx.Tool == PaintTool.Select ? "Select" : m_Ctx.Tool == PaintTool.Transform ? "Transform" : "Brush";
             foreach (var r in m_TopBarRefresh) r();
             RefreshToolButtons();
             RefreshHistoryButtons();
@@ -965,14 +966,21 @@ namespace AviCreatorEssentials
                 case PaintTool.Fill: return "Click a part of the model or texture to fill it. Change what gets filled in the Fill section.";
                 case PaintTool.Picker: return "Click to pick a color. Shift-click sets the secondary color.";
                 case PaintTool.Image: return "Import an image from the Layers section, then drag it on the model or in the texture view.";
+                case PaintTool.Transform: return "Draw around part of the layer in the texture view, or click a color, to pick it up. Then drag, scale, rotate or warp it. Enter applies, Esc cancels.";
                 default:
                     return "Left-drag to paint. Right-drag orbits, middle-drag pans, scroll zooms. Right-click for the color wheel. Ctrl+right-drag resizes the brush.";
             }
         }
 
+        PaintTool m_LastTool = PaintTool.Brush;
+
         void OnToolChanged()
         {
             if (m_Session == null) return;
+            // Leaving the Transform tool puts any floating piece down, like committing a transform in Photoshop.
+            if (m_LastTool == PaintTool.Transform && (m_Ctx.Tool != PaintTool.Transform || m_Ctx.PoseMode))
+                m_Session.ApplyAllFloating();
+            m_LastTool = m_Ctx.PoseMode ? PaintTool.Brush : m_Ctx.Tool;
             if (m_ToolRail != null)
             {
                 bool poseRail = m_PoseButtons.Count > 0;
@@ -1088,6 +1096,17 @@ namespace AviCreatorEssentials
                     case KeyCode.I: m_Ctx.Tool = PaintTool.Picker; break;
                     case KeyCode.T: m_Ctx.Tool = PaintTool.Image; break;
                     case KeyCode.S: m_Ctx.Tool = PaintTool.Select; break;
+                    case KeyCode.V: m_Ctx.Tool = PaintTool.Transform; break;
+                    case KeyCode.Return:
+                    case KeyCode.KeypadEnter:
+                    {
+                        var set = m_Session.ActiveSet;
+                        var floating = m_Session.FloatingLayer(set);
+                        if (floating == null) { handled = false; break; }
+                        m_Session.ApplyFloating(set, floating);
+                        ShowHint("Transform applied.");
+                        break;
+                    }
                     case KeyCode.X: m_Ctx.SwapColors(); break;
                     case KeyCode.H: m_View.showArmature = !m_View.showArmature; m_View.Save(); m_StructureDirty = true; m_V3?.RepaintOverlay(); break;
                     case KeyCode.M:
@@ -1117,9 +1136,18 @@ namespace AviCreatorEssentials
                         else m_V3?.Frame();
                         break;
                     case KeyCode.Escape:
+                    {
                         m_V3?.CancelStroke();
                         m_V2?.CancelStroke();
+                        var set = m_Session.ActiveSet;
+                        var floating = m_Ctx.Tool == PaintTool.Transform ? m_Session.FloatingLayer(set) : null;
+                        if (floating != null)
+                        {
+                            m_Session.CancelFloating(set, floating);
+                            ShowHint("Transform cancelled.");
+                        }
                         break;
+                    }
                     default:
                         if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9)
                         {
@@ -1287,7 +1315,8 @@ namespace AviCreatorEssentials
             });
             Group("Painting", new[,]
             {
-                { "B  E  G  I  T  S", "Brush, eraser, fill, color picker, image, select" },
+                { "B  E  G  I  T  S  V", "Brush, eraser, fill, color picker, image, select, transform" },
+                { "Enter  /  Esc (transform)", "Apply / cancel the floating piece" },
                 { "Ctrl+A  /  Ctrl+D  /  Ctrl+I", "Select all / clear / invert the UV selection" },
                 { "[  ]", "Brush size (Shift: hardness)" },
                 { "Ctrl+Right-drag / Ctrl+scroll", "Brush size (drag up/down for hardness; scroll down grows)" },

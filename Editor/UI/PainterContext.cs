@@ -13,6 +13,7 @@ namespace AviCreatorEssentials
         Picker,
         Image,
         Select,
+        Transform,
     }
 
     public enum FillMode
@@ -122,6 +123,10 @@ namespace AviCreatorEssentials
         public bool fillSampleLayer;
         public bool selectIslands = true;   // false: individual polygons
         public bool selectLasso;            // false: box
+        public bool transformWarp;          // Transform tool: warp grid instead of move/scale/rotate handles
+        public bool transformCopy;          // lift a copy and leave the original in place
+        public float transformTolerance = 0.12f;
+        public bool transformContiguous = true;
         public bool strokeActive;
 
         public event Action ToolChanged;

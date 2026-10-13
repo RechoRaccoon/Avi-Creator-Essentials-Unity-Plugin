@@ -809,6 +809,34 @@ namespace AviCreatorEssentials
             tris.Add(baseIndex); tris.Add(baseIndex + 2); tris.Add(baseIndex + 3);
         }
 
+        /// <summary>The image quad as a fine grid bent by the placement's warp; each vertex keeps its unwarped image coordinate.</summary>
+        static void AddWarpedQuad(List<Vector3> verts, List<Vector2> locals, List<int> tris, ImagePlacement p, float rx, float ry, int width, int height)
+        {
+            const int n = 24;
+            float angle = p.rotation * Mathf.Deg2Rad;
+            float c = Mathf.Cos(angle), s = Mathf.Sin(angle);
+            var cpx = new Vector2(p.uvCenter.x * width, p.uvCenter.y * height);
+            int baseIndex = verts.Count;
+            for (int j = 0; j <= n; j++)
+            for (int i = 0; i <= n; i++)
+            {
+                var l = new Vector2(i / (float)n * 2f - 1f, j / (float)n * 2f - 1f);
+                var w = p.Warp(l);
+                var o = new Vector2(w.x * rx, w.y * ry);
+                var pos = cpx + new Vector2(o.x * c - o.y * s, o.x * s + o.y * c);
+                verts.Add(new Vector3(pos.x / width, pos.y / height, 1f));
+                locals.Add(l);
+            }
+            for (int j = 0; j < n; j++)
+            for (int i = 0; i < n; i++)
+            {
+                int a = baseIndex + j * (n + 1) + i;
+                int b = a + 1, d = a + n + 1, e = d + 1;
+                tris.Add(a); tris.Add(b); tris.Add(e);
+                tris.Add(a); tris.Add(e); tris.Add(d);
+            }
+        }
+
         Mesh TempMesh()
         {
             if (m_TempMesh == null)
@@ -1113,7 +1141,8 @@ namespace AviCreatorEssentials
                 var tris = new List<int>();
                 float rx = p.uvSize.x * 0.5f * set.width;
                 float ry = p.uvSize.y * 0.5f * set.height;
-                AddQuad(verts, locals, tris, p.uvCenter, rx, ry, p.rotation * Mathf.Deg2Rad, set.width, set.height);
+                if (p.HasWarp) AddWarpedQuad(verts, locals, tris, p, rx, ry, set.width, set.height);
+                else AddQuad(verts, locals, tris, p.uvCenter, rx, ry, p.rotation * Mathf.Deg2Rad, set.width, set.height);
                 var mesh = TempMesh();
                 mesh.SetVertices(verts);
                 mesh.SetUVs(0, locals);

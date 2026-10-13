@@ -17,6 +17,7 @@ namespace AviCreatorEssentials
         readonly List<VisualElement> m_Refreshables = new List<VisualElement>();
         readonly VisualElement m_FillBox;
         readonly VisualElement m_SelectBox;
+        readonly VisualElement m_TransformBox;
         readonly VisualElement m_BrushBox;
 
         BrushSettings B => m_Ctx.brush;
@@ -66,6 +67,37 @@ namespace AviCreatorEssentials
                 m_Ctx.Render();
             })));
             Add(m_SelectBox);
+
+            m_TransformBox = W.Column("ap-transform-options");
+            m_TransformBox.Add(W.Text("Pick up part of the selected paint layer and move it. In the texture view, draw a shape around " +
+                                      "what to move, or click a color to take every touching pixel of that color (in the 3D view, click). " +
+                                      "Then drag it, pull the corners to scale (Shift: stretch), the edges to stretch, and the top handle to rotate.", "ap-hint"));
+            m_TransformBox.Add(Track(new W.Segmented(new[] { "Move / scale / rotate", "Warp" }, () => m_Ctx.transformWarp ? 1 : 0,
+                i => { m_Ctx.transformWarp = i == 1; Changed(); },
+                new[] { "Handles for moving, scaling, stretching and rotating", "A 3 × 3 grid of points: drag them to bend and distort the piece" })));
+            m_TransformBox.Add(Track(new W.ToggleRow("Keep the original (copy)", () => m_Ctx.transformCopy, v => m_Ctx.transformCopy = v,
+                "Pick up a copy and leave the original pixels where they are")));
+            m_TransformBox.Add(Track(new W.SliderRow("Color tolerance", 0f, 1f, () => m_Ctx.transformTolerance, v => m_Ctx.transformTolerance = v, 100f,
+                "Click-to-pick: how different a pixel may be and still be picked up")));
+            m_TransformBox.Add(Track(new W.ToggleRow("Only touching pixels", () => m_Ctx.transformContiguous, v => m_Ctx.transformContiguous = v,
+                "Click-to-pick: off picks up every pixel of that color on the layer")));
+            var liftRow = W.Row("ap-row-gap", "ap-wrap");
+            liftRow.Add(W.TextButton("Pick up UV selection", () => LiftWith(set => m_Ctx.session.SelectionMask(set),
+                "Select UV islands or polygons first (Select tool, S)."), "ap-small"));
+            liftRow.Add(W.TextButton("Pick up whole layer", () => LiftWith(set =>
+            {
+                var all = new byte[set.width * set.height];
+                for (int i = 0; i < all.Length; i++) all[i] = 255;
+                return all;
+            }, null), "ap-small"));
+            m_TransformBox.Add(liftRow);
+            var tfRow = W.Row("ap-row-gap", "ap-wrap");
+            tfRow.Add(W.TextButton("Apply (Enter)", () => WithFloating((s, set, f) => s.ApplyFloating(set, f), true), "ap-small", "ap-accent"));
+            tfRow.Add(W.TextButton("Cancel (Esc)", () => WithFloating((s, set, f) => s.CancelFloating(set, f), true), "ap-small"));
+            tfRow.Add(W.TextButton("Flip", () => WithFloating((s, set, f) => s.EditPlacement(set, f, "flip", pl => pl.flipX = !pl.flipX)), "ap-small"));
+            tfRow.Add(W.TextButton("Reset warp", () => WithFloating((s, set, f) => s.EditPlacement(set, f, "warp reset", pl => pl.warp = null)), "ap-small"));
+            m_TransformBox.Add(tfRow);
+            Add(m_TransformBox);
 
             m_BrushBox = W.Column();
             Add(m_BrushBox);
@@ -159,6 +191,41 @@ namespace AviCreatorEssentials
 
         void Changed() => m_Ctx.NotifyBrushChanged();
 
+        /// <summary>Runs an action on the floating piece (or the selected image layer) of the active material.</summary>
+        void WithFloating(Action<APSession, TextureSet, PaintLayer> action, bool floatingOnly = false)
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            var layer = s?.FloatingLayer(set);
+            if (layer == null && !floatingOnly && set?.ActiveLayer != null && set.ActiveLayer.kind == LayerKind.Image) layer = set.ActiveLayer;
+            if (layer == null)
+            {
+                m_Ctx.ShowHint("Nothing is picked up. Draw around part of a paint layer in the texture view, or click a color.");
+                return;
+            }
+            action(s, set, layer);
+            m_Ctx.Render();
+        }
+
+        void LiftWith(Func<TextureSet, byte[]> makeMask, string emptyHint)
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set == null) return;
+            var floating = s.FloatingLayer(set);
+            if (floating != null) s.ApplyFloating(set, floating);
+            var mask = makeMask(set);
+            if (mask == null)
+            {
+                if (emptyHint != null) m_Ctx.ShowHint(emptyHint);
+                return;
+            }
+            var msg = s.Lift(set, set.ActiveLayer, mask, m_Ctx.transformCopy);
+            if (msg != null) m_Ctx.ShowHint(msg);
+            m_Ctx.Tool = PaintTool.Transform;
+            m_Ctx.Render();
+        }
+
         public void Refresh()
         {
             foreach (var e in m_Refreshables)
@@ -176,9 +243,11 @@ namespace AviCreatorEssentials
         {
             bool fill = m_Ctx.Tool == PaintTool.Fill;
             bool select = m_Ctx.Tool == PaintTool.Select;
+            bool transform = m_Ctx.Tool == PaintTool.Transform;
             m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
             m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
-            m_BrushBox.style.display = fill || select ? DisplayStyle.None : DisplayStyle.Flex;
+            m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
+            m_BrushBox.style.display = fill || select || transform ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         void RebuildTips()
