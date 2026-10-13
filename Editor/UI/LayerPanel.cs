@@ -226,8 +226,8 @@ namespace AviCreatorEssentials
                 var row = W.Row("ap-row-gap", "ap-selection-note");
                 row.Add(new Icon(IconKind.Select, 14));
                 row.Add(W.Text(set.SelectedCount + " polygons selected", "ap-grow"));
-                var mirror = W.TextButton("Mirror to other side", () => MirrorSelection(set), "ap-small");
-                mirror.tooltip = "Copy the selected area onto its mirror image on the other side of the model (e.g. one eye onto the other), as a new layer";
+                var mirror = W.TextButton("Mirror…", () => MirrorMenu(set), "ap-small");
+                mirror.tooltip = "Copy the selected area to the other side, flipped (e.g. one eye onto the other), as a new layer";
                 row.Add(mirror);
                 row.Add(W.TextButton("Clear", () => s.ClearSelection(set), "ap-small"));
                 m_Channel.Add(row);
@@ -527,6 +527,8 @@ namespace AviCreatorEssentials
                     menu.AddSeparator("");
                 }
             }
+            menu.AddSeparator("");
+            AddMirrorItems(menu, set);
             var anchor = this.Q(className: "ap-layer-actions");
             menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
         }
@@ -540,13 +542,45 @@ namespace AviCreatorEssentials
             menu.AddItem("Recolor" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.Recolor, m_Ctx.primary); m_Ctx.Render(); });
             menu.AddItem("Hue / Saturation / Lightness" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.HueSatLight, Color.white); m_Ctx.Render(); });
             menu.AddItem("Match colors" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.Match, Color.white); m_Ctx.Render(); });
+
+            var anchor = this.Q(className: "ap-layer-actions");
+            menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
+        }
+
+        /// <summary>Mirror options: flip half the texture (or the selection) in 2D, or match the other side through 3D.</summary>
+        void MirrorMenu(TextureSet set)
+        {
+            if (set == null) return;
+            var menu = new GenericDropdownMenu();
+            AddMirrorItems(menu, set);
             if (set.HasSelection)
             {
                 menu.AddSeparator("");
-                menu.AddItem("Mirror selected area to the other side", false, () => MirrorSelection(set));
+                menu.AddItem("Selected area → other side of the model (3D)", false, () => MirrorSelection(set));
             }
             var anchor = this.Q(className: "ap-layer-actions");
             menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
+        }
+
+        void AddMirrorItems(GenericDropdownMenu menu, TextureSet set)
+        {
+            if (set.HasSelection)
+            {
+                menu.AddItem("Copy selected area to the mirrored spot (flip left ↔ right)", false, () => MirrorHalf(set, APSession.TextureMirror.LeftToRight));
+                menu.AddItem("Copy selected area to the mirrored spot (flip top ↔ bottom)", false, () => MirrorHalf(set, APSession.TextureMirror.BottomToTop));
+                return;
+            }
+            menu.AddItem("Mirror texture: left half → right half", false, () => MirrorHalf(set, APSession.TextureMirror.LeftToRight));
+            menu.AddItem("Mirror texture: right half → left half", false, () => MirrorHalf(set, APSession.TextureMirror.RightToLeft));
+            menu.AddItem("Mirror texture: bottom half → top half", false, () => MirrorHalf(set, APSession.TextureMirror.BottomToTop));
+            menu.AddItem("Mirror texture: top half → bottom half", false, () => MirrorHalf(set, APSession.TextureMirror.TopToBottom));
+        }
+
+        void MirrorHalf(TextureSet set, APSession.TextureMirror mode)
+        {
+            string msg = S.MirrorTextureHalf(set, mode);
+            m_Ctx.Render();
+            m_Ctx.ShowHint(msg);
         }
 
         void MirrorSelection(TextureSet set)

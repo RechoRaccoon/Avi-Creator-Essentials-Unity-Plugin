@@ -180,6 +180,86 @@ namespace AviCreatorEssentials
             return "Mirrored onto the other side as a new layer (" + targets.Count + " triangles). Hide or delete the layer to undo it, or erase parts of it.";
         }
 
+        public enum TextureMirror { LeftToRight, RightToLeft, BottomToTop, TopToBottom }
+
+        /// <summary>
+        /// Flips one half of the texture onto the other half (in the 2D texture layout), as a new layer. With a UV
+        /// selection, only the selected area is copied to its flipped position. Works for symmetric UV layouts,
+        /// where the left and right side of the model sit mirrored on the texture.
+        /// </summary>
+        public string MirrorTextureHalf(TextureSet set, TextureMirror mode)
+        {
+            if (set == null) return "Pick a material first.";
+            if (!set.initialized) InitializeSet(set);
+            int w = set.width, h = set.height;
+            var exportRT = engine.CompositeForExport(set, 16);
+            var srcTex = APUtil.ReadToTexture(exportRT);
+            APUtil.Release(ref exportRT);
+            var src = srcTex.GetPixels32();
+            Object.DestroyImmediate(srcTex);
+
+            byte[] sel = null;
+            if (set.HasSelection)
+            {
+                if (set.selectionDirty || set.selectionRT == null) engine.BuildSelection(set);
+                if (set.selectionRT != null)
+                {
+                    var st = APUtil.ReadToTexture(set.selectionRT);
+                    var sp = st.GetPixels32();
+                    Object.DestroyImmediate(st);
+                    sel = new byte[sp.Length];
+                    for (int i = 0; i < sp.Length; i++) sel[i] = sp[i].r;
+                }
+            }
+
+            bool horizontal = mode == TextureMirror.LeftToRight || mode == TextureMirror.RightToLeft;
+            var outPx = new Color32[w * h];
+            int written = 0;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int sx = horizontal ? w - 1 - x : x;
+                    int sy = horizontal ? y : h - 1 - y;
+                    int si = sy * w + sx;
+                    if (sel != null)
+                    {
+                        // Copy the selected area onto its flipped position.
+                        if (sel[si] < 128) continue;
+                    }
+                    else
+                    {
+                        // Destination half only.
+                        bool dest = mode == TextureMirror.LeftToRight ? x >= w / 2
+                            : mode == TextureMirror.RightToLeft ? x < w / 2
+                            : mode == TextureMirror.BottomToTop ? y >= h / 2
+                            : y < h / 2;
+                        if (!dest) continue;
+                    }
+                    var c = src[si];
+                    c.a = 255;
+                    outPx[y * w + x] = c;
+                    written++;
+                }
+            }
+            if (written == 0) return "Nothing to copy.";
+
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave };
+            tex.SetPixels32(outPx);
+            tex.Apply(false);
+            string label = mode == TextureMirror.LeftToRight ? "Left → right" : mode == TextureMirror.RightToLeft ? "Right → left"
+                : mode == TextureMirror.BottomToTop ? "Bottom → top" : "Top → bottom";
+            var layer = new PaintLayer { name = UniqueName(set, "Mirrored " + label), kind = LayerKind.Paint };
+            layer.content = engine.NewContentRT(set);
+            APUtil.Copy(tex, layer.content);
+            Object.DestroyImmediate(tex);
+            InsertLayer(set, layer, set.layers.Count, "Mirror texture");
+            Changed(set);
+            return sel != null
+                ? "Copied the selected area to the mirrored spot on the texture, as a new layer. Erase parts of it or delete the layer to undo."
+                : "Mirrored " + label.ToLowerInvariant() + " as a new layer on top. Erase the parts you want to keep different, or delete the layer to undo.";
+        }
+
         static Tri MakeTri(Vector3[] v, Vector2[] uv, int i0, int i1, int i2)
         {
             var t = new Tri { a = v[i0], b = v[i1], c = v[i2] };
