@@ -1,0 +1,823 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.UIElements;
+using Object = UnityEngine.Object;
+
+namespace AviCreatorEssentials
+{
+    // ====================================================================== brush
+
+    public class BrushPanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+        readonly VisualElement m_Tips;
+        readonly List<VisualElement> m_Refreshables = new List<VisualElement>();
+        readonly VisualElement m_FillBox;
+        readonly VisualElement m_SelectBox;
+        readonly VisualElement m_BrushBox;
+
+        BrushSettings B => m_Ctx.brush;
+
+        public BrushPanel(PainterContext ctx)
+        {
+            m_Ctx = ctx;
+            AddToClassList("ap-brush-panel");
+
+            m_FillBox = W.Column("ap-fill-options");
+            m_FillBox.Add(W.Text("Fill fills one area with the paint color in one click. Shift-click fills with transparency.", "ap-hint"));
+            var modes = new List<string> { "UV island", "Connected mesh part", "Whole material", "Entire texture", "Similar color" };
+            m_FillBox.Add(Track(new W.DropdownRow("Fill", modes, () => (int)m_Ctx.fillMode, i => m_Ctx.fillMode = (FillMode)i,
+                "What one click fills: a UV island, a connected piece of the mesh, every part using this material, the whole texture, or pixels of a similar color")));
+            m_FillBox.Add(Track(new W.SliderRow("Tolerance", 0f, 1f, () => m_Ctx.fillTolerance, v => m_Ctx.fillTolerance = v, 100f,
+                "Similar color: how different a pixel may be and still be filled")));
+            m_FillBox.Add(Track(new W.ToggleRow("Only touching pixels", () => m_Ctx.fillContiguous, v => m_Ctx.fillContiguous = v,
+                "Similar color: off fills every matching pixel in the texture")));
+            m_FillBox.Add(Track(new W.ToggleRow("Sample this layer only", () => m_Ctx.fillSampleLayer, v => m_Ctx.fillSampleLayer = v,
+                "Similar color: compare against the selected layer instead of the finished texture")));
+            m_FillBox.Add(Track(new W.ToggleRow("Mirror fill (symmetry)", () => B.symmetry, v => { B.symmetry = v; Changed(); })));
+            Add(m_FillBox);
+
+            m_SelectBox = W.Column("ap-select-options");
+            m_SelectBox.Add(W.Text("Pick UV islands or polygons on the texture or the model. While anything is selected, brushes, " +
+                                   "erasers and fills only paint inside it. Click to pick, drag for a box or lasso. Shift adds, Ctrl removes.", "ap-hint"));
+            m_SelectBox.Add(Track(new W.Segmented(new[] { "UV islands", "Polygons" }, () => m_Ctx.selectIslands ? 0 : 1,
+                i => { m_Ctx.selectIslands = i == 0; Changed(); },
+                new[] { "Each pick selects the whole connected UV island", "Each pick selects single triangles" })));
+            m_SelectBox.Add(Track(new W.Segmented(new[] { "Box", "Lasso" }, () => m_Ctx.selectLasso ? 1 : 0,
+                i => { m_Ctx.selectLasso = i == 1; Changed(); },
+                new[] { "Drag a rectangle", "Draw a free shape" })));
+            var selButtons = W.Row("ap-row-gap", "ap-wrap", "ap-select-buttons");
+            selButtons.Add(W.TextButton("Select all", () => m_Ctx.session?.SelectAll(m_Ctx.session.ActiveSet), "ap-small"));
+            selButtons.Add(W.TextButton("Invert", () => m_Ctx.session?.InvertSelection(m_Ctx.session.ActiveSet), "ap-small"));
+            selButtons.Add(W.TextButton("Clear", () => m_Ctx.session?.ClearSelection(m_Ctx.session.ActiveSet), "ap-small"));
+            m_SelectBox.Add(selButtons);
+            m_SelectBox.Add(Track(new W.ToggleRow("Dim unselected parts on the model", () => m_Ctx.view.highlightSelection, v =>
+            {
+                m_Ctx.view.highlightSelection = v;
+                m_Ctx.view.Save();
+                if (m_Ctx.session != null)
+                {
+                    m_Ctx.session.engine.highlightSelection = v;
+                    foreach (var s in m_Ctx.session.sets) s.dirty = true;
+                }
+                m_Ctx.Render();
+            })));
+            Add(m_SelectBox);
+
+            m_BrushBox = W.Column();
+            Add(m_BrushBox);
+
+            m_Tips = W.Row("ap-tips");
+            m_BrushBox.Add(m_Tips);
+
+            m_BrushBox.Add(Track(new W.SliderRow("Size (cm)", 0.0005f, 0.5f, () => B.radius * 2f, v => { B.radius = v * 0.5f; Changed(); }, 100f,
+                "Brush diameter on the model, in centimetres. Ctrl+right-drag or Ctrl+scroll in the view also resizes.", true)));
+            m_BrushBox.Add(Track(new W.SliderRow("2D size (px)", 0.0002f, 0.5f, () => B.radius2D, v => { B.radius2D = v; Changed(); }, 2048f,
+                "Brush radius in the texture view, in pixels of a 2048 texture", true)));
+            m_BrushBox.Add(Track(new W.SliderRow("Hardness", 0f, 1f, () => B.hardness, v => { B.hardness = v; Changed(); }, 100f, "Edge softness of the round brush")));
+            m_BrushBox.Add(Track(new W.SliderRow("Opacity", 0f, 1f, () => B.opacity, v => { B.opacity = v; Changed(); }, 100f,
+                "Most a single stroke can cover. Keys 1–0 set 10–100%.")));
+            m_BrushBox.Add(Track(new W.SliderRow("Flow", 0.01f, 1f, () => B.flow, v => { B.flow = v; Changed(); }, 100f,
+                "How much each dab adds; low flow builds up gradually within a stroke")));
+            m_BrushBox.Add(Track(new W.SliderRow("Spacing", 0.02f, 2f, () => B.spacing, v => { B.spacing = v; Changed(); }, 100f,
+                "Distance between dabs as a percentage of the brush size")));
+            m_BrushBox.Add(Track(new W.SliderRow("Smoothing", 0f, 1f, () => B.stabilizer, v => { B.stabilizer = v; Changed(); }, 100f,
+                "Lazy mouse: the brush trails behind the cursor for cleaner lines")));
+
+            var dyn = new Foldout { text = "Dynamics", value = EditorPrefs.GetBool("AviCreatorEssentials.Fold.Dynamics", false) };
+            dyn.AddToClassList("ap-foldout");
+            dyn.RegisterValueChangedCallback(e => EditorPrefs.SetBool("AviCreatorEssentials.Fold.Dynamics", e.newValue));
+            dyn.Add(Track(new W.ToggleRow("Pen pressure → size", () => B.pressureSize, v => { B.pressureSize = v; Changed(); })));
+            dyn.Add(Track(new W.ToggleRow("Pen pressure → flow", () => B.pressureOpacity, v => { B.pressureOpacity = v; Changed(); })));
+            dyn.Add(Track(new W.ToggleRow("Rotate with stroke", () => B.followStroke, v => { B.followStroke = v; Changed(); },
+                "Turns textured brushes to follow the stroke direction")));
+            dyn.Add(Track(new W.SliderRow("Angle", -180f, 180f, () => B.angle, v => { B.angle = v; Changed(); })));
+            dyn.Add(Track(new W.SliderRow("Angle jitter", 0f, 180f, () => B.angleJitter, v => { B.angleJitter = v; Changed(); })));
+            dyn.Add(Track(new W.SliderRow("Size jitter", 0f, 1f, () => B.sizeJitter, v => { B.sizeJitter = v; Changed(); }, 100f)));
+            dyn.Add(Track(new W.SliderRow("Flow jitter", 0f, 1f, () => B.opacityJitter, v => { B.opacityJitter = v; Changed(); }, 100f)));
+            dyn.Add(Track(new W.SliderRow("Scatter", 0f, 2f, () => B.scatter, v => { B.scatter = v; Changed(); }, 100f)));
+            m_BrushBox.Add(dyn);
+
+            var proj = new Foldout { text = "Projection", value = EditorPrefs.GetBool("AviCreatorEssentials.Fold.Projection", false) };
+            proj.AddToClassList("ap-foldout");
+            proj.RegisterValueChangedCallback(e => EditorPrefs.SetBool("AviCreatorEssentials.Fold.Projection", e.newValue));
+            proj.Add(Track(new W.DropdownRow("Mode", new List<string> { "Sphere (3D distance)", "Through the screen" },
+                () => (int)B.projection, i => { B.projection = (BrushProjection)i; Changed(); },
+                "Sphere paints everything within the brush in 3D. Through the screen paints what's under the cursor like a stencil.")));
+            proj.Add(Track(new W.ToggleRow("Only visible surfaces", () => B.occlusion, v => { B.occlusion = v; Changed(); },
+                "Don't paint parts hidden behind other geometry (inside of sleeves, behind hair)")));
+            proj.Add(Track(new W.ToggleRow("Skip back-facing surfaces", () => B.backfaceCulling, v => { B.backfaceCulling = v; Changed(); })));
+            proj.Add(Track(new W.SliderRow("Facing limit", 30f, 120f, () => B.backfaceAngle, v => { B.backfaceAngle = v; Changed(); }, 1f,
+                "Surfaces turned further away from the camera than this angle are not painted")));
+            proj.Add(Track(new W.ToggleRow("Align brush to surface", () => B.alignToSurface, v => { B.alignToSurface = v; Changed(); },
+                "Textured brushes lie flat on the surface instead of facing the screen")));
+            proj.Add(Track(new W.SliderRow("Depth", 0.1f, 4f, () => B.depthRange, v => { B.depthRange = v; Changed(); }, 100f,
+                "Through the screen: how deep the brush reaches, in brush radii")));
+            proj.Add(Track(new W.DropdownRow("Mirror axis", new List<string> { "X (left ↔ right)", "Y (up ↔ down)", "Z (front ↔ back)" },
+                () => B.symmetryAxis, i => { B.symmetryAxis = i; Changed(); })));
+            proj.Add(Track(new W.ToggleRow("Paint every material", () => B.paintAllMaterials, v => { B.paintAllMaterials = v; Changed(); },
+                "Strokes continue across body parts that use different materials (each gets painted on its selected layer)")));
+            proj.Add(Track(new W.ToggleRow("Switch to material under cursor", () => B.autoSelectMaterial, v => { B.autoSelectMaterial = v; Changed(); })));
+            proj.Add(Track(new W.ToggleRow("2D: mirror left ↔ right", () => B.mirrorU2D, v => { B.mirrorU2D = v; Changed(); })));
+            proj.Add(Track(new W.ToggleRow("2D: stay inside UV islands", () => B.clipToIslands2D, v => { B.clipToIslands2D = v; Changed(); })));
+            m_BrushBox.Add(proj);
+
+            BrushLibrary.Changed += RebuildTips;
+            m_Ctx.BrushChanged += Refresh;
+            m_Ctx.ToolChanged += RefreshMode;
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                BrushLibrary.Changed -= RebuildTips;
+                m_Ctx.BrushChanged -= Refresh;
+                m_Ctx.ToolChanged -= RefreshMode;
+            });
+            RebuildTips();
+            RefreshMode();
+        }
+
+        T Track<T>(T e) where T : VisualElement
+        {
+            m_Refreshables.Add(e);
+            return e;
+        }
+
+        void Changed() => m_Ctx.NotifyBrushChanged();
+
+        public void Refresh()
+        {
+            foreach (var e in m_Refreshables)
+            {
+                if (e is W.SliderRow s) s.Refresh();
+                else if (e is W.ToggleRow t) t.Refresh();
+                else if (e is W.DropdownRow d) d.Refresh();
+                else if (e is W.Segmented sg) sg.Refresh();
+            }
+            foreach (var tile in m_Tips.Children())
+                W.SetOn(tile, tile.userData as string == B.tip, "ap-on");
+        }
+
+        void RefreshMode()
+        {
+            bool fill = m_Ctx.Tool == PaintTool.Fill;
+            bool select = m_Ctx.Tool == PaintTool.Select;
+            m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
+            m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
+            m_BrushBox.style.display = fill || select ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        void RebuildTips()
+        {
+            m_Tips.Clear();
+            foreach (var tip in BrushLibrary.Tips)
+            {
+                var t = tip;
+                var tile = new VisualElement { tooltip = tip.name + (tip.builtIn ? "" : "  (right-click to delete)"), userData = tip.name };
+                tile.AddToClassList("ap-tip");
+                var img = new Image { image = tip.preview, scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore, tintColor = m_Ctx.view.LightTheme ? new Color(0.1f, 0.1f, 0.1f) : new Color(0.85f, 0.85f, 0.85f) };
+                img.AddToClassList("ap-tip-image");
+                tile.Add(img);
+                tile.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button == 0)
+                    {
+                        B.tip = t.name;
+                        Changed();
+                    }
+                    else if (e.button == 1 && !t.builtIn)
+                    {
+                        if (EditorUtility.DisplayDialog("Delete brush", "Delete the brush '" + t.name + "'? Its image file will be removed.", "Delete", "Cancel"))
+                        {
+                            if (B.tip == t.name) B.tip = "Round";
+                            BrushLibrary.Delete(t);
+                        }
+                    }
+                    e.StopPropagation();
+                });
+                m_Tips.Add(tile);
+            }
+            var add = new VisualElement { tooltip = "Add a custom brush from a PNG or JPG. White (or opaque) areas paint." };
+            add.AddToClassList("ap-tip");
+            add.AddToClassList("ap-tip-add");
+            add.Add(new Icon(IconKind.Plus, 18));
+            add.RegisterCallback<ClickEvent>(_ =>
+            {
+                string path = EditorUtility.OpenFilePanelWithFilters("Add brush", "", new[] { "Images", "png,jpg,jpeg" });
+                if (string.IsNullOrEmpty(path)) return;
+                B.tip = BrushLibrary.Import(path);
+                Changed();
+            });
+            m_Tips.Add(add);
+            Refresh();
+        }
+    }
+
+    // ====================================================================== materials
+
+    public class MaterialsPanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+        readonly VisualElement m_List;
+        readonly VisualElement m_Options;
+        static readonly int[] s_Sizes = { 512, 1024, 2048, 4096, 8192 };
+
+        public MaterialsPanel(PainterContext ctx)
+        {
+            m_Ctx = ctx;
+            AddToClassList("ap-materials-panel");
+            m_List = W.Column("ap-material-list");
+            Add(m_List);
+            m_Options = W.Column("ap-material-options");
+            Add(m_Options);
+        }
+
+        public void Rebuild()
+        {
+            m_List.Clear();
+            m_Options.Clear();
+            var s = m_Ctx.session;
+            if (s == null) return;
+            if (s.sets.Count == 0)
+            {
+                m_List.Add(W.Text("This avatar has no paintable materials.", "ap-empty"));
+                return;
+            }
+            foreach (var set in s.sets)
+            {
+                var row = W.Row("ap-material-row");
+                W.SetOn(row, set == s.ActiveSet, "ap-active");
+                W.SetOn(row, APSession.IsEmission(set) && s.Sibling(set, false) != null, "ap-material-child");
+                var thumb = new VisualElement();
+                thumb.AddToClassList("ap-thumb");
+                thumb.AddToClassList("ap-thumb-small");
+                thumb.Add(new Image { image = APResources.Checker, scaleMode = ScaleMode.ScaleAndCrop, pickingMode = PickingMode.Ignore });
+                Texture t = set.initialized ? (Texture)set.display : set.originalTexture;
+                if (t != null) thumb.Add(new Image { image = t, scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore });
+                row.Add(thumb);
+                var info = W.Column("ap-layer-info");
+                info.Add(W.Text(set.displayName, "ap-layer-name"));
+                string sub = set.initialized
+                    ? set.width + "×" + set.height + " · " + set.layers.Count + (set.layers.Count == 1 ? " layer" : " layers")
+                    : (set.originalTexture != null ? set.originalTexture.width + "×" + set.originalTexture.height + " · not painted yet" : "Empty slot · not painted yet");
+                info.Add(W.Text(sub, "ap-layer-sub"));
+                row.Add(info);
+                var captured = set;
+                row.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button == 0) s.ActiveSet = captured;
+                });
+                m_List.Add(row);
+            }
+
+            var active = s.ActiveSet;
+            if (active == null) return;
+            m_Options.Add(W.Text("Selected material", "ap-subtle-heading"));
+            var props = APSession.TextureProperties(active.cloneMaterial);
+            var labels = new List<string>();
+            foreach (var p in props) labels.Add(APSession.PropertyDescription(active.cloneMaterial, p) + "  (" + p + ")");
+            m_Options.Add(new W.DropdownRow("Texture slot", labels, () => Mathf.Max(0, props.IndexOf(active.property)), i =>
+            {
+                if (i < 0 || i >= props.Count || props[i] == active.property) return;
+                s.AddPropertySet(active, props[i]);
+            }, "Paint a different texture of this material, for example its emission map. Each slot keeps its own layers."));
+
+            var sizes = new List<string>();
+            foreach (var sz in s_Sizes) sizes.Add(sz + " × " + sz);
+            int current = Array.IndexOf(s_Sizes, Mathf.Max(active.width, active.height));
+            if (current < 0)
+            {
+                sizes.Insert(0, active.width + " × " + active.height + " (original)");
+            }
+            m_Options.Add(new W.DropdownRow("Resolution", sizes, () => current < 0 ? 0 : current, i =>
+            {
+                int idx = current < 0 ? i - 1 : i;
+                if (idx < 0) return;
+                int size = s_Sizes[idx];
+                if (active.initialized && !EditorUtility.DisplayDialog("Change resolution",
+                        "Resample every layer of " + active.displayName + " to " + size + "×" + size + "? Undo history will be cleared.", "Resample", "Cancel"))
+                {
+                    Rebuild();
+                    return;
+                }
+                s.ResizeSet(active, size, size);
+                Rebuild();
+            }, "Texture size of the painted result"));
+
+            var uvLabels = new List<string>();
+            var uvIdx = new List<int>();
+            for (int ch = 0; ch < 4; ch++)
+            {
+                bool has = false;
+                foreach (var u in active.users)
+                    if (s.meshes.entries[u.renderer].HasUVs(ch)) { has = true; break; }
+                if (has || ch == 0)
+                {
+                    uvLabels.Add("UV" + ch);
+                    uvIdx.Add(ch);
+                }
+            }
+            if (uvLabels.Count > 1)
+            {
+                m_Options.Add(new W.DropdownRow("UV map", uvLabels, () => Mathf.Max(0, uvIdx.IndexOf(active.uvChannel)),
+                    i => { s.SetUVChannel(active, uvIdx[i]); m_Ctx.Render(); }, "Which UV map this texture is laid out on (almost always UV0)"));
+            }
+            var used = new List<string>();
+            foreach (var u in active.users)
+            {
+                var name = s.meshes.entries[u.renderer].displayName;
+                if (!used.Contains(name)) used.Add(name);
+            }
+            m_Options.Add(W.Text("Used by " + string.Join(", ", used), "ap-hint"));
+        }
+    }
+
+    // ====================================================================== meshes
+
+    public class MeshesPanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+
+        public MeshesPanel(PainterContext ctx)
+        {
+            m_Ctx = ctx;
+            AddToClassList("ap-meshes-panel");
+        }
+
+        public void Rebuild()
+        {
+            Clear();
+            var s = m_Ctx.session;
+            if (s == null) return;
+            Add(W.Text("Hide meshes to reach what's underneath. This only affects the painter, not your avatar.", "ap-hint"));
+            var actions = W.Row("ap-row-gap");
+            actions.Add(W.TextButton("Show all", () =>
+            {
+                foreach (var e in s.meshes.entries) s.SetRendererVisible(e, true);
+                m_Ctx.Render();
+            }, "ap-small"));
+            Add(actions);
+            foreach (var e in s.meshes.entries)
+            {
+                var entry = e;
+                var row = W.Row("ap-mesh-row");
+                bool vis = e.Visible;
+                row.Add(W.IconButton(vis ? IconKind.Eye : IconKind.EyeOff, vis ? "Hide" : "Show", () =>
+                {
+                    s.SetRendererVisible(entry, !entry.Visible);
+                    m_Ctx.Render();
+                }, "ap-eye"));
+                var label = W.Text(e.displayName, "ap-mesh-name");
+                W.SetOn(row, !vis, "ap-hidden");
+                row.Add(label);
+                row.Add(W.Spacer());
+                row.Add(W.TextButton("Solo", () =>
+                {
+                    foreach (var o in s.meshes.entries) s.SetRendererVisible(o, o == entry);
+                    m_Ctx.Render();
+                }, "ap-small", "ap-ghost"));
+                Add(row);
+            }
+        }
+    }
+
+    // ====================================================================== image placement
+
+    public class ImagePanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+
+        public ImagePanel(PainterContext ctx)
+        {
+            m_Ctx = ctx;
+            AddToClassList("ap-image-panel");
+        }
+
+        public void Rebuild()
+        {
+            Clear();
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            var layer = set?.ActiveLayer;
+            if (layer == null || layer.kind != LayerKind.Image || layer.placement == null)
+            {
+                style.display = DisplayStyle.None;
+                return;
+            }
+            style.display = DisplayStyle.Flex;
+            var p = layer.placement;
+
+            Add(new W.Segmented(new[] { "On the texture", "Projected on model" }, () => p.projected ? 1 : 0, i =>
+            {
+                bool proj = i == 1;
+                if (proj == p.projected) return;
+                if (proj && p.worldWidth <= 0f) p.worldWidth = 0.1f;
+                s.EditPlacement(set, layer, "mode", pl =>
+                {
+                    pl.projected = proj;
+                    if (proj && pl.worldPos == Vector3.zero)
+                    {
+                        var b = s.meshes.VisibleBounds();
+                        pl.worldPos = b.center + Vector3.forward * b.extents.z;
+                        pl.normal = Vector3.forward;
+                        pl.up = Vector3.up;
+                        pl.worldWidth = b.extents.x * 0.5f;
+                        pl.depth = pl.worldWidth * 0.5f;
+                    }
+                });
+                m_Ctx.Render();
+                Rebuild();
+            }, new[] { "Lay the image out in texture space (like an overlay in the 2D view)", "Shine the image onto the model like a projector, across seams" }));
+
+            Add(W.Text(p.projected
+                ? "With the Image tool, drag on the model to place it. Shift-drag scales, Ctrl-drag rotates."
+                : "With the Image tool, drag the box in the 2D view: corners scale, the top handle rotates.", "ap-hint"));
+
+            if (p.projected)
+            {
+                Add(new W.SliderRow("Width (cm)", 0.002f, 2f, () => p.worldWidth, v => { s.EditPlacement(set, layer, "size", pl => pl.worldWidth = v); m_Ctx.Render(); }, 100f, null, true));
+                Add(new W.SliderRow("Depth (cm)", 0.001f, 1f, () => p.depth, v => { s.EditPlacement(set, layer, "depth", pl => pl.depth = v); m_Ctx.Render(); }, 100f,
+                    "How far in front of and behind the image surfaces still receive it", true));
+                Add(new W.SliderRow("Facing limit", 5f, 175f, () => p.angleLimit, v => { s.EditPlacement(set, layer, "angle", pl => pl.angleLimit = v); m_Ctx.Render(); }, 1f,
+                    "Surfaces turned away further than this don't receive the image"));
+            }
+            else
+            {
+                Add(new W.SliderRow("Size", 0.01f, 4f, () => p.uvSize.x, v =>
+                {
+                    s.EditPlacement(set, layer, "size", pl =>
+                    {
+                        float k = v / Mathf.Max(1e-5f, pl.uvSize.x);
+                        pl.uvSize *= k;
+                    });
+                    m_Ctx.Render();
+                }, 100f, "Width as a percentage of the texture", true));
+                Add(new W.ToggleRow("Stay inside UV islands", () => p.clipToIslands, v => { s.EditPlacement(set, layer, "clip", pl => pl.clipToIslands = v); m_Ctx.Render(); }));
+            }
+            Add(new W.SliderRow("Rotation", -180f, 180f, () => p.rotation, v => { s.EditPlacement(set, layer, "rotate", pl => pl.rotation = v); m_Ctx.Render(); }));
+            Add(new W.ToggleRow("Flip horizontally", () => p.flipX, v => { s.EditPlacement(set, layer, "flip", pl => pl.flipX = v); m_Ctx.Render(); }));
+
+            var row = W.Row("ap-row-gap");
+            if (!p.projected)
+            {
+                row.Add(W.TextButton("Stretch to texture", () =>
+                {
+                    s.EditPlacement(set, layer, "fit", pl => { pl.uvCenter = new Vector2(0.5f, 0.5f); pl.uvSize = Vector2.one; pl.rotation = 0f; });
+                    m_Ctx.Render();
+                    Rebuild();
+                }, "ap-small"));
+                row.Add(W.TextButton("Fit inside", () =>
+                {
+                    s.EditPlacement(set, layer, "fit", pl =>
+                    {
+                        float texAspect = set.height / (float)Mathf.Max(1, set.width);
+                        float imgAspect = pl.Aspect;
+                        pl.uvCenter = new Vector2(0.5f, 0.5f);
+                        pl.rotation = 0f;
+                        float wv = 1f, hv = imgAspect / texAspect;
+                        if (hv > 1f) { wv /= hv; hv = 1f; }
+                        pl.uvSize = new Vector2(wv, hv);
+                    });
+                    m_Ctx.Render();
+                    Rebuild();
+                }, "ap-small"));
+            }
+            row.Add(W.TextButton("Rasterize", () => s.RasterizeImage(set, layer), "ap-small"));
+            Add(row);
+        }
+    }
+
+    // ====================================================================== pose
+
+    public class PosePanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+        readonly Func<Texture2D> m_Capture;
+        readonly VisualElement m_BoneBox;
+        readonly VisualElement m_Library;
+        Vector3Field m_Euler;
+        string m_NewName = "";
+
+        public PosePanel(PainterContext ctx, Func<Texture2D> captureThumbnail)
+        {
+            m_Ctx = ctx;
+            m_Capture = captureThumbnail;
+            AddToClassList("ap-pose-panel");
+
+            Add(new W.Segmented(new[] { "Rotate", "Move" }, () => (int)m_Ctx.poseTool, i => { m_Ctx.poseTool = (PoseTool)i; m_Ctx.Render(); },
+                new[] { "Rotate bones with the gizmo (R)", "Drag bones to move them (G)" }));
+
+            m_BoneBox = W.Column("ap-bone-box");
+            Add(m_BoneBox);
+
+            var tools = W.Row("ap-row-gap", "ap-wrap");
+            tools.Add(W.IconTextButton(IconKind.Reset, "Reset pose", () => Apply("Reset pose", m_Ctx.session.pose.RestSnapshot(), true)));
+            tools.Add(W.IconTextButton(IconKind.Mirror, "Mirror pose", () => Apply("Mirror pose", m_Ctx.session.pose.MirroredSnapshot(), true)));
+            Add(tools);
+
+            Add(new W.ToggleRow("Local gizmo axes", () => m_Ctx.view.gizmoLocal, v => { m_Ctx.view.gizmoLocal = v; m_Ctx.view.Save(); m_Ctx.Render(); }));
+            Add(new W.ToggleRow("Humanoid bones only", () => m_Ctx.view.humanoidOnly, v => { m_Ctx.view.humanoidOnly = v; m_Ctx.view.Save(); m_Ctx.Render(); },
+                "Hide hair, clothing and accessory bones"));
+            Add(new W.SliderRow("Bone size", 0.3f, 3f, () => m_Ctx.view.boneSize, v => { m_Ctx.view.boneSize = v; m_Ctx.view.Save(); m_Ctx.Render(); }, 100f));
+
+            Add(W.Text("Saved poses", "ap-subtle-heading"));
+            var saveRow = W.Row("ap-row-gap");
+            var nameField = new TextField { value = "" };
+            nameField.AddToClassList("ap-grow");
+            nameField.RegisterValueChangedCallback(e => m_NewName = e.newValue);
+            saveRow.Add(nameField);
+            saveRow.Add(W.TextButton("Save pose", () =>
+            {
+                SavePose(string.IsNullOrWhiteSpace(m_NewName) ? "Pose " + DateTime.Now.ToString("MMdd HHmm") : m_NewName.Trim(), null);
+                nameField.SetValueWithoutNotify("");
+                m_NewName = "";
+            }, "ap-accent"));
+            Add(saveRow);
+            m_Library = W.Row("ap-pose-library");
+            Add(m_Library);
+
+            var sceneRow = W.Row("ap-row-gap");
+            sceneRow.Add(W.TextButton("Send pose to scene", () =>
+            {
+                var s = m_Ctx.session;
+                if (s.sourceAvatar == null) return;
+                s.pose.CopyToSceneAvatar(s.sourceAvatar.transform);
+            }, "ap-small"));
+            sceneRow.Add(W.TextButton("Get pose from scene", () =>
+            {
+                var s = m_Ctx.session;
+                if (s.sourceAvatar == null) return;
+                var pose = s.pose;
+                var before = pose.Capture();
+                var root = s.sourceAvatar.transform;
+                foreach (var b in pose.bones)
+                {
+                    var t = APUtil.FindPath(root, b.path);
+                    if (t == null || b.t == null) continue;
+                    b.t.localRotation = t.localRotation;
+                    b.t.localPosition = t.localPosition;
+                }
+                var after = pose.Capture();
+                pose.NotifyChanged();
+                s.Push(new ActionEntry("Get pose from scene", () => pose.Restore(before), () => pose.Restore(after)));
+                m_Ctx.Render();
+            }, "ap-small"));
+            Add(sceneRow);
+            var animRow = W.Row("ap-row-gap");
+            animRow.Add(W.IconTextButton(IconKind.Record, "Animate in the Scene view", () =>
+            {
+                var s = m_Ctx.session;
+                if (s.sourceAvatar == null) return;
+                ScenePoseState.SetAvatar(s.sourceAvatar.transform);
+                Selection.activeGameObject = s.sourceAvatar;
+                ScenePoseTool.Activate();
+            }));
+            Add(animRow);
+            Add(W.Text("Posing here only changes the painter's copy, and painting works in any pose. To make animations, " +
+                       "use Animate in the Scene view: the same bone overlay appears on your real avatar and works with the Animation window's record mode.", "ap-hint"));
+        }
+
+        void Apply(string name, PoseSnapshot target, bool animate)
+        {
+            var pose = m_Ctx.session.pose;
+            pose.FinishTransition();
+            var before = pose.Capture();
+            if (animate) pose.TransitionTo(target);
+            else pose.Restore(target);
+            m_Ctx.session.Push(new ActionEntry(name, () => { pose.FinishTransition(); pose.Restore(before); }, () => { pose.FinishTransition(); pose.Restore(target); }));
+            m_Ctx.Render();
+            RefreshBone();
+        }
+
+        public void RefreshBone()
+        {
+            m_BoneBox.Clear();
+            var s = m_Ctx.session;
+            var b = s?.pose.selected;
+            if (b == null)
+            {
+                m_BoneBox.Add(W.Text("Click a bone in the 3D view to select it. Tab switches between painting and posing.", "ap-hint"));
+                return;
+            }
+            var title = W.Row("ap-row-gap");
+            title.Add(new Icon(IconKind.Bone, 14));
+            title.Add(W.Text(b.Name, "ap-bone-name"));
+            if (b.isHuman) title.Add(W.Text(ObjectNames.NicifyVariableName(b.human.ToString()), "ap-badge"));
+            m_BoneBox.Add(title);
+            m_Euler = new Vector3Field("Rotation") { value = b.t.localEulerAngles };
+            m_Euler.AddToClassList("ap-euler");
+            m_Euler.RegisterValueChangedCallback(e =>
+            {
+                var pose = s.pose;
+                var before = pose.Capture();
+                b.t.localEulerAngles = e.newValue;
+                var after = pose.Capture();
+                s.Push(new ActionEntry("Rotate bone", () => pose.Restore(before), () => pose.Restore(after)));
+                pose.NotifyChanged();
+                m_Ctx.Render();
+            });
+            m_BoneBox.Add(m_Euler);
+            var row = W.Row("ap-row-gap", "ap-wrap");
+            row.Add(W.TextButton("Reset rotation", () => ResetBone(b, true, false), "ap-small"));
+            row.Add(W.TextButton("Reset position", () => ResetBone(b, false, true), "ap-small"));
+            if (b.parent != null) row.Add(W.TextButton("Parent", () => { s.pose.Select(b.parent); m_Ctx.Render(); }, "ap-small", "ap-ghost"));
+            if (b.tailChild != null) row.Add(W.TextButton("Child", () => { s.pose.Select(b.tailChild); m_Ctx.Render(); }, "ap-small", "ap-ghost"));
+            if (b.mirror != null) row.Add(W.TextButton("Other side", () => { s.pose.Select(b.mirror); m_Ctx.Render(); }, "ap-small", "ap-ghost"));
+            m_BoneBox.Add(row);
+        }
+
+        public void RefreshValues()
+        {
+            var b = m_Ctx.session?.pose.selected;
+            if (b != null && m_Euler != null) m_Euler.SetValueWithoutNotify(b.t.localEulerAngles);
+        }
+
+        void ResetBone(Bone b, bool rot, bool pos)
+        {
+            var pose = m_Ctx.session.pose;
+            var before = pose.Capture();
+            pose.ResetBone(b, rot, pos);
+            var after = pose.Capture();
+            m_Ctx.session.Push(new ActionEntry("Reset bone", () => pose.Restore(before), () => pose.Restore(after)));
+            m_Ctx.Render();
+            RefreshValues();
+        }
+
+        public void RebuildLibrary()
+        {
+            m_Library.Clear();
+            var guids = AssetDatabase.FindAssets("t:AvatarPose");
+            if (guids.Length == 0)
+            {
+                m_Library.Add(W.Text("No saved poses yet. Pose the avatar and press Save pose; click a saved pose to switch to it.", "ap-hint"));
+                return;
+            }
+            foreach (var g in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(g);
+                var asset = AssetDatabase.LoadAssetAtPath<AvatarPose>(path);
+                if (asset == null) continue;
+                var card = new VisualElement { tooltip = asset.name + (string.IsNullOrEmpty(asset.avatarName) ? "" : "\nSaved from " + asset.avatarName) + "\nClick to apply · right-click for options" };
+                card.AddToClassList("ap-pose-card");
+                var img = new Image { image = asset.thumbnail != null ? asset.thumbnail : null, scaleMode = ScaleMode.ScaleAndCrop, pickingMode = PickingMode.Ignore };
+                img.AddToClassList("ap-pose-thumb");
+                if (asset.thumbnail == null) img.Add(new Icon(IconKind.Bone, 22));
+                card.Add(img);
+                card.Add(W.Text(asset.name, "ap-pose-name"));
+                card.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button != 0) return;
+                    Apply("Apply pose " + asset.name, m_Ctx.session.pose.SnapshotFrom(asset.bones), true);
+                });
+                card.AddManipulator(new ContextualMenuManipulator(evt =>
+                {
+                    evt.menu.AppendAction("Apply", _ => Apply("Apply pose " + asset.name, m_Ctx.session.pose.SnapshotFrom(asset.bones), true));
+                    evt.menu.AppendAction("Overwrite with current pose", _ => SavePose(asset.name, asset));
+                    evt.menu.AppendAction("Rename…", _ => RenamePose(asset));
+                    evt.menu.AppendAction("Show in Project", _ => EditorGUIUtility.PingObject(asset));
+                    evt.menu.AppendAction("Delete", _ =>
+                    {
+                        if (EditorUtility.DisplayDialog("Delete pose", "Delete the pose '" + asset.name + "'?", "Delete", "Cancel"))
+                        {
+                            AssetDatabase.DeleteAsset(path);
+                            RebuildLibrary();
+                        }
+                    });
+                }));
+                m_Library.Add(card);
+            }
+        }
+
+        void SavePose(string name, AvatarPose existing)
+        {
+            var s = m_Ctx.session;
+            APUtil.EnsureAssetFolder(APUtil.PosesFolder);
+            var asset = existing;
+            if (asset == null)
+            {
+                asset = ScriptableObject.CreateInstance<AvatarPose>();
+                string path = AssetDatabase.GenerateUniqueAssetPath(APUtil.PosesFolder + "/" + APUtil.SafeFileName(name) + ".asset");
+                AssetDatabase.CreateAsset(asset, path);
+            }
+            asset.avatarName = s.avatarName;
+            asset.bones = s.pose.ToPoseBones();
+            var thumb = m_Capture?.Invoke();
+            if (thumb != null)
+            {
+                if (asset.thumbnail != null) AssetDatabase.RemoveObjectFromAsset(asset.thumbnail);
+                thumb.name = "Thumbnail";
+                thumb.hideFlags = HideFlags.None;
+                AssetDatabase.AddObjectToAsset(thumb, asset);
+                asset.thumbnail = thumb;
+            }
+            EditorUtility.SetDirty(asset);
+            AssetDatabase.SaveAssets();
+            RebuildLibrary();
+        }
+
+        void RenamePose(AvatarPose asset)
+        {
+            var popup = new TextInputPopup("Rename pose", asset.name, newName =>
+            {
+                if (string.IsNullOrWhiteSpace(newName)) return;
+                AssetDatabase.RenameAsset(AssetDatabase.GetAssetPath(asset), APUtil.SafeFileName(newName.Trim()));
+                AssetDatabase.SaveAssets();
+                RebuildLibrary();
+            });
+            var anchor = worldBound;
+            UnityEditor.PopupWindow.Show(new Rect(anchor.x, anchor.y, 10, 10), popup);
+        }
+    }
+
+    /// <summary>Tiny popup with one text field.</summary>
+    public class TextInputPopup : PopupWindowContent
+    {
+        readonly string m_Title;
+        string m_Value;
+        readonly Action<string> m_Done;
+        bool m_Focused;
+
+        public TextInputPopup(string title, string value, Action<string> done)
+        {
+            m_Title = title;
+            m_Value = value;
+            m_Done = done;
+        }
+
+        public override Vector2 GetWindowSize() => new Vector2(260, 74);
+
+        public override void OnGUI(Rect rect)
+        {
+            GUILayout.Label(m_Title, EditorStyles.boldLabel);
+            GUI.SetNextControlName("ap_text");
+            m_Value = EditorGUILayout.TextField(m_Value);
+            if (!m_Focused)
+            {
+                EditorGUI.FocusTextInControl("ap_text");
+                m_Focused = true;
+            }
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            bool enter = Event.current.type == EventType.KeyDown && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter);
+            if (GUILayout.Button("OK", GUILayout.Width(70)) || enter)
+            {
+                m_Done?.Invoke(m_Value);
+                editorWindow.Close();
+            }
+            GUILayout.EndHorizontal();
+        }
+    }
+
+    // ====================================================================== view settings
+
+    public class ViewPanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+
+        public ViewPanel(PainterContext ctx)
+        {
+            m_Ctx = ctx;
+            AddToClassList("ap-view-panel");
+            var v = ctx.view;
+            void Save() { v.Save(); m_Ctx.Render(); }
+
+            Add(new W.DropdownRow("Theme", new List<string> { "Follow Unity", "Dark", "Light" },
+                () => v.theme, i =>
+                {
+                    v.theme = i;
+                    v.Save();
+                    var w = EditorWindow.HasOpenInstances<AviCreatorWindow>() ? EditorWindow.GetWindow<AviCreatorWindow>(false, null, false) : null;
+                    w?.ApplyTheme();
+                    m_Ctx.Render();
+                }));
+            Add(new W.DropdownRow("Lighting", new List<string> { "Studio", "Soft", "Flat (base colors)", "Dramatic", "Night" },
+                () => (int)v.lighting, i => { v.lighting = (LightingPreset)i; Save(); }));
+            Add(new W.SliderRow("Light angle", -180f, 180f, () => v.lightYaw, x => { v.lightYaw = x; Save(); }));
+            Add(new W.ToggleRow("Light turns with the camera", () => v.lightFollowsCamera, x => { v.lightFollowsCamera = x; Save(); }));
+            Add(new W.SliderRow("Light strength", 0f, 2f, () => v.lightIntensity, x => { v.lightIntensity = x; Save(); }, 100f));
+            Add(new W.SliderRow("Ambient", 0f, 1.5f, () => v.ambient, x => { v.ambient = x; Save(); }, 100f));
+            Add(new W.SliderRow("Field of view", 10f, 80f, () => v.fov, x => { v.fov = x; Save(); }));
+            Add(new W.SliderRow("Emission view base", 0f, 0.5f, () => v.emissionBaseDim, x => { v.emissionBaseDim = x; Save(); m_Ctx.session?.RefreshEmissionView(); }, 100f,
+                "How much of the base color stays faintly visible in the emission-only view"));
+            Add(new W.ToggleRow("Orbit around the point under the cursor", () => v.orbitAroundCursor, x => { v.orbitAroundCursor = x; Save(); }));
+            Add(new W.ToggleRow("Show transparency in 2D view", () => v.showAlpha2D, x => { v.showAlpha2D = x; Save(); }));
+            Add(new W.ToggleRow("Repeat texture in 2D view", () => v.tile2D, x => { v.tile2D = x; Save(); }));
+            Add(new W.ToggleRow("Tint hidden areas while painting a mask", () => v.showMaskOverlay, x => { v.showMaskOverlay = x; Save(); }));
+            Add(new W.SliderRow("Seam padding (px)", 0f, 64f, () => v.displayPadding, x =>
+            {
+                v.displayPadding = Mathf.RoundToInt(x);
+                if (m_Ctx.session != null) foreach (var s in m_Ctx.session.sets) s.dirty = true;
+                Save();
+            }, 1f, "Colors are extended this far past UV island edges so seams never show a line"));
+            Add(new W.ToggleRow("Start from full-resolution source files", () => v.preferSourceFiles, x => { v.preferSourceFiles = x; Save(); },
+                "Read the original PNG/JPG instead of the compressed, size-limited imported texture"));
+            Add(new W.SliderRow("Undo steps", 5f, 200f, () => v.undoSteps, x =>
+            {
+                v.undoSteps = Mathf.RoundToInt(x);
+                if (m_Ctx.session != null) m_Ctx.session.history.MaxSteps = v.undoSteps;
+                v.Save();
+            }));
+        }
+    }
+}
