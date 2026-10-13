@@ -89,6 +89,7 @@ namespace AviCreatorEssentials
             m_Ctx = new PainterContext { brush = m_Brush, view = m_View };
             m_Ctx.RequestRender = () => m_V3?.RequestRender();
             m_Ctx.RequestRender2D = () => m_V2?.RequestRender();
+            m_Ctx.OpenQuickColor = pos => QuickColorPopup.Show(m_Root, m_Ctx, pos);
             m_Ctx.ToolChanged += OnToolChanged;
             m_Ctx.BrushChanged += () => { m_V3?.UpdateHud(); m_V3?.RepaintOverlay(); m_V2?.RepaintOverlay(); };
             m_Ctx.ColorChanged += OnPaintColorChanged;
@@ -781,15 +782,19 @@ namespace AviCreatorEssentials
             m_V2?.UpdateHud();
         }
 
-        /// <summary>When a fill or recolor layer becomes active, the color wheel shows its color.</summary>
+        /// <summary>
+        /// When a fill or recolor layer is opened (selected, or switched to Recolor), the brush takes its color,
+        /// so painting continues in the color that layer uses.
+        /// </summary>
         void SyncPickerToLayer(PaintLayer layer)
         {
-            string id = layer != null ? layer.id : null;
+            string id = layer != null ? layer.id + "|" + layer.kind + "|" + (layer.kind == LayerKind.Adjustment ? layer.adjMode.ToString() : "") : null;
             if (id == m_LastActiveLayerId) return;
             m_LastActiveLayerId = id;
-            if (layer == null || !layer.HasEditableColor || !m_View.pickerEditsLayer) return;
+            if (layer == null || !layer.HasEditableColor) return;
+            if (layer.EditableColor == m_Ctx.primary) return;
             m_SuppressLayerColor = true;
-            try { m_Ctx.SetPrimary(layer.EditableColor); }
+            try { m_Ctx.SetPrimary(layer.EditableColor, true); }
             finally { m_SuppressLayerColor = false; }
         }
 
@@ -961,7 +966,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Picker: return "Click to pick a color. Shift-click sets the secondary color.";
                 case PaintTool.Image: return "Import an image from the Layers section, then drag it on the model or in the texture view.";
                 default:
-                    return "Left-drag to paint. Right-drag or middle-drag orbits, Shift pans, scroll zooms. Ctrl+right-drag resizes the brush.";
+                    return "Left-drag to paint. Right-drag orbits, middle-drag pans, scroll zooms. Right-click for the color wheel. Ctrl+right-drag resizes the brush.";
             }
         }
 
@@ -999,6 +1004,13 @@ namespace AviCreatorEssentials
 
             if (key == KeyCode.None)
             {
+                return;
+            }
+
+            if (key == KeyCode.Escape && QuickColorPopup.IsOpen)
+            {
+                QuickColorPopup.Close();
+                evt.StopPropagation();
                 return;
             }
 
@@ -1266,9 +1278,9 @@ namespace AviCreatorEssentials
             }
             Group("View", new[,]
             {
-                { "Right-drag / Middle-drag / Alt+Left-drag", "Orbit (around the point under the cursor)" },
-                { "Shift+Right-drag / Shift+Middle-drag", "Pan" },
-                { "Scroll / Alt+Right-drag", "Zoom" },
+                { "Right-drag / Alt+Middle-drag / Alt+Left-drag", "Orbit (around the point under the cursor)" },
+                { "Middle-drag / Shift+Right-drag", "Pan" },
+                { "Scroll / Alt+Right-drag / Ctrl+Middle-drag", "Zoom" },
                 { "F", "Frame the avatar (or fit the texture in the 2D view)" },
                 { "Tab", "Switch between painting and posing" },
                 { "H", "Show or hide the armature" },
@@ -1278,7 +1290,8 @@ namespace AviCreatorEssentials
                 { "B  E  G  I  T  S", "Brush, eraser, fill, color picker, image, select" },
                 { "Ctrl+A  /  Ctrl+D  /  Ctrl+I", "Select all / clear / invert the UV selection" },
                 { "[  ]", "Brush size (Shift: hardness)" },
-                { "Ctrl+Right-drag / Ctrl+scroll", "Brush size (drag up/down for hardness)" },
+                { "Ctrl+Right-drag / Ctrl+scroll", "Brush size (drag up/down for hardness; scroll down grows)" },
+                { "Right-click", "Quick color wheel with recent colors under the cursor" },
                 { "1 … 0", "Opacity 10 … 100%" },
                 { "X", "Swap paint colors" },
                 { "M", "Add a mask, or switch between the layer and its mask" },

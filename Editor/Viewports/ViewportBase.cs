@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -7,44 +8,86 @@ using UnityEngine.UIElements;
 namespace AviCreatorEssentials
 {
     /// <summary>
-    /// Turns mouse/pen movement into evenly spaced dabs, with an optional lazy-mouse stabiliser.
+    /// Turns mouse/pen movement into evenly spaced dabs, with an optional stabiliser
+    /// (a lazy-mouse rope, or a smoothing average over the recent path).
     /// Works in any 2D space (viewport points for 3D painting, texels for 2D painting).
     /// </summary>
     public class StrokeSampler
     {
         Vector2 m_Brush;      // stabilised brush position
-        Vector2 m_Last;       // last emitted dab position
+        Vector2 m_Pointer;    // latest raw pointer position
         float m_Carry;
         float m_LastPressure = 1f;
+        float m_PointerPressure = 1f;
+        readonly List<Vector2> m_Path = new List<Vector2>();   // pointer path resampled at even spacing (smooth mode)
         public Vector2 Position => m_Brush;
         public Vector2 Direction { get; private set; } = Vector2.right;
 
         public void Begin(Vector2 p, float pressure)
         {
             m_Brush = p;
-            m_Last = p;
+            m_Pointer = p;
             m_Carry = 0f;
             m_LastPressure = pressure;
+            m_PointerPressure = pressure;
             Direction = Vector2.right;
+            m_Path.Clear();
+            m_Path.Add(p);
         }
 
-        /// <summary>Moves toward the pointer and calls emit for every dab position along the way.</summary>
-        public void Advance(Vector2 pointer, float pressure, float step, float stabilizer, Action<Vector2, float, Vector2> emit)
+        /// <summary>
+        /// Moves toward the pointer and calls emit for every dab position along the way.
+        /// unit is the size of one screen point in this space, so the stabiliser feels the same at any zoom.
+        /// </summary>
+        public void Advance(Vector2 pointer, float pressure, float step, BrushSettings b, float unit, Action<Vector2, float, Vector2> emit)
         {
-            step = Mathf.Max(0.25f, step);
+            m_Pointer = pointer;
+            m_PointerPressure = pressure;
+            float strength = Mathf.Clamp01(b.stabilizer);
             Vector2 target = pointer;
-            if (stabilizer > 0f)
+            if (strength > 0f && b.stabilizerMode == StabilizerMode.Rope)
             {
+                float rope = strength * 80f * unit;
                 var d = pointer - m_Brush;
                 float len = d.magnitude;
-                if (len <= stabilizer) return;
-                target = pointer - d / len * stabilizer;
+                if (len <= rope) return;
+                target = pointer - d / len * rope;
             }
+            else if (strength > 0f && b.stabilizerMode == StabilizerMode.Smooth)
+            {
+                // Average the last stretch of the path, measured in distance rather than events,
+                // so the result does not depend on how fast the mouse reports.
+                float spacing = 2f * unit;
+                var last = m_Path[m_Path.Count - 1];
+                float dist = Vector2.Distance(last, pointer);
+                if (dist >= spacing)
+                {
+                    int n = Mathf.FloorToInt(dist / spacing);
+                    for (int i = 1; i <= n; i++) m_Path.Add(Vector2.Lerp(last, pointer, i * spacing / dist));
+                }
+                int window = Mathf.Max(1, Mathf.RoundToInt(strength * strength * 120f));
+                while (m_Path.Count > window) m_Path.RemoveAt(0);
+                var sum = Vector2.zero;
+                foreach (var q in m_Path) sum += q;
+                target = sum / m_Path.Count;
+            }
+            MoveTo(target, pressure, step, emit);
+        }
+
+        /// <summary>Draws the rest of the line up to where the pointer was released.</summary>
+        public void Finish(float step, Action<Vector2, float, Vector2> emit)
+        {
+            MoveTo(m_Pointer, m_PointerPressure, Mathf.Max(0.25f, step), emit);
+        }
+
+        void MoveTo(Vector2 target, float pressure, float step, Action<Vector2, float, Vector2> emit)
+        {
+            step = Mathf.Max(0.25f, step);
             var from = m_Brush;
             var seg = target - from;
             float segLen = seg.magnitude;
-            m_Brush = target;
             if (segLen < 1e-4f) return;
+            m_Brush = target;
             var dir = seg / segLen;
             Direction = dir;
             float t = step - m_Carry;
@@ -54,7 +97,6 @@ namespace AviCreatorEssentials
                 var pos = from + dir * t;
                 float k = t / segLen;
                 emit(pos, Mathf.Lerp(p0, pressure, k), dir);
-                m_Last = pos;
                 t += step;
             }
             m_Carry = segLen - (t - step);
@@ -230,6 +272,17 @@ namespace AviCreatorEssentials
         {
             foreach (var l in new[] { hudLeft, hudRight, hudCenter })
                 l.style.display = string.IsNullOrEmpty(l.text) ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        /// <summary>A right-button press that has not moved far enough to count as a drag yet.</summary>
+        protected bool rightClickPending;
+        protected const float ClickSlop = 4f;
+
+        /// <summary>A plain right-click (no drag) opens the quick color wheel under the cursor.</summary>
+        protected void OpenQuickColor(Vector2 local)
+        {
+            if (ctx.PoseMode) return;
+            ctx.OpenQuickColor?.Invoke(this.LocalToWorld(local));
         }
 
         protected static float PressureOf(IPointerEvent evt)

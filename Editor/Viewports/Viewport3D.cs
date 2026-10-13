@@ -276,11 +276,15 @@ namespace AviCreatorEssentials
             m_DragStart = m_DragLast = m_Mouse;
 
             if (evt.button == 0 && alt) BeginNav(Drag.Orbit);
-            else if (evt.button == 2) BeginNav(shift || alt ? Drag.Pan : ctrl ? Drag.Zoom : Drag.Orbit);
+            else if (evt.button == 2) BeginNav(alt ? Drag.Orbit : ctrl ? Drag.Zoom : Drag.Pan);
             else if (evt.button == 1)
             {
                 if (ctrl && !ctx.PoseMode) BeginBrushSize();
-                else BeginNav(alt ? Drag.Zoom : shift ? Drag.Pan : Drag.Orbit);
+                else
+                {
+                    BeginNav(alt ? Drag.Zoom : shift ? Drag.Pan : Drag.Orbit);
+                    rightClickPending = !alt && !shift && !ctx.PoseMode;
+                }
             }
             else if (evt.button == 0)
             {
@@ -330,6 +334,13 @@ namespace AviCreatorEssentials
                 return;
             }
 
+            if (rightClickPending)
+            {
+                // Hold the orbit until the mouse really moves, so a plain right-click leaves the camera alone.
+                if (Vector2.Distance(m_Mouse, m_DragStart) < ClickSlop) return;
+                rightClickPending = false;
+            }
+
             switch (m_Drag)
             {
                 case Drag.Orbit:
@@ -375,9 +386,11 @@ namespace AviCreatorEssentials
         void OnPointerUp(PointerUpEvent evt)
         {
             if (evt.pointerId != m_PointerId) return;
+            bool click = rightClickPending;
             EndDrag(false);
             if (this.HasPointerCapture(evt.pointerId)) this.ReleasePointer(evt.pointerId);
             evt.StopPropagation();
+            if (click) OpenQuickColor(evt.localPosition);
         }
 
         void EndDrag(bool cancelled)
@@ -404,6 +417,7 @@ namespace AviCreatorEssentials
             }
             m_Drag = Drag.None;
             m_PointerId = -1;
+            rightClickPending = false;
             RepaintOverlay();
         }
 
@@ -413,7 +427,7 @@ namespace AviCreatorEssentials
             float d = evt.delta.y;
             if (evt.actionKey && !ctx.PoseMode)
             {
-                ctx.brush.radius = Mathf.Clamp(ctx.brush.radius * (d > 0 ? 0.9f : 1.1f), 0.0005f, 1f);
+                ctx.brush.radius = Mathf.Clamp(ctx.brush.radius * (d > 0 ? 1.1f : 0.9f), 0.0005f, 1f);
                 ctx.NotifyBrushChanged();
             }
             else if (evt.shiftKey && !ctx.PoseMode)
@@ -532,12 +546,11 @@ namespace AviCreatorEssentials
         void ContinueStroke(float pressure)
         {
             if (m_Stroke == null) return;
-            float radiusPx = RadiusPoints(ctx.brush.radius);
-            float step = Mathf.Max(0.5f, ctx.brush.spacing * 2f * radiusPx);
-            float stab = ctx.brush.stabilizer * 80f;
-            m_Sampler.Advance(m_Mouse, pressure, step, stab, (pos, pr, dir) => EmitDab(pos, pr, dir));
+            m_Sampler.Advance(m_Mouse, pressure, StrokeStep, ctx.brush, 1f, (pos, pr, dir) => EmitDab(pos, pr, dir));
             FlushDabs();
         }
+
+        float StrokeStep => Mathf.Max(0.5f, ctx.brush.spacing * 2f * RadiusPoints(ctx.brush.radius));
 
         float RadiusPoints(float worldRadius)
         {
@@ -661,6 +674,11 @@ namespace AviCreatorEssentials
         void EndStroke()
         {
             if (m_Stroke == null) return;
+            if (ctx.brush.stabilizer > 0f && ctx.brush.stabilizerCatchUp)
+            {
+                m_Sampler.Finish(StrokeStep, (pos, pr, dir) => EmitDab(pos, pr, dir));
+                FlushDabs();
+            }
             var entry = ctx.session.engine.EndStroke(m_Stroke);
             if (entry != null) ctx.session.Push(entry);
             m_Stroke = null;
@@ -1239,6 +1257,11 @@ namespace AviCreatorEssentials
                     Circle(p, m_Mouse, rp, new Color(1, 1, 1, 0.55f), 1f);
                 }
                 Disc(p, m_HasHit ? pr.ToLocal(m_Hit.point) : m_Mouse, 1.5f, Color.white);
+                if (m_Drag == Drag.Paint && ctx.brush.stabilizer > 0f)
+                {
+                    Line(p, m_Sampler.Position, m_Mouse, new Color(1f, 1f, 1f, 0.4f), 1f);
+                    Disc(p, m_Sampler.Position, 2.5f, new Color(1f, 0.85f, 0.4f, 0.9f));
+                }
                 if (m_Drag == Drag.BrushSize)
                 {
                     float rp = RadiusPoints(ctx.brush.radius);

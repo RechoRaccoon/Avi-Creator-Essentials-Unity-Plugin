@@ -10,6 +10,7 @@ namespace AviCreatorEssentials
     public class ColorPicker : VisualElement
     {
         readonly PainterContext m_Ctx;
+        readonly bool m_Compact;
         float m_H, m_S = 0f, m_V = 1f, m_A = 1f;
         bool m_Updating;
 
@@ -39,10 +40,16 @@ namespace AviCreatorEssentials
         const float WheelSize = 196f;
         const float RingWidth = 18f;
 
-        public ColorPicker(PainterContext ctx)
+        /// <summary>Raised when a recent color or swatch is clicked (the quick popup closes on it).</summary>
+        public event Action SwatchPicked;
+
+        /// <param name="compact">Just the wheel and the color lists, for the right-click popup in the viewports.</param>
+        public ColorPicker(PainterContext ctx, bool compact = false)
         {
             m_Ctx = ctx;
+            m_Compact = compact;
             AddToClassList("ap-color-picker");
+            if (compact) AddToClassList("ap-color-picker-compact");
 
             var top = W.Row("ap-color-top");
             Add(top);
@@ -92,8 +99,17 @@ namespace AviCreatorEssentials
             pair.Add(m_Primary);
             side2.Add(pair);
             side2.Add(W.IconButton(IconKind.Swap, "Swap colors (X)", () => m_Ctx.SwapColors()));
-            side2.Add(W.IconButton(IconKind.Picker, "Pick a color from the model or texture (I)", () => m_Ctx.Tool = PaintTool.Picker));
+            if (!compact) side2.Add(W.IconButton(IconKind.Picker, "Pick a color from the model or texture (I)", () => m_Ctx.Tool = PaintTool.Picker));
             side2.Add(W.IconButton(IconKind.Plus, "Save this color as a swatch", () => m_Ctx.colors.AddSwatch(m_Ctx.primary)));
+
+            // Recent colors sit right under the wheel so the main colors are one click away.
+            var histHead = W.Row();
+            histHead.Add(W.Text("Recent", "ap-subtle-heading"));
+            histHead.Add(W.Spacer());
+            if (!compact) histHead.Add(W.Text("Right-click: secondary", "ap-hint-inline"));
+            Add(histHead);
+            m_History = W.Row("ap-color-history");
+            Add(m_History);
 
             // hex + mode
             var hexRow = W.Row("ap-hex-row");
@@ -113,7 +129,7 @@ namespace AviCreatorEssentials
             hexRow.Add(m_Hex);
             hexRow.Add(W.Spacer());
             hexRow.Add(new W.Segmented(new[] { "RGB", "HSV" }, () => m_HsvMode ? 1 : 0, i => { m_HsvMode = i == 1; Refresh(); }));
-            Add(hexRow);
+            if (!compact) Add(hexRow);
 
             m_SliderBox = W.Column("ap-color-sliders");
             for (int i = 0; i < 4; i++)
@@ -132,31 +148,40 @@ namespace AviCreatorEssentials
                 row.Add(m_Fields[i]);
                 m_SliderBox.Add(row);
             }
-            Add(m_SliderBox);
+            if (!compact) Add(m_SliderBox);
 
-            Add(W.Text("Recent", "ap-subtle-heading"));
-            m_History = W.Row("ap-color-history");
-            Add(m_History);
             var swHead = W.Row();
             swHead.Add(W.Text("Swatches", "ap-subtle-heading"));
             swHead.Add(W.Spacer());
-            swHead.Add(W.Text("Right-click a swatch to remove it", "ap-hint-inline"));
+            if (!compact) swHead.Add(W.Text("Right-click a swatch to remove it", "ap-hint-inline"));
             Add(swHead);
             m_Swatches = W.Row("ap-color-history");
             Add(m_Swatches);
 
-            BuildRing();
-            m_Ctx.ColorChanged += OnContextColor;
-            m_Ctx.colors.Changed += RebuildLists;
+            // Hook up on every attach, not just once: docking or moving the window detaches the panel,
+            // and the textures and subscriptions released then have to come back when it reattaches.
+            RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                m_Ctx.ColorChanged -= OnContextColor;
+                m_Ctx.colors.Changed -= RebuildLists;
+                m_Ctx.ColorChanged += OnContextColor;
+                m_Ctx.colors.Changed += RebuildLists;
+                if (m_RingTex == null) BuildRing();
+                m_SquareHue = -1f;
+                OnContextColor();
+                RebuildLists();
+            });
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 m_Ctx.ColorChanged -= OnContextColor;
                 m_Ctx.colors.Changed -= RebuildLists;
                 if (m_RingTex != null) Object.DestroyImmediate(m_RingTex);
                 if (m_SquareTex != null) Object.DestroyImmediate(m_SquareTex);
+                m_RingTex = null;
+                m_SquareTex = null;
+                m_Ring.image = null;
+                m_Square.image = null;
             });
-            OnContextColor();
-            RebuildLists();
         }
 
         void OnContextColor()
@@ -364,15 +389,17 @@ namespace AviCreatorEssentials
             m_History.Clear();
             if (m_Ctx.colors.history.Count == 0)
                 m_History.Add(W.Text("Colors you paint with show up here.", "ap-hint-inline"));
+            int swatchSize = m_Compact ? 22 : 18;
             foreach (var c in m_Ctx.colors.history)
             {
-                var sw = W.Swatch(c, 18, "#" + APUtil.ToHex(c, c.a < 0.999f));
+                var sw = W.Swatch(c, swatchSize, "#" + APUtil.ToHex(c, c.a < 0.999f));
                 var col = c;
                 sw.RegisterCallback<PointerDownEvent>(e =>
                 {
                     if (e.button == 0) m_Ctx.SetPrimary(col);
                     else if (e.button == 1) m_Ctx.SetSecondary(col);
                     e.StopPropagation();
+                    if (e.button == 0) SwatchPicked?.Invoke();
                 });
                 m_History.Add(sw);
             }
@@ -381,15 +408,84 @@ namespace AviCreatorEssentials
             {
                 var c = m_Ctx.colors.swatches[i];
                 int idx = i;
-                var sw = W.Swatch(c, 18, "#" + APUtil.ToHex(c, c.a < 0.999f));
+                var sw = W.Swatch(c, swatchSize, "#" + APUtil.ToHex(c, c.a < 0.999f));
                 sw.RegisterCallback<PointerDownEvent>(e =>
                 {
                     if (e.button == 0) m_Ctx.SetPrimary(c);
                     else if (e.button == 1) m_Ctx.colors.RemoveSwatch(idx);
                     e.StopPropagation();
+                    if (e.button == 0) SwatchPicked?.Invoke();
                 });
                 m_Swatches.Add(sw);
             }
+        }
+    }
+
+    /// <summary>
+    /// A color wheel with recent colors that pops up under the cursor on a right-click in the viewports.
+    /// Closes on a click outside it, Escape (handled by the window), or picking a recent color or swatch.
+    /// </summary>
+    public class QuickColorPopup : VisualElement
+    {
+        static QuickColorPopup s_Open;
+        readonly VisualElement m_Panel;
+        readonly Vector2 m_Anchor;
+
+        public static bool IsOpen => s_Open != null;
+
+        public static void Show(VisualElement root, PainterContext ctx, Vector2 worldPos)
+        {
+            Close();
+            if (root == null) return;
+            s_Open = new QuickColorPopup(root, ctx, worldPos);
+            root.Add(s_Open);
+        }
+
+        public static void Close()
+        {
+            if (s_Open == null) return;
+            s_Open.RemoveFromHierarchy();
+            s_Open = null;
+        }
+
+        QuickColorPopup(VisualElement root, PainterContext ctx, Vector2 worldPos)
+        {
+            AddToClassList("ap-quick-color-backdrop");
+            pickingMode = PickingMode.Position;
+            m_Anchor = root.WorldToLocal(worldPos);
+
+            m_Panel = new VisualElement();
+            m_Panel.AddToClassList("ap-quick-color");
+            m_Panel.style.visibility = Visibility.Hidden;   // shown once its size is known and it can be placed
+            var picker = new ColorPicker(ctx, true);
+            picker.SwatchPicked += Close;
+            m_Panel.Add(picker);
+            Add(m_Panel);
+
+            m_Panel.RegisterCallback<GeometryChangedEvent>(_ => Place());
+            RegisterCallback<GeometryChangedEvent>(_ => Place());
+            RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.target == this) Close();
+                e.StopPropagation();
+            });
+            RegisterCallback<WheelEvent>(e => e.StopPropagation());
+            RegisterCallback<DetachFromPanelEvent>(_ => { if (s_Open == this) s_Open = null; });
+        }
+
+        const float WheelCenter = 8f + 98f;   // panel padding + half the wheel
+
+        /// <summary>Centers the wheel on the click, kept inside the window.</summary>
+        void Place()
+        {
+            float w = m_Panel.resolvedStyle.width, h = m_Panel.resolvedStyle.height;
+            var area = contentRect;
+            if (float.IsNaN(w) || float.IsNaN(h) || w < 1f || area.width < 1f) return;
+            float x = Mathf.Clamp(m_Anchor.x - WheelCenter, 4f, Mathf.Max(4f, area.width - w - 4f));
+            float y = Mathf.Clamp(m_Anchor.y - WheelCenter, 4f, Mathf.Max(4f, area.height - h - 4f));
+            m_Panel.style.left = x;
+            m_Panel.style.top = y;
+            m_Panel.style.visibility = Visibility.Visible;
         }
     }
 }

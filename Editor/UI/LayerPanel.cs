@@ -360,6 +360,10 @@ namespace AviCreatorEssentials
             {
                 if (e.button != 0) return;
                 if (set.activeLayer != index || set.editingMask) S.SetActiveLayer(set, layer, false);
+                // Opening a fill or recolor layer loads its color into the brush (after it is active,
+                // so the wheel's edit-the-layer link doesn't write the color onto the previous layer).
+                if (layer.HasEditableColor && set.ActiveLayer == layer && !set.editingMask && layer.EditableColor != m_Ctx.primary)
+                    m_Ctx.SetPrimary(layer.EditableColor, true);
                 m_DragLayer = layer;
                 m_DragStart = e.position;
                 m_Dragging = false;

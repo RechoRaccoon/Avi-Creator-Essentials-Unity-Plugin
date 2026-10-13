@@ -152,7 +152,11 @@ namespace AviCreatorEssentials
             m_DragStart = m_DragLast = m_Mouse;
             bool alt = evt.altKey, ctrl = evt.actionKey, shift = evt.shiftKey;
 
-            if (evt.button == 2 || (evt.button == 0 && alt) || (evt.button == 1 && !ctrl)) m_Drag = Drag.Pan;
+            if (evt.button == 2 || (evt.button == 0 && alt) || (evt.button == 1 && !ctrl))
+            {
+                m_Drag = Drag.Pan;
+                rightClickPending = evt.button == 1 && !alt && !shift && !ctx.PoseMode;
+            }
             else if (evt.button == 1 && ctrl)
             {
                 m_Drag = Drag.BrushSize;
@@ -197,6 +201,11 @@ namespace AviCreatorEssentials
         {
             if (ctx.session == null) return;
             m_Mouse = evt.localPosition;
+            if (rightClickPending)
+            {
+                if (Vector2.Distance(m_Mouse, m_DragStart) < ClickSlop) return;
+                rightClickPending = false;
+            }
             var delta = m_Mouse - m_DragLast;
             switch (m_Drag)
             {
@@ -238,9 +247,11 @@ namespace AviCreatorEssentials
         void OnPointerUp(PointerUpEvent evt)
         {
             if (evt.pointerId != m_PointerId) return;
+            bool click = rightClickPending;
             EndDrag();
             if (this.HasPointerCapture(evt.pointerId)) this.ReleasePointer(evt.pointerId);
             evt.StopPropagation();
+            if (click) OpenQuickColor(evt.localPosition);
         }
 
         void EndDrag()
@@ -251,6 +262,7 @@ namespace AviCreatorEssentials
             else if (m_Drag == Drag.Select) FinishSelect();
             m_Drag = Drag.None;
             m_PointerId = -1;
+            rightClickPending = false;
             RepaintOverlay();
         }
 
@@ -260,7 +272,7 @@ namespace AviCreatorEssentials
             float d = evt.delta.y;
             if (evt.actionKey)
             {
-                ctx.brush.radius2D = Mathf.Clamp(ctx.brush.radius2D * (d > 0 ? 0.9f : 1.1f), 0.0002f, 0.5f);
+                ctx.brush.radius2D = Mathf.Clamp(ctx.brush.radius2D * (d > 0 ? 1.1f : 0.9f), 0.0002f, 0.5f);
                 ctx.NotifyBrushChanged();
             }
             else
@@ -301,13 +313,12 @@ namespace AviCreatorEssentials
         void ContinueStroke(float pressure)
         {
             if (m_Stroke == null) return;
-            float radiusPx = ctx.brush.radius2D * TexW;
-            float step = Mathf.Max(0.5f, ctx.brush.spacing * 2f * radiusPx);
-            float stab = ctx.brush.stabilizer * 80f / Mathf.Max(1e-4f, SX / TexW);
             var t = UVToTexel(LocalToUV(m_Mouse));
-            m_Sampler.Advance(t, pressure, step, stab, Emit);
+            m_Sampler.Advance(t, pressure, StrokeStep, ctx.brush, 1f / Mathf.Max(1e-4f, SX / TexW), Emit);
             Flush();
         }
+
+        float StrokeStep => Mathf.Max(0.5f, ctx.brush.spacing * 2f * ctx.brush.radius2D * TexW);
 
         void Emit(Vector2 texel, float pressure, Vector2 dir)
         {
@@ -339,6 +350,11 @@ namespace AviCreatorEssentials
         void EndStroke()
         {
             if (m_Stroke == null) return;
+            if (ctx.brush.stabilizer > 0f && ctx.brush.stabilizerCatchUp)
+            {
+                m_Sampler.Finish(StrokeStep, Emit);
+                Flush();
+            }
             var entry = ctx.session.engine.EndStroke(m_Stroke);
             if (entry != null) ctx.session.Push(entry);
             m_Stroke = null;

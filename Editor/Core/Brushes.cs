@@ -13,6 +13,12 @@ namespace AviCreatorEssentials
         Projected,  // camera-aligned footprint, like painting through the screen (Substance style)
     }
 
+    public enum StabilizerMode
+    {
+        Rope,       // lazy mouse: the brush trails the cursor on a string and stays put inside it
+        Smooth,     // the brush follows an average of the recent path, ironing out wobble
+    }
+
     /// <summary>Brush behaviour, saved in EditorPrefs between sessions.</summary>
     [Serializable]
     public class BrushSettings
@@ -34,7 +40,9 @@ namespace AviCreatorEssentials
         public bool followStroke;
         public bool pressureSize = true;
         public bool pressureOpacity;
-        public float stabilizer;               // 0..1
+        public float stabilizer;               // 0..1 intensity, 0 = off
+        public StabilizerMode stabilizerMode = StabilizerMode.Smooth;
+        public bool stabilizerCatchUp = true;  // finish the line to the cursor on release
         public BrushProjection projection = BrushProjection.Projected;
         public float depthRange = 1f;          // projected mode thickness in radii
         public bool occlusion = true;          // only paint surfaces visible from the camera

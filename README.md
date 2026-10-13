@@ -39,8 +39,10 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 | Do this | How |
 | --- | --- |
 | Paint / erase | Left-drag. **B** brush, **E** eraser |
-| Orbit / pan / zoom | Right-drag or middle-drag / Shift+drag / scroll |
-| Brush size | **[** **]**, Ctrl+scroll, or Ctrl+right-drag |
+| Orbit / pan / zoom | Right-drag / middle-drag (or Shift+right-drag) / scroll |
+| Brush size | **[** **]**, Ctrl+scroll (down grows), or Ctrl+right-drag |
+| Quick color | Right-click (without dragging) for a color wheel with your recent colors |
+| Steadier lines | Brush → Stabilizer: set the intensity, Smooth or Rope mode |
 | Opacity | **1** … **0** |
 | Fill an area | **G**, then click a UV island, mesh part, material or similar color |
 | Pick a color | **I**, then click |

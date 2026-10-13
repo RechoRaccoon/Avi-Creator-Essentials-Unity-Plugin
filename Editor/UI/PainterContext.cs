@@ -130,6 +130,7 @@ namespace AviCreatorEssentials
         public event Action<string> Hint;
         public Action RequestRender;
         public Action RequestRender2D;
+        public Action<Vector2> OpenQuickColor;   // world (panel) position of the right-click
 
         public PaintTool Tool
         {

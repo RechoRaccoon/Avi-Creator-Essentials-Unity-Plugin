@@ -378,6 +378,18 @@
 .ap-color-field { width: 46px; }
 .ap-color-history { flex-wrap: wrap; min-height: 20px; }
 
+.ap-quick-color-backdrop { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.ap-quick-color {
+    position: absolute;
+    width: 290px;
+    padding: 8px;
+    background-color: var(--bg);
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: var(--header-border);
+}
+.ap-color-picker-compact .ap-subtle-heading { margin-top: 4px; }
+
 /* ------------------------------------------------------------------ brushes */
 
 .ap-tips { flex-wrap: wrap; margin-bottom: 6px; }

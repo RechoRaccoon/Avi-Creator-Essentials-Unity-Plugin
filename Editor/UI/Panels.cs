@@ -84,8 +84,21 @@ namespace AviCreatorEssentials
                 "How much each dab adds; low flow builds up gradually within a stroke")));
             m_BrushBox.Add(Track(new W.SliderRow("Spacing", 0.02f, 2f, () => B.spacing, v => { B.spacing = v; Changed(); }, 100f,
                 "Distance between dabs as a percentage of the brush size")));
-            m_BrushBox.Add(Track(new W.SliderRow("Smoothing", 0f, 1f, () => B.stabilizer, v => { B.stabilizer = v; Changed(); }, 100f,
-                "Lazy mouse: the brush trails behind the cursor for cleaner lines")));
+
+            var stab = new Foldout { text = "Stabilizer", value = EditorPrefs.GetBool("AviCreatorEssentials.Fold.Stabilizer", true) };
+            stab.AddToClassList("ap-foldout");
+            stab.RegisterValueChangedCallback(e => EditorPrefs.SetBool("AviCreatorEssentials.Fold.Stabilizer", e.newValue));
+            stab.Add(Track(new W.SliderRow("Intensity", 0f, 1f, () => B.stabilizer, v => { B.stabilizer = v; Changed(); }, 100f,
+                "How strongly wobble is smoothed out of your strokes. 0 turns the stabilizer off.")));
+            stab.Add(Track(new W.Segmented(new[] { "Smooth", "Rope" }, () => B.stabilizerMode == StabilizerMode.Smooth ? 0 : 1,
+                i => { B.stabilizerMode = i == 0 ? StabilizerMode.Smooth : StabilizerMode.Rope; Changed(); }, new[]
+                {
+                    "The brush follows an average of your recent movement, ironing out shaky lines",
+                    "Lazy mouse: the brush trails the cursor on a string and only moves once the string is pulled tight",
+                })));
+            stab.Add(Track(new W.ToggleRow("Finish line on release", () => B.stabilizerCatchUp, v => { B.stabilizerCatchUp = v; Changed(); },
+                "When you let go, the stroke continues to where the cursor is instead of stopping behind it")));
+            m_BrushBox.Add(stab);
 
             var dyn = new Foldout { text = "Dynamics", value = EditorPrefs.GetBool("AviCreatorEssentials.Fold.Dynamics", false) };
             dyn.AddToClassList("ap-foldout");

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.5
+
+- Stabilizer: a Stabilizer section in the Brush panel with an intensity slider and two modes. Smooth averages your recent movement to iron out shaky lines; Rope is the lazy-mouse string. "Finish line on release" draws the rest of the stroke to the cursor when you let go.
+- Right-click (without dragging) in the 3D or 2D view opens a color wheel with your recent colors and swatches under the cursor.
+- Recent colors now sit right under the color wheel for quick swapping.
+- Middle-drag pans in the 3D view without holding a key (Alt+middle-drag orbits, Ctrl+middle-drag zooms).
+- Ctrl+scroll brush resizing is inverted: scrolling down grows the brush.
+- Selecting a fill or recolor layer (or switching an adjustment layer to Recolor) loads its color into the brush.
+- Fixed the color wheel's hue ring disappearing (and the wheel no longer following color changes) after the window was docked or moved.
+
 ## 0.5.4
 
 - Mirror texture runs on the GPU in a single pass: instant at any texture size, with any number of selected polygons.
