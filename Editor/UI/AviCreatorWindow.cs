@@ -62,6 +62,10 @@ namespace AviCreatorEssentials
         MaterialsPanel m_MaterialsPanel;
         MeshesPanel m_MeshesPanel;
         ImagePanel m_ImagePanel;
+        AdjustPanel m_AdjustPanel;
+        W.Section m_AdjustSection;
+        string m_LastActiveLayerId;
+        bool m_SuppressLayerColor;
         PosePanel m_PosePanel;
         W.Section m_ColorSection, m_BrushSection, m_LayerSection, m_ImageSection, m_MaterialSection, m_MeshSection, m_ViewSection, m_PoseSection;
 
@@ -87,6 +91,9 @@ namespace AviCreatorEssentials
             m_Ctx.RequestRender2D = () => m_V2?.RequestRender();
             m_Ctx.ToolChanged += OnToolChanged;
             m_Ctx.BrushChanged += () => { m_V3?.UpdateHud(); m_V3?.RepaintOverlay(); m_V2?.RepaintOverlay(); };
+            m_Ctx.ColorChanged += OnPaintColorChanged;
+            UpdateChecker.Changed += OnUpdateInfo;
+            UpdateChecker.Check(false);
             m_Ctx.Hint += ShowHint;
             m_Thumbs = new ThumbnailCache();
             EditorApplication.update += Tick;
@@ -98,6 +105,7 @@ namespace AviCreatorEssentials
         void OnDisable()
         {
             EditorApplication.update -= Tick;
+            UpdateChecker.Changed -= OnUpdateInfo;
             AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeReload;
             EditorApplication.playModeStateChanged -= OnPlayMode;
             EditorSceneManagerHooks(false);
@@ -247,6 +255,15 @@ namespace AviCreatorEssentials
             card.Add(brand);
             card.Add(W.Text("Paint straight onto your avatar in 3D or on the texture in 2D, with layers, masks and posing. " +
                             "Your scene and original textures stay untouched until you bake.", "ap-start-lead"));
+
+            if (UpdateChecker.UpdateAvailable)
+            {
+                var up = W.Row("ap-banner");
+                up.Add(new Icon(IconKind.Bake, 16));
+                up.Add(W.Text("Version " + UpdateChecker.Latest + " is available (you have " + UpdateChecker.Version + ").", "ap-grow"));
+                up.Add(W.TextButton("Update", UpdateChecker.Update, "ap-accent"));
+                card.Add(up);
+            }
 
             if (!APResources.ShadersAvailable)
             {
@@ -613,6 +630,10 @@ namespace AviCreatorEssentials
             var bake = W.IconTextButton(IconKind.Bake, "Bake", ShowBakeDialog, "ap-accent");
             bake.tooltip = "Write the final textures as PNGs and put them on your avatar";
             bar.Add(bake);
+            m_UpdateButton = W.TextButton("Update", UpdateChecker.Update, "ap-accent");
+            m_UpdateButton.tooltip = "A newer version of Avi Creator Essentials is available";
+            bar.Add(m_UpdateButton);
+            OnUpdateInfo();
             bar.Add(W.IconButton(IconKind.Theme, "Switch between light and dark", () =>
             {
                 m_View.theme = m_View.LightTheme ? 1 : 2;
@@ -698,6 +719,11 @@ namespace AviCreatorEssentials
             m_LayerSection.Body.Add(m_LayerPanel);
             m_RightPanel.Add(m_LayerSection);
 
+            m_AdjustSection = new W.Section("Adjustment", IconKind.Theme, "adjust");
+            m_AdjustPanel = new AdjustPanel(m_Ctx);
+            m_AdjustSection.Body.Add(m_AdjustPanel);
+            m_RightPanel.Add(m_AdjustSection);
+
             m_ImageSection = new W.Section("Image", IconKind.Image, "image");
             m_ImagePanel = new ImagePanel(m_Ctx);
             m_ImageSection.Body.Add(m_ImagePanel);
@@ -730,6 +756,8 @@ namespace AviCreatorEssentials
             Show(m_MaterialSection, !pose);
             var layer = m_Session.ActiveSet?.ActiveLayer;
             Show(m_ImageSection, !pose && layer != null && layer.kind == LayerKind.Image);
+            Show(m_AdjustSection, !pose && layer != null && layer.kind == LayerKind.Adjustment);
+            SyncPickerToLayer(layer);
 
             if (pose)
             {
@@ -741,6 +769,7 @@ namespace AviCreatorEssentials
                 m_LayerPanel?.Rebuild();
                 m_MaterialsPanel?.Rebuild();
                 m_ImagePanel?.Rebuild();
+                m_AdjustPanel?.Rebuild();
             }
             m_MeshesPanel?.Rebuild();
             var title = m_BrushSection?.Q<Label>(className: "ap-section-title");
@@ -750,6 +779,44 @@ namespace AviCreatorEssentials
             RefreshHistoryButtons();
             m_V3?.UpdateHud();
             m_V2?.UpdateHud();
+        }
+
+        /// <summary>When a fill or recolor layer becomes active, the color wheel shows its color.</summary>
+        void SyncPickerToLayer(PaintLayer layer)
+        {
+            string id = layer != null ? layer.id : null;
+            if (id == m_LastActiveLayerId) return;
+            m_LastActiveLayerId = id;
+            if (layer == null || !layer.HasEditableColor || !m_View.pickerEditsLayer) return;
+            m_SuppressLayerColor = true;
+            try { m_Ctx.SetPrimary(layer.EditableColor); }
+            finally { m_SuppressLayerColor = false; }
+        }
+
+        /// <summary>The color wheel edits the selected fill or recolor layer, like Substance's per-layer color pickers.</summary>
+        void OnPaintColorChanged()
+        {
+            if (m_SuppressLayerColor || m_Session == null || !m_View.pickerEditsLayer || m_Ctx.strokeActive || m_Ctx.PoseMode) return;
+            var set = m_Session.ActiveSet;
+            var layer = set?.ActiveLayer;
+            if (layer == null || !layer.HasEditableColor || set.editingMask) return;
+            if (layer.EditableColor == m_Ctx.primary) return;
+            var c = m_Ctx.primary;
+            m_Session.EditLayer(set, layer, "Layer color", l => l.EditableColor = c);
+            m_V3?.RequestRender();
+            m_V2?.RequestRender();
+        }
+
+        Button m_UpdateButton;
+
+        void OnUpdateInfo()
+        {
+            if (m_UpdateButton != null)
+            {
+                m_UpdateButton.style.display = UpdateChecker.UpdateAvailable ? DisplayStyle.Flex : DisplayStyle.None;
+                m_UpdateButton.text = "Update to " + UpdateChecker.Latest;
+            }
+            if (m_Session == null && m_Root != null) ShowStart();
         }
 
         void RefreshHistoryButtons()

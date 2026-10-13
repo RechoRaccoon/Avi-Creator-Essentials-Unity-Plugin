@@ -308,7 +308,12 @@ namespace AviCreatorEssentials
             int i = m.shader.FindPropertyIndex(property);
             if (i < 0) return property;
             string d = m.shader.GetPropertyDescription(i);
-            return string.IsNullOrEmpty(d) ? property : d;
+            if (string.IsNullOrEmpty(d)) return property;
+            // Some shaders (Poiyomi, Thry) pack editor metadata after "--" in the display name.
+            int meta = d.IndexOf("--", StringComparison.Ordinal);
+            if (meta > 0) d = d.Substring(0, meta);
+            d = d.Trim();
+            return d.Length == 0 ? property : d;
         }
 
         static string DefaultProperty(Material m)

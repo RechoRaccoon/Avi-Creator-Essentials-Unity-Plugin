@@ -124,6 +124,7 @@ namespace AviCreatorEssentials
             actions.Add(W.IconButton(IconKind.Plus, "New paint layer", () => S.AddPaintLayer(Set)));
             actions.Add(W.IconButton(IconKind.FillLayer, "New fill layer (solid color). Painting on it reveals it through a mask.", () =>
                 S.AddFillLayer(Set, m_Ctx.primary, true)));
+            actions.Add(W.IconButton(IconKind.Theme, "New adjustment layer: recolor, hue/saturation, or match colors. Uses the current UV selection as its area.", AdjustmentMenu));
             actions.Add(W.IconButton(IconKind.Image, "Import an image as a new layer", ImportImage));
             actions.Add(W.IconButton(IconKind.Mask, "Add a mask to the selected layer", AddMaskMenu));
             actions.Add(W.IconButton(IconKind.Duplicate, "Duplicate layer", () => { if (Set?.ActiveLayer != null) S.DuplicateLayer(Set, Set.ActiveLayer); }));
@@ -282,12 +283,28 @@ namespace AviCreatorEssentials
             thumb.AddToClassList("ap-thumb");
             W.SetOn(thumb, active && !set.editingMask, "ap-thumb-active");
             thumb.Add(new Image { image = APResources.Checker, scaleMode = ScaleMode.ScaleAndCrop, pickingMode = PickingMode.Ignore });
-            if (layer.kind == LayerKind.Fill)
+            if (layer.kind == LayerKind.Fill || (layer.kind == LayerKind.Adjustment && layer.adjMode == AdjustMode.Recolor))
             {
                 var fill = new VisualElement { pickingMode = PickingMode.Ignore };
                 fill.AddToClassList("ap-thumb-fill");
-                fill.style.backgroundColor = layer.fillColor;
+                fill.style.backgroundColor = layer.kind == LayerKind.Fill ? layer.fillColor : layer.adjColor;
                 thumb.Add(fill);
+                if (layer.kind == LayerKind.Adjustment)
+                {
+                    var ic = new Icon(IconKind.Theme, 18) { Tint = APUtil.Luminance(layer.adjColor) > 0.5f ? Color.black : Color.white };
+                    ic.style.position = Position.Absolute;
+                    ic.style.left = 9;
+                    ic.style.top = 9;
+                    thumb.Add(ic);
+                }
+            }
+            else if (layer.kind == LayerKind.Adjustment)
+            {
+                var ic = new Icon(layer.adjMode == AdjustMode.Match ? IconKind.Swap : IconKind.Theme, 22);
+                ic.style.position = Position.Absolute;
+                ic.style.left = 6;
+                ic.style.top = 6;
+                thumb.Add(ic);
             }
             else if (layer.content != null)
             {
@@ -321,7 +338,9 @@ namespace AviCreatorEssentials
             var info = W.Column("ap-layer-info");
             var name = W.Text(layer.name, "ap-layer-name");
             info.Add(name);
-            string sub = layer.kind == LayerKind.Fill ? "Fill" : layer.kind == LayerKind.Image ? (layer.placement != null && layer.placement.projected ? "Image · projected" : "Image") : "Paint";
+            string sub = layer.kind == LayerKind.Fill ? "Fill" : layer.kind == LayerKind.Image ? (layer.placement != null && layer.placement.projected ? "Image · projected" : "Image") :
+                layer.kind == LayerKind.Adjustment ? (layer.adjMode == AdjustMode.Recolor ? "Recolor" : layer.adjMode == AdjustMode.Match ? (layer.refValid ? "Match colors" : "Match colors · no reference yet") : "Hue / saturation") :
+                "Paint";
             if (layer.blend != LayerBlendMode.Normal) sub += " · " + s_BlendNames[(int)layer.blend];
             if (layer.opacity < 0.999f) sub += " · " + Mathf.RoundToInt(layer.opacity * 100f) + "%";
             if (layer.lockAlpha) sub += " · alpha locked";
@@ -505,6 +524,19 @@ namespace AviCreatorEssentials
                     menu.AddSeparator("");
                 }
             }
+            var anchor = this.Q(className: "ap-layer-actions");
+            menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
+        }
+
+        void AdjustmentMenu()
+        {
+            var set = Set;
+            if (set == null) return;
+            var menu = new GenericDropdownMenu();
+            string where = set.HasSelection ? " (selected area)" : " (whole texture)";
+            menu.AddItem("Recolor" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.Recolor, m_Ctx.primary); m_Ctx.Render(); });
+            menu.AddItem("Hue / Saturation / Lightness" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.HueSatLight, Color.white); m_Ctx.Render(); });
+            menu.AddItem("Match colors" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.Match, Color.white); m_Ctx.Render(); });
             var anchor = this.Q(className: "ap-layer-actions");
             menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
         }

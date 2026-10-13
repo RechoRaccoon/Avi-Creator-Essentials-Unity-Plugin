@@ -488,6 +488,97 @@ namespace AviCreatorEssentials
         }
     }
 
+    // ====================================================================== adjustment layers
+
+    public class AdjustPanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+
+        public AdjustPanel(PainterContext ctx)
+        {
+            m_Ctx = ctx;
+            AddToClassList("ap-adjust-panel");
+        }
+
+        public void Rebuild()
+        {
+            Clear();
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            var layer = set?.ActiveLayer;
+            if (layer == null || layer.kind != LayerKind.Adjustment) return;
+
+            Add(new W.Segmented(new[] { "Recolor", "Hue / Sat", "Match" }, () => (int)layer.adjMode, i =>
+            {
+                s.EditLayer(set, layer, "Adjustment type", l => l.adjMode = (AdjustMode)i);
+                m_Ctx.Render();
+                Rebuild();
+            }, new[]
+            {
+                "Give the area a new overall color while keeping its shading and detail",
+                "Shift hue, saturation and lightness",
+                "Make this area's colors match another area (e.g. one eye to the other)",
+            }));
+
+            switch (layer.adjMode)
+            {
+                case AdjustMode.Recolor:
+                {
+                    Add(W.Text("The area's average color becomes this color; highlights, shadows and patterns stay. " +
+                               "While this layer is selected, the color wheel above edits it.", "ap-hint"));
+                    var row = W.Row("ap-row-gap");
+                    var sw = W.Swatch(layer.adjColor, 24, "Recolor target");
+                    row.Add(sw);
+                    row.Add(W.TextButton("Use paint color", () =>
+                    {
+                        s.EditLayer(set, layer, "Layer color", l => l.adjColor = m_Ctx.primary);
+                        m_Ctx.Render();
+                        Rebuild();
+                    }, "ap-small"));
+                    Add(row);
+                    break;
+                }
+                case AdjustMode.HueSatLight:
+                    Add(new W.SliderRow("Hue", -180f, 180f, () => layer.hue, v => { s.EditLayer(set, layer, "Hue", l => l.hue = v); m_Ctx.Render(); }));
+                    Add(new W.SliderRow("Saturation", -1f, 1f, () => layer.saturation, v => { s.EditLayer(set, layer, "Saturation", l => l.saturation = v); m_Ctx.Render(); }, 100f));
+                    Add(new W.SliderRow("Lightness", -1f, 1f, () => layer.lightness, v => { s.EditLayer(set, layer, "Lightness", l => l.lightness = v); m_Ctx.Render(); }, 100f));
+                    break;
+                case AdjustMode.Match:
+                {
+                    Add(W.Text(layer.refValid
+                        ? "Matching the reference area. To pick a different one, select it and press the button again."
+                        : "1. This layer's area is what gets changed (it was the selection when you added it).\n" +
+                          "2. Now select the area to copy colors from (Select tool, S) and press the button below.", "ap-hint"));
+                    var b = W.TextButton(layer.refValid ? "Use selected area as reference again" : "Use selected area as reference", () =>
+                    {
+                        if (!s.SetMatchReference(set, layer))
+                            m_Ctx.ShowHint("Select the area to copy colors from first (Select tool, S).");
+                        m_Ctx.Render();
+                        Rebuild();
+                    }, "ap-accent");
+                    b.SetEnabled(set.HasSelection);
+                    Add(b);
+                    if (layer.refValid)
+                    {
+                        var ref0 = new Color(layer.refMean.x, layer.refMean.y, layer.refMean.z);
+                        var src0 = new Color(layer.srcMean.x, layer.srcMean.y, layer.srcMean.z);
+                        var row = W.Row("ap-row-gap");
+                        row.Add(W.Swatch(src0, 18, "This area's average color before matching"));
+                        row.Add(W.Text("→", "ap-hint-inline"));
+                        row.Add(W.Swatch(ref0, 18, "Reference area's average color"));
+                        Add(row);
+                    }
+                    break;
+                }
+            }
+
+            var tools = W.Row("ap-row-gap", "ap-wrap");
+            tools.Add(W.TextButton("Re-measure area", () => { s.MeasureSource(set, layer); m_Ctx.Render(); Rebuild(); }, "ap-small"));
+            Add(tools);
+            Add(W.Text("Painting on this layer paints its mask: white areas are affected, black are not. Use the layer opacity for strength.", "ap-hint"));
+        }
+    }
+
     // ====================================================================== pose
 
     public class PosePanel : VisualElement
@@ -833,6 +924,15 @@ namespace AviCreatorEssentials
             }, 1f, "Colors are extended this far past UV island edges so seams never show a line"));
             Add(new W.ToggleRow("Start from full-resolution source files", () => v.preferSourceFiles, x => { v.preferSourceFiles = x; Save(); },
                 "Read the original PNG/JPG instead of the compressed, size-limited imported texture"));
+            var ver = W.Row("ap-row-gap");
+            ver.Add(W.Text("Version " + UpdateChecker.Version + " · " + UpdateChecker.InstallDescription, "ap-hint-inline", "ap-grow"));
+            ver.Add(W.TextButton("Check for updates", () =>
+            {
+                UpdateChecker.Check(true);
+                EditorApplication.delayCall += () => { };
+            }, "ap-small"));
+            Add(ver);
+            Add(new W.ToggleRow("Color wheel edits the selected fill/recolor layer", () => v.pickerEditsLayer, x => { v.pickerEditsLayer = x; v.Save(); }));
             Add(new W.SliderRow("Undo steps", 5f, 200f, () => v.undoSteps, x =>
             {
                 v.undoSteps = Mathf.RoundToInt(x);

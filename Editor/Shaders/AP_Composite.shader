@@ -294,6 +294,63 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         return float4(rgb, 1);
     }
 
+    // ---------------- adjustment layers ----------------
+    float _AdjMode;       // 0 recolor, 1 hue/sat/light, 2 match
+    float4 _AdjColor;
+    float4 _AdjHSL;       // x hue shift (0..1 turns), y saturation, z lightness
+    float4 _SrcMean;
+    float4 _SrcStd;
+    float4 _RefMean;
+    float4 _RefStd;
+    float _RefValid;
+
+    float3 AP_RGBtoHSV(float3 c)
+    {
+        float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+        float4 p = lerp(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+        float4 q = lerp(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+        float d = q.x - min(q.w, q.y);
+        float e = 1.0e-10;
+        return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+    }
+
+    float3 AP_HSVtoRGB(float3 c)
+    {
+        float3 p = abs(frac(c.xxx + float3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+        return c.z * lerp(float3(1, 1, 1), saturate(p - 1.0), c.y);
+    }
+
+    float4 frag_adjust(v2f_img i) : SV_Target
+    {
+        float4 d = AP_SAMPLE_LOD(_MainTex, i.uv, 0);
+        float m = (_HasMask > 0.5) ? AP_SAMPLE_LOD(_MaskTex, i.uv, 0).r : 1.0;
+        float k = saturate(m * _Opacity);
+        float3 c = d.rgb;
+        float3 a = c;
+        if (_AdjMode < 0.5)
+        {
+            // Recolor: the area's average becomes the chosen color, light and dark detail is kept.
+            float srcL = max(AP_Lum(_SrcMean.rgb), 0.03);
+            float l = AP_Lum(c) * AP_Lum(_AdjColor.rgb) / srcL;
+            a = AP_SetLum(_AdjColor.rgb, l);
+        }
+        else if (_AdjMode < 1.5)
+        {
+            float3 hsv = AP_RGBtoHSV(c);
+            hsv.x = frac(hsv.x + _AdjHSL.x + 1.0);
+            hsv.y = saturate(hsv.y * (1.0 + _AdjHSL.y));
+            a = AP_HSVtoRGB(hsv);
+            a = (_AdjHSL.z >= 0.0) ? lerp(a, float3(1, 1, 1), _AdjHSL.z) : a * (1.0 + _AdjHSL.z);
+        }
+        else if (_RefValid > 0.5)
+        {
+            // Match: shift and scale each channel so this area's color statistics equal the reference area's.
+            a = (c - _SrcMean.rgb) / max(_SrcStd.rgb, 0.02) * _RefStd.rgb + _RefMean.rgb;
+        }
+        a = saturate(a);
+        return float4(lerp(c, a, k), d.a);
+    }
+
     // ---------------- misc ----------------
     float4 frag_unpremultiply(v2f_img i) : SV_Target
     {
@@ -455,6 +512,17 @@ Shader "Hidden/AviCreatorEssentials/Composite"
             #pragma target 4.5
             #pragma vertex vert_img
             #pragma fragment frag_remap
+            ENDCG
+        }
+
+        // 13 adjustment layer
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_img
+            #pragma fragment frag_adjust
             ENDCG
         }
     }

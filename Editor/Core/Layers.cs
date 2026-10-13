@@ -11,6 +11,14 @@ namespace AviCreatorEssentials
         Paint,
         Fill,
         Image,
+        Adjustment,
+    }
+
+    public enum AdjustMode
+    {
+        Recolor,        // new overall color, shading and detail kept
+        HueSatLight,
+        Match,          // make this area's colors match a reference area
     }
 
     /// <summary>Order must match AP_Blend in AP_Composite.shader.</summary>
@@ -82,6 +90,29 @@ namespace AviCreatorEssentials
         public RenderTexture mask;               // optional
         public bool maskEnabled = true;
         public ImagePlacement placement;         // image layers
+
+        // adjustment layers (work on everything below them, inside their mask)
+        public AdjustMode adjMode;
+        public Color adjColor = Color.white;     // recolor target (gamma)
+        public float hue;                        // -180..180 degrees
+        public float saturation;                 // -1..1
+        public float lightness;                  // -1..1
+        public Vector4 srcMean, srcStd;          // colors of the masked area (measured)
+        public Vector4 refMean, refStd;          // colors of the reference area (match mode)
+        public bool refValid;
+
+        /// <summary>The color the color wheel edits for this layer, if it has one.</summary>
+        public bool HasEditableColor => kind == LayerKind.Fill || (kind == LayerKind.Adjustment && adjMode == AdjustMode.Recolor);
+
+        public Color EditableColor
+        {
+            get => kind == LayerKind.Fill ? fillColor : adjColor;
+            set
+            {
+                if (kind == LayerKind.Fill) fillColor = value;
+                else adjColor = value;
+            }
+        }
 
         public bool HasMask => mask != null;
         public bool MaskActive => mask != null && maskEnabled;

@@ -40,6 +40,7 @@ namespace AviCreatorEssentials
         public const int Fill = 10;
         public const int Over = 11;
         public const int Remap = 12;
+        public const int Adjust = 13;
     }
 
     internal static class APIds
@@ -55,6 +56,14 @@ namespace AviCreatorEssentials
         public static readonly int DecalTex = Shader.PropertyToID("_DecalTex");
         public static readonly int SeedTex = Shader.PropertyToID("_SeedTex");
         public static readonly int SelTex = Shader.PropertyToID("_SelTex");
+        public static readonly int AdjMode = Shader.PropertyToID("_AdjMode");
+        public static readonly int AdjColor = Shader.PropertyToID("_AdjColor");
+        public static readonly int AdjHSL = Shader.PropertyToID("_AdjHSL");
+        public static readonly int SrcMean = Shader.PropertyToID("_SrcMean");
+        public static readonly int SrcStd = Shader.PropertyToID("_SrcStd");
+        public static readonly int RefMean = Shader.PropertyToID("_RefMean");
+        public static readonly int RefStd = Shader.PropertyToID("_RefStd");
+        public static readonly int RefValid = Shader.PropertyToID("_RefValid");
         public static readonly int UseSel = Shader.PropertyToID("_UseSel");
         public static readonly int SelOverlay = Shader.PropertyToID("_SelOverlay");
         public static readonly int JumpStep = Shader.PropertyToID("_JumpStep");

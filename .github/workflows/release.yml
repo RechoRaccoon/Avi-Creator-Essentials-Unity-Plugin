@@ -1,0 +1,84 @@
+# Publishes a release whenever package.json gets a new version, then rebuilds the
+# VRChat Creator Companion (VPM) listing on GitHub Pages so VCC offers the update.
+name: Release and VCC listing
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  release:
+    types: [published, deleted]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          echo "name=$(jq -r .name package.json)" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already released
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build package zip
+        if: steps.exists.outputs.exists == 'false'
+        run: |
+          ZIP="${{ steps.version.outputs.name }}-${{ steps.version.outputs.version }}.zip"
+          zip -r -q "$ZIP" . -x ".git/*" ".github/*" ".gitignore" ".gitattributes"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Create release
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=$(python3 .github/scripts/changelog_section.py "${{ steps.version.outputs.version }}")
+          gh release create "v${{ steps.version.outputs.version }}" "$ZIP" \
+            --title "Avi Creator Essentials ${{ steps.version.outputs.version }}" \
+            --notes "$NOTES"
+
+  listing:
+    needs: [release]
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build VPM listing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/build_listing.py site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

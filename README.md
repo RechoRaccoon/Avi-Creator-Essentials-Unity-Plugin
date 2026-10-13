@@ -11,13 +11,22 @@ Made for the VRChat Creator Companion's Unity version (2022.3) with the Built-in
 
 Pick one:
 
+- **VRChat Creator Companion (recommended, easiest to update):** open the [listing page](https://rechoraccoon.github.io/Avi-Creator-Essentials-Unity-Plugin/) and press **Add to VRChat Creator Companion**. Then, in the VCC, open your project's *Manage Project* page and add **Avi Creator Essentials**.
 - **Package Manager:** Window › Package Manager › **+** › *Add package from git URL…* and paste:
   ```
   https://github.com/RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin.git
   ```
-- **Download:** Code › *Download ZIP*, unzip it, and drag the folder into your project's `Assets` folder.
+- **Download:** grab the zip from [Releases](https://github.com/RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin/releases), unzip it, and drag the folder into your project's `Assets` folder.
 
 Everything is editor-only, so it never ends up in an avatar upload.
+
+### Updating
+
+The tool checks GitHub once a day. When a new version is out, an **Update** button appears in the painter's toolbar (and at the bottom of the Viewport section). What it does depends on how you installed:
+
+- **VCC:** press the update arrow next to Avi Creator Essentials on your project's *Manage Project* page.
+- **Git URL:** the button updates it for you.
+- **Manual copy:** the button offers to switch you to the VCC listing, so future updates are one click.
 
 ## Avatar Painter
 
@@ -48,6 +57,14 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 **Emission.** Every material with an emission slot has a **Base color / Emission** switch above its layers. The sun button in the toolbar shows only what glows.
 
 **Selecting UV areas.** Press **S** (Select tool). Click a UV island, or drag a box or lasso, in the texture view or on the model. Shift adds and Ctrl removes. While something is selected, brushes, erasers and fills only paint inside it. Ctrl+D clears the selection, Ctrl+A selects everything and Ctrl+I inverts it.
+
+**Recoloring and matching colors.** Adjustment layers change the color of an area without painting over it, so shading, highlights and patterns stay. Select an area first (**S**, then click a UV island), then press the adjustment button in the Layers section:
+
+- **Recolor** gives the area a new overall color. While the layer is selected, the color wheel edits it live, so you can just pick colors until it looks right.
+- **Hue / Saturation / Lightness** shifts the existing colors.
+- **Match colors** makes the area look like another one. Example for two different-colored eyes: select the eye you want to change, add a *Match colors* layer, then select the other eye and press **Use selected area as reference**.
+
+Each adjustment layer remembers its area, so you can stack one per eye, hide them, or change them later, like in Substance.
 
 **Images.** Import a PNG or JPG from the Layers section. Place it on the texture, or project it onto the model like a sticker.
 

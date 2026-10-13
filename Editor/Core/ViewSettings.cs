@@ -56,7 +56,8 @@ namespace AviCreatorEssentials
         public bool showCursorOnModel = true;
         public float rightPanelWidth = 330f;
         public int theme;                      // 0 follow Unity, 1 dark, 2 light
-        public bool linkClothing = true;       // clothing armatures follow the body like VRCFury's Armature Link
+        public bool linkClothing = true;
+        public bool pickerEditsLayer = true;   // the color wheel edits the selected fill/recolor layer       // clothing armatures follow the body like VRCFury's Armature Link
 
         /// <summary>Resolved at runtime from the theme setting and Unity's own skin.</summary>
         public bool LightTheme => theme == 2 || (theme == 0 && !EditorGUIUtility.isProSkin);

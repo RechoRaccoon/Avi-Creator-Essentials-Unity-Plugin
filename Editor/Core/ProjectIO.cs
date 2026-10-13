@@ -51,6 +51,11 @@ namespace AviCreatorEssentials
         public bool maskEnabled = true;
         public bool hasPlacement;
         public ImagePlacement placement;
+        public int adjMode;
+        public Color adjColor = Color.white;
+        public float hue, saturation, lightness;
+        public Vector4 srcMean, srcStd, refMean, refStd;
+        public bool refValid;
     }
 
     public class ProjectInfo
@@ -164,6 +169,16 @@ namespace AviCreatorEssentials
                             lockAlpha = layer.lockAlpha,
                             fillColor = layer.fillColor,
                             maskEnabled = layer.maskEnabled,
+                            adjMode = (int)layer.adjMode,
+                            adjColor = layer.adjColor,
+                            hue = layer.hue,
+                            saturation = layer.saturation,
+                            lightness = layer.lightness,
+                            srcMean = layer.srcMean,
+                            srcStd = layer.srcStd,
+                            refMean = layer.refMean,
+                            refStd = layer.refStd,
+                            refValid = layer.refValid,
                         };
                         string prefix = "s" + si + "_l" + li + "_";
                         if (layer.content != null && layer.kind != LayerKind.Image)
@@ -284,6 +299,16 @@ namespace AviCreatorEssentials
                             lockAlpha = ld.lockAlpha,
                             fillColor = ld.fillColor,
                             maskEnabled = ld.maskEnabled,
+                            adjMode = (AdjustMode)ld.adjMode,
+                            adjColor = ld.adjColor,
+                            hue = ld.hue,
+                            saturation = ld.saturation,
+                            lightness = ld.lightness,
+                            srcMean = ld.srcMean,
+                            srcStd = ld.srcStd,
+                            refMean = ld.refMean,
+                            refStd = ld.refStd,
+                            refValid = ld.refValid,
                         };
                         if (!string.IsNullOrEmpty(ld.contentFile))
                             layer.content = LoadRT(s, set, Path.Combine(folder, ld.contentFile), false);
@@ -295,7 +320,7 @@ namespace AviCreatorEssentials
                             if (!string.IsNullOrEmpty(ld.placement.imageFile))
                                 layer.placement.image = APUtil.LoadImageFile(Path.Combine(folder, ld.placement.imageFile));
                         }
-                        if (layer.kind != LayerKind.Fill && layer.content == null) layer.content = s.engine.NewContentRT(set);
+                        if (layer.kind != LayerKind.Fill && layer.kind != LayerKind.Adjustment && layer.content == null) layer.content = s.engine.NewContentRT(set);
                         set.layers.Add(layer);
                     }
                     if (set.layers.Count == 0)

@@ -301,6 +301,23 @@ namespace AviCreatorEssentials
             foreach (var layer in set.layers)
             {
                 if (!layer.visible || layer.opacity <= 0f) continue;
+                if (layer.kind == LayerKind.Adjustment)
+                {
+                    comp.SetFloat(APIds.HasMask, layer.MaskActive ? 1f : 0f);
+                    comp.SetTexture(APIds.MaskTex, layer.MaskActive ? (Texture)layer.mask : APResources.White);
+                    comp.SetFloat(APIds.Opacity, layer.opacity);
+                    comp.SetFloat(APIds.AdjMode, (float)layer.adjMode);
+                    comp.SetVector(APIds.AdjColor, APUtil.V(layer.adjColor));
+                    comp.SetVector(APIds.AdjHSL, new Vector4(layer.hue / 360f, layer.saturation, layer.lightness, 0f));
+                    comp.SetVector(APIds.SrcMean, layer.srcMean);
+                    comp.SetVector(APIds.SrcStd, layer.srcStd);
+                    comp.SetVector(APIds.RefMean, layer.refMean);
+                    comp.SetVector(APIds.RefStd, layer.refStd);
+                    comp.SetFloat(APIds.RefValid, layer.refValid ? 1f : 0f);
+                    Graphics.Blit(a, b, comp, CompPass.Adjust);
+                    var ta = a; a = b; b = ta;
+                    continue;
+                }
                 bool isFill = layer.kind == LayerKind.Fill;
                 if (!isFill && layer.content == null) continue;
                 comp.SetFloat(APIds.IsFill, isFill ? 1f : 0f);
@@ -338,6 +355,53 @@ namespace AviCreatorEssentials
             set.layers.Clear();
             set.layers.AddRange(saved);
             set.dirty = true;
+        }
+
+        /// <summary>
+        /// Average color and spread (per channel, gamma space) of the layers below `layerIndex`, inside a region mask.
+        /// Returns false when the region is empty.
+        /// </summary>
+        public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std)
+        {
+            mean = std = Vector4.zero;
+            if (region == null) return false;
+            var below = new List<PaintLayer>();
+            for (int i = 0; i < layerIndex && i < set.layers.Count; i++) below.Add(set.layers[i]);
+            var colorRT = NewContentRT(set);
+            CompositeSubset(set, below, colorRT);
+            var maskRT = APUtil.CreateRT(set.width, set.height, GraphicsFormat.R8G8B8A8_UNorm, "region");
+            var comp = APResources.Composite;
+            comp.SetFloat(APIds.CopyMode, 1f);
+            comp.SetFloat(APIds.SrcToGamma, 0f);
+            var prev = RenderTexture.active;
+            Graphics.Blit(region, maskRT, comp, CompPass.Copy);
+            RenderTexture.active = prev;
+            var ct = APUtil.ReadToTexture(colorRT);
+            var mt = APUtil.ReadToTexture(maskRT);
+            var cp = ct.GetPixels32();
+            var mp = mt.GetPixels32();
+            Object.DestroyImmediate(ct);
+            Object.DestroyImmediate(mt);
+            APUtil.Release(ref colorRT);
+            APUtil.Release(ref maskRT);
+            double w = 0, r = 0, g = 0, b = 0, rr = 0, gg = 0, bb = 0;
+            for (int i = 0; i < cp.Length && i < mp.Length; i++)
+            {
+                float k = mp[i].r / 255f;
+                if (k < 0.5f) continue;
+                double cr = cp[i].r / 255.0, cg = cp[i].g / 255.0, cb = cp[i].b / 255.0;
+                w += 1;
+                r += cr; g += cg; b += cb;
+                rr += cr * cr; gg += cg * cg; bb += cb * cb;
+            }
+            if (w < 1) return false;
+            r /= w; g /= w; b /= w;
+            mean = new Vector4((float)r, (float)g, (float)b, 1f);
+            std = new Vector4(
+                (float)Math.Sqrt(Math.Max(0, rr / w - r * r)),
+                (float)Math.Sqrt(Math.Max(0, gg / w - g * g)),
+                (float)Math.Sqrt(Math.Max(0, bb / w - b * b)), 1f);
+            return true;
         }
 
         /// <summary>Final texture for export, padded by the given number of texels (negative = fill everything).</summary>
@@ -423,7 +487,7 @@ namespace AviCreatorEssentials
             if (layer == null) return null;
             bool mask = set.editingMask && layer.HasMask;
 
-            if (layer.kind == LayerKind.Fill && !mask)
+            if ((layer.kind == LayerKind.Fill || layer.kind == LayerKind.Adjustment) && !mask)
             {
                 // Painting on a fill layer paints its mask: start hidden, reveal where painted.
                 if (!layer.HasMask)

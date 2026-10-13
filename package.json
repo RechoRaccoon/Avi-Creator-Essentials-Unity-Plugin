@@ -1,6 +1,6 @@
 {
   "name": "com.rechoraccoon.avi-creator-essentials",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "displayName": "Avi Creator Essentials",
   "description": "Editor tools for VRChat avatar creators: a seam-free 3D/2D texture painter with layers, masks and emission painting, and Blender-style bone posing in the Scene view for making animations.",
   "unity": "2022.3",
@@ -19,5 +19,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin.git"
+  },
+  "documentationUrl": "https://github.com/RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin#readme",
+  "changelogUrl": "https://github.com/RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin/blob/main/CHANGELOG.md",
+  "vpmDependencies": {},
+  "legacyFolders": {
+    "Assets\\AviCreatorEssentials": "",
+    "Assets\\AvatarPainter": ""
   }
 }

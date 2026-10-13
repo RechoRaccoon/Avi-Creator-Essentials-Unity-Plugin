@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Adjustment layers: Recolor (new overall color, detail kept), Hue / Saturation / Lightness, and Match colors (copy one area's colors to another, e.g. one eye to the other). Each uses the UV selection it was made with.
+- The color wheel edits the selected Recolor layer live.
+- Shader property names show without Poiyomi's extra "--" labels.
+- Update checker with an Update button, and a VRChat Creator Companion listing for one-click updates.
+
 ## 0.3.0
 
 - Clothing armatures are matched to the body armature by name (like VRCFury's Armature Link), including prefixed/suffixed names and outfit-only extra bones.

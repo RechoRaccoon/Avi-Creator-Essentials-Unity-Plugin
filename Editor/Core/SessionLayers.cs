@@ -17,6 +17,9 @@ namespace AviCreatorEssentials
             public bool lockAlpha;
             public Color fillColor;
             public bool maskEnabled;
+            public AdjustMode adjMode;
+            public Color adjColor;
+            public float hue, saturation, lightness;
 
             public static LayerState Of(PaintLayer l) => new LayerState
             {
@@ -27,6 +30,11 @@ namespace AviCreatorEssentials
                 lockAlpha = l.lockAlpha,
                 fillColor = l.fillColor,
                 maskEnabled = l.maskEnabled,
+                adjMode = l.adjMode,
+                adjColor = l.adjColor,
+                hue = l.hue,
+                saturation = l.saturation,
+                lightness = l.lightness,
             };
 
             public void ApplyTo(PaintLayer l)
@@ -38,6 +46,11 @@ namespace AviCreatorEssentials
                 l.lockAlpha = lockAlpha;
                 l.fillColor = fillColor;
                 l.maskEnabled = maskEnabled;
+                l.adjMode = adjMode;
+                l.adjColor = adjColor;
+                l.hue = hue;
+                l.saturation = saturation;
+                l.lightness = lightness;
             }
         }
 
@@ -204,14 +217,81 @@ namespace AviCreatorEssentials
             if (entries.Count > 0) Push(new CompoundEntry("New layer in all materials", entries));
         }
 
+        /// <summary>A mask copied from the current UV selection, or null when nothing is selected.</summary>
+        RenderTexture MaskFromSelection(TextureSet set)
+        {
+            if (!set.HasSelection) return null;
+            if (set.selectionDirty || set.selectionRT == null) engine.BuildSelection(set);
+            return set.selectionRT != null ? engine.CloneRT(set.selectionRT, "Mask") : null;
+        }
+
         public PaintLayer AddFillLayer(TextureSet set, Color color, bool blackMask)
         {
             if (!set.initialized) InitializeSet(set);
             var layer = new PaintLayer { name = UniqueName(set, "Fill"), kind = LayerKind.Fill, fillColor = color };
+            var fromSel = MaskFromSelection(set);
+            if (fromSel != null)
+            {
+                layer.mask = fromSel;
+                InsertLayer(set, layer, InsertIndex(set), "New fill layer");
+                set.editingMask = false;
+                return layer;
+            }
             if (blackMask) layer.mask = engine.NewMaskRT(set, 0f);
             InsertLayer(set, layer, InsertIndex(set), "New fill layer");
             if (blackMask) set.editingMask = true;
             return layer;
+        }
+
+        /// <summary>
+        /// Adds an adjustment layer that changes the colors below it. It is limited to the current UV selection
+        /// (or covers everything when nothing is selected); paint its mask to refine it.
+        /// </summary>
+        public PaintLayer AddAdjustmentLayer(TextureSet set, AdjustMode mode, Color color)
+        {
+            if (!set.initialized) InitializeSet(set);
+            string baseName = mode == AdjustMode.Recolor ? "Recolor" : mode == AdjustMode.Match ? "Match colors" : "Hue/Saturation";
+            var layer = new PaintLayer
+            {
+                name = UniqueName(set, baseName),
+                kind = LayerKind.Adjustment,
+                adjMode = mode,
+                adjColor = color,
+            };
+            layer.mask = MaskFromSelection(set) ?? engine.NewMaskRT(set, 1f);
+            int index = InsertIndex(set);
+            InsertLayer(set, layer, index, "New " + baseName.ToLowerInvariant() + " layer");
+            set.editingMask = false;
+            MeasureSource(set, layer);
+            return layer;
+        }
+
+        /// <summary>Measures the current colors under the layer's mask (what Recolor and Match start from).</summary>
+        public void MeasureSource(TextureSet set, PaintLayer layer)
+        {
+            int idx = set.layers.IndexOf(layer);
+            if (idx < 0) return;
+            if (engine.MeasureRegion(set, idx, layer.mask != null ? (Texture)layer.mask : APResources.White, out var mean, out var std))
+            {
+                layer.srcMean = mean;
+                layer.srcStd = std;
+            }
+            Changed(set);
+        }
+
+        /// <summary>Match mode: the current UV selection becomes the area whose colors this layer copies.</summary>
+        public bool SetMatchReference(TextureSet set, PaintLayer layer)
+        {
+            if (!set.HasSelection) return false;
+            if (set.selectionDirty || set.selectionRT == null) engine.BuildSelection(set);
+            int idx = set.layers.IndexOf(layer);
+            if (!engine.MeasureRegion(set, idx, set.selectionRT, out var mean, out var std)) return false;
+            MeasureSource(set, layer);
+            var oldMean = layer.refMean; var oldStd = layer.refStd; bool oldValid = layer.refValid;
+            void Set(Vector4 m, Vector4 s, bool v) { layer.refMean = m; layer.refStd = s; layer.refValid = v; Changed(set); }
+            Set(mean, std, true);
+            Push(new ActionEntry("Set match reference", () => Set(oldMean, oldStd, oldValid), () => Set(mean, std, true)));
+            return true;
         }
 
         /// <summary>Adds an image layer. The image must be a gamma-value texture (see APUtil.ToGammaTexture).</summary>
@@ -259,6 +339,16 @@ namespace AviCreatorEssentials
                 lockAlpha = layer.lockAlpha,
                 fillColor = layer.fillColor,
                 maskEnabled = layer.maskEnabled,
+                adjMode = layer.adjMode,
+                adjColor = layer.adjColor,
+                hue = layer.hue,
+                saturation = layer.saturation,
+                lightness = layer.lightness,
+                srcMean = layer.srcMean,
+                srcStd = layer.srcStd,
+                refMean = layer.refMean,
+                refStd = layer.refStd,
+                refValid = layer.refValid,
                 content = engine.CloneRT(layer.content, "Layer"),
                 mask = engine.CloneRT(layer.mask, "Mask"),
             };
