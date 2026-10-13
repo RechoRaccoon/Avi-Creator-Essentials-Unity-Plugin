@@ -30,6 +30,8 @@ namespace AviCreatorEssentials
         public Mesh paintMesh;            // posed vertices + original UVs/indices, rendered into UV space
         public Mesh bakeTemp;
         public Mesh restMesh;             // rest-pose vertices, normals and tangents in avatar-root space (for wrapped textures)
+        public Matrix4x4 restRootToLocal = Matrix4x4.identity;  // rest-pose avatar-root space -> the space shaders see as "local"
+        public Matrix4x4 restRootToWorld = Matrix4x4.identity;  // rest-pose avatar-root space -> world space
         public Matrix4x4 matrix = Matrix4x4.identity;
         public Vector3[] worldVerts = Array.Empty<Vector3>();
         public Vector3[] worldNormals = Array.Empty<Vector3>();
@@ -324,6 +326,11 @@ namespace AviCreatorEssentials
                 foreach (var e in entries)
                 {
                     if (e.renderer == null) continue;
+                    // Object space as an avatar shader sees it (Poiyomi's Local Pos): skinned meshes are drawn
+                    // relative to their root bone, everything else relative to its own transform.
+                    var localT = e.skinned != null ? (e.skinned.rootBone != null ? e.skinned.rootBone : e.skinned.transform) : e.renderer.transform;
+                    e.restRootToWorld = rootM.inverse;
+                    e.restRootToLocal = localT.worldToLocalMatrix * rootM.inverse;
                     Vector3[] v, n;
                     Vector4[] t;
                     Matrix4x4 m;

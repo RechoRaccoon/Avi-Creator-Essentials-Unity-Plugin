@@ -77,6 +77,12 @@ namespace AviCreatorEssentials
         public bool greenDown;              // DirectX-style normal map (green channel points down)
         public bool linked = true;          // edits apply to the same texture wrapped on other materials
 
+        // exact planar mapping read from the avatar's shader (Poiyomi Local Pos / World Pos), instead of the triplanar wrap
+        public int shaderSpace;             // 0 off, 1 local position, 2 world position
+        public int axisU;                   // which position axis (0 X, 1 Y, 2 Z) becomes u
+        public int axisV = 1;
+        public Vector4 shaderST = new Vector4(1, 1, 0, 0);   // the texture's tiling (xy) and offset (zw)
+
         public int Mode => wrap ? 2 : projected ? 1 : 0;
 
         [NonSerialized] public Texture2D image;

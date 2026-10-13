@@ -1018,6 +1018,11 @@ namespace AviCreatorEssentials
         void DragWrapped(Vector2 delta)
         {
             var s = ctx.session;
+            if (m_ImageLayer.placement.shaderSpace > 0)
+            {
+                ctx.ShowHint("This layer copies the material's own mapping exactly. Choose \"Adjust by hand instead\" in the Image panel to move it.");
+                return;
+            }
             switch (m_ImageDrag)
             {
                 case ImageDrag.Move:

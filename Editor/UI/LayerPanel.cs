@@ -632,12 +632,44 @@ namespace AviCreatorEssentials
 
         /// <summary>
         /// Wraps a tiling image (cardboard, fabric, a normal map...) around the model from every side and bakes it into
-        /// the UV layout, like a shader's world/local position mapping but stuck to the model.
+        /// the UV layout, like a shader's world/local position mapping but stuck to the model. The image can come from
+        /// one of the material's own texture slots (matching its Local Pos / World Pos mapping exactly), a texture in the
+        /// project, or an image file.
         /// </summary>
         public void ImportWrapTexture()
         {
             var set = Set;
             if (set == null) return;
+            var menu = new GenericDropdownMenu();
+            var mat = set.originalMaterial;
+            var slots = ShaderMapping.TextureSlots(mat);
+            if (slots.Count > 0)
+            {
+                menu.AddDisabledItem("From " + (mat != null ? mat.name : "this material") + ":", false);
+                // Slots that already use a position-based mapping come first: those are what people want to bake.
+                slots.Sort((a, b) => (b.space > 0).CompareTo(a.space > 0));
+                foreach (var slot in slots)
+                {
+                    var sl = slot;
+                    string label = "   " + slot.displayName + "  (" + slot.texture.name + ")" + (slot.space > 0 ? "  — " + slot.SpaceName + ", matched" : "");
+                    menu.AddItem(label, false, () => WrapFromSlot(sl));
+                }
+                menu.AddSeparator("");
+            }
+            menu.AddItem("Texture from the project…", false, () =>
+            {
+                var tex = TexturePickWindow.Pick("Wrap texture", "Pick the tiling texture to wrap around the model.");
+                if (tex == null) return;
+                var img = ShaderMapping.ToImage(tex, out bool normal);
+                Wrap(Set, img, normal, null);
+            });
+            menu.AddItem("Image file…", false, WrapFromFile);
+            var anchor = this.Q(className: "ap-layer-actions");
+            menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
+        }
+
+        void WrapFromFile()
+        {
             string path = EditorUtility.OpenFilePanelWithFilters("Wrap a texture around the model", EditorPrefs.GetString("AviCreatorEssentials.LastImageDir", ""),
                 new[] { "Images", "png,jpg,jpeg", "All files", "*" });
             if (string.IsNullOrEmpty(path)) return;
@@ -648,19 +680,42 @@ namespace AviCreatorEssentials
                 EditorUtility.DisplayDialog("Avi Creator Essentials", "That file couldn't be read as a PNG or JPG image.", "OK");
                 return;
             }
-            bool normal = APUtil.LooksLikeNormalMap(tex) || APSession.IsNormalMap(set);
+            Wrap(Set, tex, APUtil.LooksLikeNormalMap(tex), null);
+        }
+
+        void WrapFromSlot(MaterialTextureSlot slot)
+        {
+            var img = ShaderMapping.ToImage(slot.texture, out bool normal);
+            if (img == null)
+            {
+                EditorUtility.DisplayDialog("Avi Creator Essentials", "That texture couldn't be read.", "OK");
+                return;
+            }
+            Wrap(Set, img, normal || APSession.IsNormalProperty(slot.property), slot.space > 0 ? slot : null);
+        }
+
+        /// <summary>Adds the wrap layers. With a matched slot, the shader's own planar mapping is baked exactly.</summary>
+        void Wrap(TextureSet set, Texture2D tex, bool normal, MaterialTextureSlot matched)
+        {
+            if (set == null || tex == null) return;
+            normal = normal || APUtil.LooksLikeNormalMap(tex) || APSession.IsNormalMap(set);
             string what = normal
                 ? "This looks like a normal map, so it goes into the materials' normal map slots (one is added where a material has none), on top of any normal map already there."
                 : "The image goes into the materials' main textures as a new layer.";
-            int choice = EditorUtility.DisplayDialogComplex("Wrap texture around the model",
-                what + "\n\nWrap it around every material, or only " + (set.originalMaterial != null ? set.originalMaterial.name : "this material") + "?",
-                "Every material", "Cancel", "Only this material");
-            if (choice == 1)
+            bool all = false;
+            if (matched == null)
             {
-                UnityEngine.Object.DestroyImmediate(tex);
-                return;
+                int choice = EditorUtility.DisplayDialogComplex("Wrap texture around the model",
+                    what + "\n\nWrap it around every material, or only " + (set.originalMaterial != null ? set.originalMaterial.name : "this material") + "?",
+                    "Every material", "Cancel", "Only this material");
+                if (choice == 1)
+                {
+                    UnityEngine.Object.DestroyImmediate(tex);
+                    return;
+                }
+                all = choice == 0;
             }
-            var targets = S.WrapTargets(set, choice == 0, normal, out int skipped);
+            var targets = S.WrapTargets(set, all, normal, out int skipped);
             if (targets.Count == 0)
             {
                 UnityEngine.Object.DestroyImmediate(tex);
@@ -672,14 +727,25 @@ namespace AviCreatorEssentials
             var p = new ImagePlacement { wrap = true, normalMap = normal };
             var b = S.meshes.VisibleBounds();
             p.tileSize = Mathf.Clamp(b.size.y * 0.15f, 0.02f, 1f);
+            if (matched != null)
+            {
+                p.shaderSpace = matched.space;
+                p.axisU = matched.axisU;
+                p.axisV = matched.axisV;
+                p.shaderST = matched.st;
+            }
             S.AddWrapLayers(targets, tex, p);
             var show = targets.Find(t => t.originalMaterial == set.originalMaterial) ?? targets[0];
             S.ActiveSet = show;
             m_Ctx.Tool = PaintTool.Image;
             m_Ctx.Render();
-            m_Ctx.ShowHint("Wrapped onto " + targets.Count + (targets.Count == 1 ? " texture" : " textures") +
-                           (skipped > 0 ? " (" + skipped + " skipped: no " + (normal ? "normal map" : "texture") + " slot)" : "") +
-                           ". Drag on the model to slide it, Shift-drag to scale, Ctrl-drag to rotate, then Bake.");
+            if (matched != null)
+                m_Ctx.ShowHint("Baked the material's " + matched.SpaceName + " mapping of " + matched.texture.name + " into the UVs. " +
+                               "Press Bake to save it, then set that texture slot back to UV0 in the material.");
+            else
+                m_Ctx.ShowHint("Wrapped onto " + targets.Count + (targets.Count == 1 ? " texture" : " textures") +
+                               (skipped > 0 ? " (" + skipped + " skipped: no " + (normal ? "normal map" : "texture") + " slot)" : "") +
+                               ". Drag on the model to slide it, Shift-drag to scale, Ctrl-drag to rotate, then Bake.");
         }
 
         public void ImportImage()

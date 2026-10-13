@@ -584,6 +584,25 @@ namespace AviCreatorEssentials
 
         void BuildWrap(APSession s, TextureSet set, PaintLayer layer, ImagePlacement p)
         {
+            if (p.shaderSpace > 0)
+            {
+                string[] axes = { "X", "Y", "Z" };
+                Add(W.Text("Matches the material's " + (p.shaderSpace == 1 ? "Local Pos" : "World Pos") + " mapping exactly: u from " +
+                           axes[Mathf.Clamp(p.axisU, 0, 2)] + ", v from " + axes[Mathf.Clamp(p.axisV, 0, 2)] + ", tiling " +
+                           p.shaderST.x.ToString("0.###") + " × " + p.shaderST.y.ToString("0.###") + ", offset " +
+                           p.shaderST.z.ToString("0.###") + ", " + p.shaderST.w.ToString("0.###") + ". " +
+                           "Worked out on the rest pose, so it sticks to the model. Bake, then set the slot back to UV0 in the material.", "ap-hint"));
+                var mrow = W.Row("ap-row-gap", "ap-wrap");
+                mrow.Add(W.TextButton("Adjust by hand instead", () =>
+                {
+                    s.EditPlacement(set, layer, "wrap mode", pl => pl.shaderSpace = 0);
+                    m_Ctx.Render();
+                    Rebuild();
+                }, "ap-small"));
+                mrow.Add(W.TextButton("Rasterize", () => s.RasterizeImage(set, layer), "ap-small"));
+                Add(mrow);
+                return;
+            }
             Add(W.Text("Tiles the image around the model from every side, like Poiyomi's World Pos / Local Pos mapping, but " +
                        "worked out on the rest pose and written into this texture's UVs, so it sticks to the model when it moves. " +
                        "With the Image tool: drag on the model to slide it, Shift-drag to scale, Ctrl-drag to rotate.", "ap-hint"));

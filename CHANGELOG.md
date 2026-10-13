@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- Wrap tiling texture now lets you pick the image from the material's own texture slots or from any texture in the project (Unity's texture picker), as well as from an image file.
+- Texture slots that use Poiyomi's Local Pos or World Pos mapping are read straight from the material (mode, axes, tiling and offset) and baked with exactly that projection, so the result matches what the shader showed. "Adjust by hand instead" in the Image panel switches back to the adjustable wrap.
+
 ## 0.6.1
 
 - Fixed the brush tips showing up twice in the Brush panel after Unity reloaded scripts.

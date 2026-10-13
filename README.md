@@ -73,7 +73,7 @@ Each adjustment layer remembers its area, so you can stack one per eye, hide the
 
 **Images.** Import a PNG or JPG from the Layers section. Place it on the texture, or project it onto the model like a sticker.
 
-**Wrapping a texture around the model (cardboard, fabric, scales...).** Shader options like Poiyomi's *World Pos* or *Local Pos* make a tiling texture flow over the model without UV seams, but it slides when the avatar moves. Layers › image button › **Wrap tiling texture around the model…** does the same projection once, on the avatar's rest pose, and writes it into each material's own UV layout, so it looks the same but stays stuck to the model.
+**Wrapping a texture around the model (cardboard, fabric, scales...).** Shader options like Poiyomi's *World Pos* or *Local Pos* make a tiling texture flow over the model without UV seams, but it slides when the avatar moves. Layers › image button › **Wrap tiling texture around the model…** does the same projection once (pick the texture from the material's slots, the project or a file; a slot already set to Local Pos / World Pos is matched exactly), on the avatar's rest pose, and writes it into each material's own UV layout, so it looks the same but stays stuck to the model.
 
 - Normal maps are detected automatically and go into each material's normal map slot (one is added if a material has none). They are converted to each mesh's tangent space, so the bumps light correctly everywhere, and the blend mode *Normal map combine* keeps the material's own normal detail underneath.
 - Pick **Every material** so the pattern lines up across body and clothes. Edits to one copy change them all (turn off *Same settings on all materials* to change one alone).

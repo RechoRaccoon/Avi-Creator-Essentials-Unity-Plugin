@@ -61,6 +61,9 @@ namespace AviCreatorEssentials
         public static readonly int WrapStrength = Shader.PropertyToID("_WrapStrength");
         public static readonly int WrapGreenDown = Shader.PropertyToID("_WrapGreenDown");
         public static readonly int WrapImageAspect = Shader.PropertyToID("_WrapImageAspect");
+        public static readonly int WrapPlanar = Shader.PropertyToID("_WrapPlanar");
+        public static readonly int WrapRowU = Shader.PropertyToID("_WrapRowU");
+        public static readonly int WrapRowV = Shader.PropertyToID("_WrapRowV");
         public static readonly int LayerTex = Shader.PropertyToID("_LayerTex");
         public static readonly int MaskTex = Shader.PropertyToID("_MaskTex");
         public static readonly int StrokeTex = Shader.PropertyToID("_StrokeTex");

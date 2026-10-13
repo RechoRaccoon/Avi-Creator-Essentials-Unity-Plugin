@@ -1220,6 +1220,7 @@ namespace AviCreatorEssentials
             m.SetFloat(APIds.WrapGreenDown, p.greenDown ? 1f : 0f);
             m.SetFloat(APIds.FlipX, p.flipX ? 1f : 0f);
             m.SetFloat(APIds.WrapImageAspect, img.width / (float)Mathf.Max(1, img.height));
+            m.SetFloat(APIds.WrapPlanar, p.shaderSpace > 0 ? 1f : 0f);
             Graphics.SetRenderTarget(target);
             GL.Clear(false, true, new Color(0, 0, 0, 0));
             // Conservative first so thin triangles get covered, then the exact pass on top for clean interiors.
@@ -1231,6 +1232,14 @@ namespace AviCreatorEssentials
                     if (u.renderer < 0 || u.renderer >= m_Meshes.entries.Count) continue;
                     var e = m_Meshes.entries[u.renderer];
                     if (e.restMesh == null || u.submesh >= e.SubmeshCount) continue;
+                    if (p.shaderSpace > 0)
+                    {
+                        // Rest-pose avatar-root position -> the shader's local (or world) position -> texture uv.
+                        var basis = p.shaderSpace == 1 ? e.restRootToLocal : e.restRootToWorld;
+                        var st = p.shaderST;
+                        m.SetVector(APIds.WrapRowU, basis.GetRow(Mathf.Clamp(p.axisU, 0, 2)) * st.x + new Vector4(0, 0, 0, st.z));
+                        m.SetVector(APIds.WrapRowV, basis.GetRow(Mathf.Clamp(p.axisV, 0, 2)) * st.y + new Vector4(0, 0, 0, st.w));
+                    }
                     m.SetPass(pass);
                     Graphics.DrawMeshNow(e.restMesh, Matrix4x4.identity, u.submesh);
                 }

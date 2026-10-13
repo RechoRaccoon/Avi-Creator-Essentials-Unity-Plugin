@@ -193,6 +193,9 @@ Shader "Hidden/AviCreatorEssentials/Paint"
     float _WrapStrength;
     float _WrapGreenDown;
     float _WrapImageAspect; // image width / height
+    float _WrapPlanar;      // 1: exact planar mapping copied from the avatar's shader (Local Pos / World Pos)
+    float4 _WrapRowU;       // texture u = dot(row, (rest position, 1)), per renderer
+    float4 _WrapRowV;
 
     struct ap_appdata_wrap
     {
@@ -250,6 +253,13 @@ Shader "Hidden/AviCreatorEssentials/Paint"
 
     float4 frag_wrap(v2f_wrap i) : SV_Target
     {
+        if (_WrapPlanar > 0.5)
+        {
+            // The same projection the avatar's shader does, so the result is pixel-for-pixel what it showed.
+            // Normal maps come out unchanged: the shader would have used them in the mesh's own tangent space too.
+            float4 P = float4(i.wpos, 1.0);
+            return AP_SAMPLE(_MainTex, float2(dot(_WrapRowU, P), dot(_WrapRowV, P)));
+        }
         float3 N = normalize(i.wnrm);
         float3 p = (i.wpos + _WrapOffset) / max(_WrapSize, 1e-5);
 
