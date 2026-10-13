@@ -56,6 +56,7 @@ namespace AviCreatorEssentials
         public float hue, saturation, lightness;
         public Vector4 srcMean, srcStd, refMean, refStd;
         public bool refValid;
+        public float[] srcHist, refHist;
     }
 
     public class ProjectInfo
@@ -179,6 +180,8 @@ namespace AviCreatorEssentials
                             refMean = layer.refMean,
                             refStd = layer.refStd,
                             refValid = layer.refValid,
+                            srcHist = layer.srcHist,
+                            refHist = layer.refHist,
                         };
                         string prefix = "s" + si + "_l" + li + "_";
                         if (layer.content != null && layer.kind != LayerKind.Image)
@@ -309,6 +312,8 @@ namespace AviCreatorEssentials
                             refMean = ld.refMean,
                             refStd = ld.refStd,
                             refValid = ld.refValid,
+                            srcHist = ld.srcHist != null && ld.srcHist.Length == 768 ? ld.srcHist : null,
+                            refHist = ld.refHist != null && ld.refHist.Length == 768 ? ld.refHist : null,
                         };
                         if (!string.IsNullOrEmpty(ld.contentFile))
                             layer.content = LoadRT(s, set, Path.Combine(folder, ld.contentFile), false);

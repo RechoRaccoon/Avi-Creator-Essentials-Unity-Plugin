@@ -48,6 +48,8 @@ namespace AviCreatorEssentials
     internal static class APIds
     {
         public static readonly int MainTex = Shader.PropertyToID("_MainTex");
+        public static readonly int UseLut = Shader.PropertyToID("_UseLut");
+        public static readonly int LutTex = Shader.PropertyToID("_LutTex");
         public static readonly int WrapSize = Shader.PropertyToID("_WrapSize");
         public static readonly int WrapSharp = Shader.PropertyToID("_WrapSharp");
         public static readonly int WrapAxis = Shader.PropertyToID("_WrapAxis");

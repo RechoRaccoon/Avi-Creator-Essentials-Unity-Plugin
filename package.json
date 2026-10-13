@@ -1,6 +1,6 @@
 {
   "name": "com.rechoraccoon.avi-creator-essentials",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "displayName": "Avi Creator Essentials",
   "description": "Editor tools for VRChat avatar creators: a seam-free 3D/2D texture painter with layers, masks and emission painting, and Blender-style bone posing in the Scene view for making animations.",
   "unity": "2022.3",

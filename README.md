@@ -62,7 +62,7 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 
 - **Recolor** gives the area a new overall color. While the layer is selected, the color wheel edits it live, so you can just pick colors until it looks right.
 - **Hue / Saturation / Lightness** shifts the existing colors.
-- **Match colors** makes the area look like another one. Example for two different-colored eyes: select the eye you want to change, add a *Match colors* layer, then select the other eye and press **Use selected area as reference**.
+- **Match colors** makes the area look like another one, shade for shade (dark rim, mid tones and highlights all line up). Example for two different-colored eyes: select the eye you want to change, add a *Match colors* layer, then select the other eye and press **Use selected area as reference**.
 
 Each adjustment layer remembers its area, so you can stack one per eye, hide them, or change them later, like in Substance.
 

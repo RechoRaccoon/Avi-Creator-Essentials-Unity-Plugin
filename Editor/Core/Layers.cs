@@ -115,6 +115,8 @@ namespace AviCreatorEssentials
         public Vector4 srcMean, srcStd;          // colors of the masked area (measured)
         public Vector4 refMean, refStd;          // colors of the reference area (match mode)
         public bool refValid;
+        public float[] srcHist, refHist;          // match mode: luma/chroma histograms (3 x 256) of both areas
+        public Texture2D matchLut;               // built from the histograms (see PaintEngine.MatchLut)
 
         /// <summary>The color the color wheel edits for this layer, if it has one.</summary>
         public bool HasEditableColor => kind == LayerKind.Fill || (kind == LayerKind.Adjustment && adjMode == AdjustMode.Recolor);
@@ -138,6 +140,11 @@ namespace AviCreatorEssentials
         {
             APUtil.Release(ref content);
             APUtil.Release(ref mask);
+            if (matchLut != null)
+            {
+                Object.DestroyImmediate(matchLut);
+                matchLut = null;
+            }
             if (placement != null && placement.image != null)
             {
                 Object.DestroyImmediate(placement.image);

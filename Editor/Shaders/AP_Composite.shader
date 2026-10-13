@@ -334,6 +334,32 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         return c.z * lerp(float3(1, 1, 1), saturate(p - 1.0), c.y);
     }
 
+    float _UseLut;
+    AP_TEX(_LutTex);
+
+    float3 AP_ToYCC(float3 c)
+    {
+        float y = dot(c, float3(0.299, 0.587, 0.114));
+        return float3(y, (c.b - y) * 0.564 + 0.5, (c.r - y) * 0.713 + 0.5);
+    }
+
+    float3 AP_FromYCC(float3 q)
+    {
+        float y = q.x;
+        float r = y + (q.z - 0.5) / 0.713;
+        float b = y + (q.y - 0.5) / 0.564;
+        float g = (y - 0.299 * r - 0.114 * b) / 0.587;
+        return float3(r, g, b);
+    }
+
+    // Looks a 0..1 value up in the 256-entry table (texel centres line up with the histogram bins).
+    float AP_Lut(float x, int ch)
+    {
+        float u = saturate(x) * (255.0 / 256.0) + 0.5 / 256.0;
+        float4 t = AP_SAMPLE_LOD(_LutTex, float2(u, 0.5), 0);
+        return ch == 0 ? t.r : (ch == 1 ? t.g : t.b);
+    }
+
     float4 frag_adjust(v2f_img i) : SV_Target
     {
         float4 d = AP_SAMPLE_LOD(_MainTex, i.uv, 0);
@@ -355,6 +381,13 @@ Shader "Hidden/AviCreatorEssentials/Composite"
             hsv.y = saturate(hsv.y * (1.0 + _AdjHSL.y));
             a = AP_HSVtoRGB(hsv);
             a = (_AdjHSL.z >= 0.0) ? lerp(a, float3(1, 1, 1), _AdjHSL.z) : a * (1.0 + _AdjHSL.z);
+        }
+        else if (_RefValid > 0.5 && _UseLut > 0.5)
+        {
+            // Match: histogram matching in luma/chroma, so every shade lands on the reference's shade at the same percentile.
+            float3 q = AP_ToYCC(c);
+            q = float3(AP_Lut(q.x, 0), AP_Lut(q.y, 1), AP_Lut(q.z, 2));
+            a = AP_FromYCC(q);
         }
         else if (_RefValid > 0.5)
         {

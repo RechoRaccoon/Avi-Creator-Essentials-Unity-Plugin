@@ -331,6 +331,9 @@ namespace AviCreatorEssentials
                     comp.SetVector(APIds.RefMean, layer.refMean);
                     comp.SetVector(APIds.RefStd, layer.refStd);
                     comp.SetFloat(APIds.RefValid, layer.refValid ? 1f : 0f);
+                    var lut = layer.adjMode == AdjustMode.Match ? MatchLut(layer) : null;
+                    comp.SetFloat(APIds.UseLut, lut != null ? 1f : 0f);
+                    comp.SetTexture(APIds.LutTex, lut != null ? lut : (Texture)APResources.White);
                     Graphics.Blit(a, b, comp, CompPass.Adjust);
                     var ta = a; a = b; b = ta;
                     continue;
@@ -378,9 +381,17 @@ namespace AviCreatorEssentials
         /// Average color and spread (per channel, gamma space) of the layers below `layerIndex`, inside a region mask.
         /// Returns false when the region is empty.
         /// </summary>
-        public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std)
+        public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std) =>
+            MeasureRegion(set, layerIndex, region, out mean, out std, out _);
+
+        /// <summary>
+        /// Average, spread and luma/chroma histograms (Y, Cb, Cr; 256 bins each, normalised) of the colors under
+        /// the region, as composited by the layers below layerIndex.
+        /// </summary>
+        public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std, out float[] hist)
         {
             mean = std = Vector4.zero;
+            hist = null;
             if (region == null) return false;
             var below = new List<PaintLayer>();
             for (int i = 0; i < layerIndex && i < set.layers.Count; i++) below.Add(set.layers[i]);
@@ -402,16 +413,23 @@ namespace AviCreatorEssentials
             APUtil.Release(ref colorRT);
             APUtil.Release(ref maskRT);
             double w = 0, r = 0, g = 0, b = 0, rr = 0, gg = 0, bb = 0;
+            var h = new double[768];
             for (int i = 0; i < cp.Length && i < mp.Length; i++)
             {
                 float k = mp[i].r / 255f;
                 if (k < 0.5f) continue;
                 double cr = cp[i].r / 255.0, cg = cp[i].g / 255.0, cb = cp[i].b / 255.0;
+                ToYCC(cr, cg, cb, out double y, out double u, out double v);
+                h[Bin(y)] += 1;
+                h[256 + Bin(u)] += 1;
+                h[512 + Bin(v)] += 1;
                 w += 1;
                 r += cr; g += cg; b += cb;
                 rr += cr * cr; gg += cg * cg; bb += cb * cb;
             }
             if (w < 1) return false;
+            hist = new float[768];
+            for (int i = 0; i < 768; i++) hist[i] = (float)(h[i] / w);
             r /= w; g /= w; b /= w;
             mean = new Vector4((float)r, (float)g, (float)b, 1f);
             std = new Vector4(
@@ -422,6 +440,111 @@ namespace AviCreatorEssentials
         }
 
         /// <summary>Final texture for export, padded by the given number of texels (negative = fill everything).</summary>
+        static int Bin(double x) => Math.Min(255, Math.Max(0, (int)(x * 255.0 + 0.5)));
+
+        /// <summary>BT.601 luma/chroma of gamma RGB, with chroma moved to 0..1. Must match AP_ToYCC in AP_Composite.</summary>
+        static void ToYCC(double r, double g, double b, out double y, out double u, out double v)
+        {
+            y = 0.299 * r + 0.587 * g + 0.114 * b;
+            u = (b - y) * 0.564 + 0.5;
+            v = (r - y) * 0.713 + 0.5;
+        }
+
+        /// <summary>
+        /// Histogram matching table: for every luma and chroma value of the source area, the value at the same
+        /// percentile in the reference area. Applying it makes the area's whole color distribution (dark rim,
+        /// mid tones, highlights) match the reference, not just its average.
+        /// </summary>
+        public static Texture2D BuildMatchLut(float[] src, float[] reference)
+        {
+            if (src == null || reference == null || src.Length != 768 || reference.Length != 768) return null;
+            var lut = new Color[256];
+            var outCh = new float[3][];
+            for (int ch = 0; ch < 3; ch++)
+            {
+                var s = Smooth(src, ch * 256);
+                var r = Smooth(reference, ch * 256);
+                var sc = Cdf(s);
+                var rc = Cdf(r);
+                var o = new float[256];
+                for (int i = 0; i < 256; i++)
+                {
+                    // Percentile of this source value (centre of its bin), then the reference value there.
+                    float p = (i == 0 ? sc[0] : sc[i - 1] + sc[i]) * 0.5f;
+                    if (i == 0) p = sc[0] * 0.5f;
+                    o[i] = InverseCdf(rc, p);
+                }
+                // Keep the mapping increasing so detail never inverts.
+                for (int i = 1; i < 256; i++) o[i] = Mathf.Max(o[i], o[i - 1]);
+                outCh[ch] = o;
+            }
+            for (int i = 0; i < 256; i++) lut[i] = new Color(outCh[0][i], outCh[1][i], outCh[2][i], 1f);
+            var tex = new Texture2D(256, 1, TextureFormat.RGBAHalf, false, true)
+            {
+                name = "AP Match LUT",
+                hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            tex.SetPixels(lut);
+            tex.Apply(false);
+            return tex;
+        }
+
+        static float[] Smooth(float[] h, int offset)
+        {
+            var o = new float[256];
+            for (int i = 0; i < 256; i++)
+            {
+                float a = 0, wsum = 0;
+                for (int d = -2; d <= 2; d++)
+                {
+                    int j = i + d;
+                    if (j < 0 || j > 255) continue;
+                    float wt = 3 - Mathf.Abs(d);
+                    a += h[offset + j] * wt;
+                    wsum += wt;
+                }
+                o[i] = a / wsum;
+            }
+            return o;
+        }
+
+        static float[] Cdf(float[] h)
+        {
+            var c = new float[256];
+            float sum = 0;
+            for (int i = 0; i < 256; i++) sum += h[i];
+            float acc = 0;
+            for (int i = 0; i < 256; i++)
+            {
+                acc += h[i];
+                c[i] = sum > 0 ? acc / sum : (i + 1) / 256f;
+            }
+            return c;
+        }
+
+        /// <summary>Value (0..1) at which the cumulative distribution reaches p, interpolated within the bin.</summary>
+        static float InverseCdf(float[] c, float p)
+        {
+            for (int i = 0; i < 256; i++)
+            {
+                if (c[i] < p) continue;
+                float lo = i == 0 ? 0f : c[i - 1];
+                float t = c[i] - lo > 1e-7f ? (p - lo) / (c[i] - lo) : 0.5f;
+                return Mathf.Clamp01((i - 0.5f + t) / 255f);
+            }
+            return 1f;
+        }
+
+        /// <summary>The match table for a layer, rebuilt when its histograms change.</summary>
+        public static Texture MatchLut(PaintLayer layer)
+        {
+            if (layer.matchLut == null && layer.refValid && layer.srcHist != null && layer.refHist != null)
+                layer.matchLut = BuildMatchLut(layer.srcHist, layer.refHist);
+            return layer.matchLut;
+        }
+
         public RenderTexture CompositeForExport(TextureSet set, int padding)
         {
             EnsureBuffers(set);

@@ -286,12 +286,20 @@ namespace AviCreatorEssentials
         {
             int idx = set.layers.IndexOf(layer);
             if (idx < 0) return;
-            if (engine.MeasureRegion(set, idx, layer.mask != null ? (Texture)layer.mask : APResources.White, out var mean, out var std))
+            if (engine.MeasureRegion(set, idx, layer.mask != null ? (Texture)layer.mask : APResources.White, out var mean, out var std, out var hist))
             {
                 layer.srcMean = mean;
                 layer.srcStd = std;
+                layer.srcHist = hist;
+                ResetLut(layer);
             }
             Changed(set);
+        }
+
+        static void ResetLut(PaintLayer layer)
+        {
+            if (layer.matchLut != null) Object.DestroyImmediate(layer.matchLut);
+            layer.matchLut = null;
         }
 
         /// <summary>Match mode: the current UV selection becomes the area whose colors this layer copies.</summary>
@@ -300,12 +308,17 @@ namespace AviCreatorEssentials
             if (!set.HasSelection) return false;
             if (set.selectionDirty || set.selectionRT == null) engine.BuildSelection(set);
             int idx = set.layers.IndexOf(layer);
-            if (!engine.MeasureRegion(set, idx, set.selectionRT, out var mean, out var std)) return false;
+            if (!engine.MeasureRegion(set, idx, set.selectionRT, out var mean, out var std, out var hist)) return false;
             MeasureSource(set, layer);
-            var oldMean = layer.refMean; var oldStd = layer.refStd; bool oldValid = layer.refValid;
-            void Set(Vector4 m, Vector4 s, bool v) { layer.refMean = m; layer.refStd = s; layer.refValid = v; Changed(set); }
-            Set(mean, std, true);
-            Push(new ActionEntry("Set match reference", () => Set(oldMean, oldStd, oldValid), () => Set(mean, std, true)));
+            var oldMean = layer.refMean; var oldStd = layer.refStd; bool oldValid = layer.refValid; var oldHist = layer.refHist;
+            void Set(Vector4 m, Vector4 s, bool v, float[] h)
+            {
+                layer.refMean = m; layer.refStd = s; layer.refValid = v; layer.refHist = h;
+                ResetLut(layer);
+                Changed(set);
+            }
+            Set(mean, std, true, hist);
+            Push(new ActionEntry("Set match reference", () => Set(oldMean, oldStd, oldValid, oldHist), () => Set(mean, std, true, hist)));
             return true;
         }
 
@@ -466,6 +479,8 @@ namespace AviCreatorEssentials
                 refMean = layer.refMean,
                 refStd = layer.refStd,
                 refValid = layer.refValid,
+                srcHist = layer.srcHist,
+                refHist = layer.refHist,
                 content = engine.CloneRT(layer.content, "Layer"),
                 mask = engine.CloneRT(layer.mask, "Mask"),
             };
