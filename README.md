@@ -78,4 +78,4 @@ The painter follows Unity's light or dark skin by default. Use the half-circle b
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+GPL-3.0. See [LICENSE.md](LICENSE.md).
