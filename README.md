@@ -64,6 +64,8 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 - **Hue / Saturation / Lightness** shifts the existing colors.
 - **Match colors** makes the area look like another one, shade for shade (dark rim, mid tones and highlights all line up). Example for two different-colored eyes: select the eye you want to change, add a *Match colors* layer, then select the other eye and press **Use selected area as reference**.
 
+To make two sides identical instead, select the side that looks right and press **Mirror to other side** (next to the selection count in the Layers section). It copies that area onto its mirror image on the other side of the model as a new layer, flipped like a reflection.
+
 Each adjustment layer remembers its area, so you can stack one per eye, hide them, or change them later, like in Substance.
 
 **Images.** Import a PNG or JPG from the Layers section. Place it on the texture, or project it onto the model like a sticker.

@@ -225,7 +225,10 @@ namespace AviCreatorEssentials
             {
                 var row = W.Row("ap-row-gap", "ap-selection-note");
                 row.Add(new Icon(IconKind.Select, 14));
-                row.Add(W.Text(set.SelectedCount + " polygons selected · painting stays inside", "ap-grow"));
+                row.Add(W.Text(set.SelectedCount + " polygons selected", "ap-grow"));
+                var mirror = W.TextButton("Mirror to other side", () => MirrorSelection(set), "ap-small");
+                mirror.tooltip = "Copy the selected area onto its mirror image on the other side of the model (e.g. one eye onto the other), as a new layer";
+                row.Add(mirror);
                 row.Add(W.TextButton("Clear", () => s.ClearSelection(set), "ap-small"));
                 m_Channel.Add(row);
             }
@@ -537,8 +540,29 @@ namespace AviCreatorEssentials
             menu.AddItem("Recolor" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.Recolor, m_Ctx.primary); m_Ctx.Render(); });
             menu.AddItem("Hue / Saturation / Lightness" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.HueSatLight, Color.white); m_Ctx.Render(); });
             menu.AddItem("Match colors" + where, false, () => { S.AddAdjustmentLayer(set, AdjustMode.Match, Color.white); m_Ctx.Render(); });
+            if (set.HasSelection)
+            {
+                menu.AddSeparator("");
+                menu.AddItem("Mirror selected area to the other side", false, () => MirrorSelection(set));
+            }
             var anchor = this.Q(className: "ap-layer-actions");
             menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
+        }
+
+        void MirrorSelection(TextureSet set)
+        {
+            string msg;
+            try
+            {
+                EditorUtility.DisplayProgressBar("Avi Creator Essentials", "Mirroring to the other side…", 0.5f);
+                msg = S.MirrorSelectionToOtherSide(set);
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+            m_Ctx.Render();
+            m_Ctx.ShowHint(msg);
         }
 
         void AddMaskMenu()
