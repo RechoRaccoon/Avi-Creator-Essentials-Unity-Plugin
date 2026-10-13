@@ -138,13 +138,24 @@ namespace AviCreatorEssentials
             {
                 var prev = RenderTexture.active;
                 // fileTex holds raw gamma values (linear texture); imported textures are sRGB-decoded when sampled.
-                APUtil.CopyToGammaData(source, baseLayer.content, !set.linearData);
+                if (fileTex == null && IsPackedNormalMap(source))
+                {
+                    // Imported normal maps sample as packed data (DXT5nm/BC5); unpack to plain RGB normals.
+                    var comp = APResources.Composite;
+                    comp.SetFloat(APIds.CopyMode, 4f);
+                    comp.SetFloat(APIds.SrcToGamma, 0f);
+                    Graphics.Blit(source, baseLayer.content, comp, CompPass.Copy);
+                    comp.SetFloat(APIds.CopyMode, 0f);
+                }
+                else APUtil.CopyToGammaData(source, baseLayer.content, !set.linearData);
                 RenderTexture.active = prev;
             }
             else
             {
                 bool black = set.property.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0;
-                APUtil.Clear(baseLayer.content, black ? new Color(0, 0, 0, 1) : Color.white);
+                bool flatNormal = set.linearData && APSession.IsNormalProperty(set.property);
+                APUtil.Clear(baseLayer.content, flatNormal ? new Color(0.5f, 0.5f, 1f, 1f) : black ? new Color(0, 0, 0, 1) : Color.white);
+                if (flatNormal) baseLayer.name = "Base (flat normal)";
             }
             if (fileTex != null) Object.DestroyImmediate(fileTex);
 
@@ -155,6 +166,12 @@ namespace AviCreatorEssentials
             set.islandDirty = true;
             EnsureBuffers(set);
             NotifyChanged(set);
+        }
+
+        static bool IsPackedNormalMap(Texture t)
+        {
+            var importer = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(t)) as TextureImporter;
+            return importer != null && importer.textureType == TextureImporterType.NormalMap;
         }
 
         public RenderTexture NewContentRT(TextureSet set, Color? clear = null)
@@ -960,8 +977,13 @@ namespace AviCreatorEssentials
             var m = APResources.Paint;
             m.SetFloat(APIds.FlipX, p.flipX ? 1f : 0f);
             m.SetVector(APIds.UVTransform, new Vector4(1, 1, 0, 0));
-            if (!p.projected)
+            if (p.wrap)
             {
+                RenderWrapped(set, layer.content, p);
+            }
+            else if (!p.projected)
+            {
+                p.image.wrapMode = TextureWrapMode.Clamp;
                 if (set.islandDirty) BuildIsland(set);
                 var verts = new List<Vector3>();
                 var locals = new List<Vector2>();
@@ -983,6 +1005,7 @@ namespace AviCreatorEssentials
             else
             {
                 m_Meshes.EnsurePosed();
+                p.image.wrapMode = TextureWrapMode.Clamp;
                 var n = p.normal.sqrMagnitude > 1e-8f ? p.normal.normalized : Vector3.forward;
                 var up = Vector3.ProjectOnPlane(p.up, n);
                 if (up.sqrMagnitude < 1e-8f) up = Vector3.ProjectOnPlane(Vector3.up, n);
@@ -1017,6 +1040,49 @@ namespace AviCreatorEssentials
             }
             RenderTexture.active = prev;
             NotifyChanged(set);
+        }
+
+        /// <summary>
+        /// Projects a tiling image onto the rest-pose model from three sides (or one) and writes the result into the
+        /// texture's UV layout. Normal maps are converted into the mesh's own tangent space, so the baked map
+        /// lights exactly like the live world/local-position projection did.
+        /// </summary>
+        void RenderWrapped(TextureSet set, RenderTexture target, ImagePlacement p)
+        {
+            m_Meshes.EnsureRestMeshes();
+            var m = APResources.Paint;
+            var img = p.image;
+            img.wrapMode = TextureWrapMode.Repeat;
+            img.filterMode = FilterMode.Trilinear;
+            float rad = p.rotation * Mathf.Deg2Rad;
+            m.SetTexture(APIds.MainTex, img);
+            m.SetVector(APIds.UVTransform, new Vector4(1, 1, 0, 0));
+            m.SetInt(APIds.UVChannel, set.uvChannel);
+            m.SetFloat(APIds.WrapSize, Mathf.Max(1e-4f, p.tileSize));
+            m.SetFloat(APIds.WrapSharp, Mathf.Clamp(p.sharpness, 1f, 64f));
+            m.SetFloat(APIds.WrapAxis, p.axis);
+            m.SetVector(APIds.WrapOffset, p.wrapOffset);
+            m.SetVector(APIds.WrapRot, new Vector4(Mathf.Cos(rad), Mathf.Sin(rad), 0, 0));
+            m.SetFloat(APIds.WrapNormal, p.normalMap ? 1f : 0f);
+            m.SetFloat(APIds.WrapStrength, p.normalStrength);
+            m.SetFloat(APIds.WrapGreenDown, p.greenDown ? 1f : 0f);
+            m.SetFloat(APIds.FlipX, p.flipX ? 1f : 0f);
+            m.SetFloat(APIds.WrapImageAspect, img.width / (float)Mathf.Max(1, img.height));
+            Graphics.SetRenderTarget(target);
+            GL.Clear(false, true, new Color(0, 0, 0, 0));
+            // Conservative first so thin triangles get covered, then the exact pass on top for clean interiors.
+            int[] passes = PaintPass.UseConservative ? new[] { PaintPass.WrapConservative, PaintPass.Wrap } : new[] { PaintPass.Wrap };
+            foreach (int pass in passes)
+            {
+                foreach (var u in set.users)
+                {
+                    if (u.renderer < 0 || u.renderer >= m_Meshes.entries.Count) continue;
+                    var e = m_Meshes.entries[u.renderer];
+                    if (e.restMesh == null || u.submesh >= e.SubmeshCount) continue;
+                    m.SetPass(pass);
+                    Graphics.DrawMeshNow(e.restMesh, Matrix4x4.identity, u.submesh);
+                }
+            }
         }
 
         // ================================================================== 2D view

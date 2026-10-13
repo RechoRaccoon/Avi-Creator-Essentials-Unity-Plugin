@@ -185,6 +185,27 @@ namespace AviCreatorEssentials
             return tex;
         }
 
+        /// <summary>True when a (readable) image is mostly the light blue of a tangent-space normal map.</summary>
+        public static bool LooksLikeNormalMap(Texture2D t)
+        {
+            if (t == null || !t.isReadable) return false;
+            int mip = Mathf.Max(0, t.mipmapCount - 7);
+            Color32[] px;
+            try { px = t.GetPixels32(mip); }
+            catch (Exception) { return false; }
+            if (px.Length == 0) return false;
+            int step = Mathf.Max(1, px.Length / 65536);
+            double r = 0, g = 0, b = 0;
+            int n = 0;
+            for (int i = 0; i < px.Length; i += step)
+            {
+                r += px[i].r; g += px[i].g; b += px[i].b;
+                n++;
+            }
+            r /= n * 255.0; g /= n * 255.0; b /= n * 255.0;
+            return b > 0.7 && Math.Abs(r - 0.5) < 0.15 && Math.Abs(g - 0.5) < 0.15;
+        }
+
         /// <summary>Converts any texture (asset or runtime) to a readable linear RGBA32 texture holding gamma values.</summary>
         public static Texture2D ToGammaTexture(Texture src, int maxSize = 8192)
         {

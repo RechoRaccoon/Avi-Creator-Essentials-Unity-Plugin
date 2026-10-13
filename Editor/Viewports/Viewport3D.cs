@@ -856,7 +856,7 @@ namespace AviCreatorEssentials
             m_ImageSet = set;
             m_ImageDrag = shift ? ImageDrag.Scale : ctrl ? ImageDrag.Rotate : ImageDrag.Move;
             m_Drag = Drag.Image;
-            if (m_ImageDrag == ImageDrag.Move) MoveImageTo(m_Mouse);
+            if (m_ImageDrag == ImageDrag.Move && !layer.placement.wrap) MoveImageTo(m_Mouse);
         }
 
         void MoveImageTo(Vector2 local)
@@ -889,6 +889,11 @@ namespace AviCreatorEssentials
         void DragImage(Vector2 delta)
         {
             var s = ctx.session;
+            if (m_ImageLayer.placement.wrap)
+            {
+                DragWrapped(delta);
+                return;
+            }
             switch (m_ImageDrag)
             {
                 case ImageDrag.Move:
@@ -902,6 +907,37 @@ namespace AviCreatorEssentials
                         pl.depth = Mathf.Max(pl.depth, pl.worldWidth * 0.25f);
                         pl.uvSize *= k;
                     });
+                    break;
+                case ImageDrag.Rotate:
+                    s.EditPlacement(m_ImageSet, m_ImageLayer, "rotate", pl => pl.rotation = Mathf.Repeat(pl.rotation + delta.x * 0.5f + 180f, 360f) - 180f);
+                    break;
+            }
+            ctx.Render();
+        }
+
+        /// <summary>Wrapped images: drag slides the texture over the model, Shift scales, Ctrl rotates.</summary>
+        void DragWrapped(Vector2 delta)
+        {
+            var s = ctx.session;
+            switch (m_ImageDrag)
+            {
+                case ImageDrag.Move:
+                {
+                    var cam = Cam;
+                    var root = s.meshes.projectionRoot;
+                    var inv = root != null ? Quaternion.Inverse(root.rotation) : Quaternion.identity;
+                    var right = inv * (cam.rotation * Vector3.right);
+                    var up = inv * (cam.rotation * Vector3.up);
+                    s.EditPlacement(m_ImageSet, m_ImageLayer, "slide", pl =>
+                    {
+                        float k = pl.tileSize * 0.004f;
+                        pl.wrapOffset -= (right * delta.x - up * delta.y) * k;
+                    });
+                    break;
+                }
+                case ImageDrag.Scale:
+                    float f = Mathf.Exp((delta.x - delta.y) * 0.006f);
+                    s.EditPlacement(m_ImageSet, m_ImageLayer, "tile size", pl => pl.tileSize = Mathf.Clamp(pl.tileSize * f, 0.005f, 5f));
                     break;
                 case ImageDrag.Rotate:
                     s.EditPlacement(m_ImageSet, m_ImageLayer, "rotate", pl => pl.rotation = Mathf.Repeat(pl.rotation + delta.x * 0.5f + 180f, 360f) - 180f);

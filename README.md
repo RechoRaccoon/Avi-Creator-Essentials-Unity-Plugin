@@ -68,6 +68,13 @@ Each adjustment layer remembers its area, so you can stack one per eye, hide the
 
 **Images.** Import a PNG or JPG from the Layers section. Place it on the texture, or project it onto the model like a sticker.
 
+**Wrapping a texture around the model (cardboard, fabric, scales...).** Shader options like Poiyomi's *World Pos* or *Local Pos* make a tiling texture flow over the model without UV seams, but it slides when the avatar moves. Layers › image button › **Wrap tiling texture around the model…** does the same projection once, on the avatar's rest pose, and writes it into each material's own UV layout, so it looks the same but stays stuck to the model.
+
+- Normal maps are detected automatically and go into each material's normal map slot (one is added if a material has none). They are converted to each mesh's tangent space, so the bumps light correctly everywhere, and the blend mode *Normal map combine* keeps the material's own normal detail underneath.
+- Pick **Every material** so the pattern lines up across body and clothes. Edits to one copy change them all (turn off *Same settings on all materials* to change one alone).
+- With the Image tool, drag on the model to slide the pattern, Shift-drag to scale it and Ctrl-drag to rotate it. The Image panel also has tile size, blend sharpness, one-side projection (Side / Top / Front, like a planar Local Pos), bump strength and a DirectX green-channel switch.
+- Press **Bake** to save the finished textures and put them on the avatar. Then set the material's normal map UV mode back to UV0 in Poiyomi.
+
 **Custom brushes.** Click **+** after the brush tips and pick a PNG or JPG. White (or opaque) areas paint.
 
 **Saving and baking.** **Save** keeps your layers in an `AviCreatorEssentialsProjects` folder next to `Assets`. **Bake** writes finished PNGs to `Assets/Avi Creator Essentials Data/Baked` and can put them on your avatar using copies of your materials.

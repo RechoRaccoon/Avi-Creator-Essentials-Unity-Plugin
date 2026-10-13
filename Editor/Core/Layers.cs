@@ -41,6 +41,7 @@ namespace AviCreatorEssentials
         Saturation,
         Color,
         Luminosity,
+        NormalCombine,  // layers normal-map detail on top of the normal map below (reoriented normal mapping)
     }
 
     /// <summary>Where and how an image layer's picture sits on the texture or model.</summary>
@@ -63,6 +64,20 @@ namespace AviCreatorEssentials
         public float worldWidth = 0.1f;
         public float depth = 0.05f;     // half thickness of the projection box
         public float angleLimit = 80f;  // faces turned further than this from the projection do not receive the image
+
+        // wrapped placement: a tiling texture projected from all sides in the avatar's rest pose (triplanar),
+        // so it looks the same as a world/local-position projection but stays stuck to the model
+        public bool wrap;
+        public float tileSize = 0.25f;      // world size of one repeat of the image, metres
+        public float sharpness = 4f;        // how quickly the side projections hand over to each other
+        public int axis = -1;               // -1 all sides, 0 side (X), 1 top (Y), 2 front (Z)
+        public Vector3 wrapOffset;
+        public bool normalMap;              // the image is a tangent-space normal map
+        public float normalStrength = 1f;
+        public bool greenDown;              // DirectX-style normal map (green channel points down)
+        public bool linked = true;          // edits apply to the same texture wrapped on other materials
+
+        public int Mode => wrap ? 2 : projected ? 1 : 0;
 
         [NonSerialized] public Texture2D image;
         public string imageFile;        // file name inside the project folder when saved

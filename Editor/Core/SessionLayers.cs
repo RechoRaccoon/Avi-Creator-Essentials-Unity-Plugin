@@ -116,20 +116,35 @@ namespace AviCreatorEssentials
         public void EditPlacement(TextureSet set, PaintLayer layer, string what, Action<ImagePlacement> change)
         {
             if (layer.placement == null) return;
-            var before = layer.placement.Clone();
-            change(layer.placement);
-            var after = layer.placement.Clone();
-            engine.RenderImageLayer(set, layer);
+            // Linked wrapped layers (the same texture wrapped around several materials) change together.
+            var targets = new List<(TextureSet set, PaintLayer layer)> { (set, layer) };
+            if (layer.placement.wrap && layer.placement.linked)
+                foreach (var sib in WrapSiblings(layer))
+                    if (sib.layer.placement.linked) targets.Add(sib);
+            var before = new ImagePlacement[targets.Count];
+            var after = new ImagePlacement[targets.Count];
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var (ts, tl) = targets[i];
+                before[i] = tl.placement.Clone();
+                change(tl.placement);
+                after[i] = tl.placement.Clone();
+                engine.RenderImageLayer(ts, tl);
+            }
             string key = layer.id + "/placement/" + what;
             double now = UnityEditor.EditorApplication.timeSinceStartup;
-            void Restore(ImagePlacement p)
+            void Restore(ImagePlacement[] states)
             {
-                if (layer.placement == null) return;
-                var img = layer.placement.image;
-                layer.placement = p.Clone();
-                layer.placement.image = img;
-                engine.RenderImageLayer(set, layer);
-                Changed(set);
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    var (ts, tl) = targets[i];
+                    if (tl.placement == null) continue;
+                    var img = tl.placement.image;
+                    tl.placement = states[i].Clone();
+                    tl.placement.image = img;
+                    engine.RenderImageLayer(ts, tl);
+                    Changed(ts);
+                }
             }
             if (history.Top is MergeableEntry top && top.key == key && now - top.time < 1.5)
             {
@@ -138,9 +153,9 @@ namespace AviCreatorEssentials
             }
             else
             {
-                Push(new MergeableEntry { Name = "Move image", key = key, time = now, undo = () => Restore(before), redo = () => Restore(after) });
+                Push(new MergeableEntry { Name = layer.placement.wrap ? "Edit wrapped texture" : "Move image", key = key, time = now, undo = () => Restore(before), redo = () => Restore(after) });
             }
-            Changed(set);
+            foreach (var t in targets) Changed(t.set);
         }
 
         // ------------------------------------------------------------------ add / remove
@@ -295,7 +310,7 @@ namespace AviCreatorEssentials
         }
 
         /// <summary>Adds an image layer. The image must be a gamma-value texture (see APUtil.ToGammaTexture).</summary>
-        public PaintLayer AddImageLayer(TextureSet set, Texture2D image, ImagePlacement placement)
+        public PaintLayer AddImageLayer(TextureSet set, Texture2D image, ImagePlacement placement, LayerBlendMode blend = LayerBlendMode.Normal)
         {
             if (!set.initialized) InitializeSet(set);
             placement.image = image;
@@ -304,11 +319,113 @@ namespace AviCreatorEssentials
                 name = image != null ? image.name : UniqueName(set, "Image"),
                 kind = LayerKind.Image,
                 placement = placement,
+                blend = blend,
             };
             layer.content = engine.NewContentRT(set);
             engine.RenderImageLayer(set, layer);
             InsertLayer(set, layer, InsertIndex(set), "Add image");
             return layer;
+        }
+
+        /// <summary>
+        /// The textures a wrapped image should go into: each material's normal map slot (created if the material has
+        /// none yet) for normal maps, otherwise its main texture.
+        /// </summary>
+        public List<TextureSet> WrapTargets(TextureSet from, bool allMaterials, bool normal, out int skipped)
+        {
+            skipped = 0;
+            var reps = new List<TextureSet>();
+            var seen = new HashSet<Material>();
+            foreach (var s in allMaterials ? new List<TextureSet>(sets) : new List<TextureSet> { from })
+                if (s != null && s.originalMaterial != null && seen.Add(s.originalMaterial)) reps.Add(s);
+            var result = new List<TextureSet>();
+            bool created = false;
+            foreach (var rep in reps)
+            {
+                string prop = normal ? NormalProperty(rep.cloneMaterial) : DefaultProperty(rep.cloneMaterial);
+                if (prop == null)
+                {
+                    skipped++;
+                    continue;
+                }
+                TextureSet target = null;
+                foreach (var s in sets)
+                    if (s.originalMaterial == rep.originalMaterial && s.property == prop) { target = s; break; }
+                if (target == null)
+                {
+                    target = CreateSiblingSet(rep, prop);
+                    created = true;
+                }
+                if (!target.initialized) InitializeSet(target);
+                result.Add(target);
+            }
+            if (created) StructureChanged?.Invoke();
+            return result;
+        }
+
+        /// <summary>Adds one wrapped image layer per texture. Normal maps are layered over the existing normal map.</summary>
+        public List<PaintLayer> AddWrapLayers(IList<TextureSet> targets, Texture2D image, ImagePlacement template)
+        {
+            var added = new List<PaintLayer>();
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var t = targets[i];
+                var img = image;
+                if (i > 0)
+                {
+                    img = Object.Instantiate(image);
+                    img.name = image.name;
+                    img.hideFlags = HideFlags.HideAndDontSave;
+                }
+                var p = template.Clone();
+                p.wrap = true;
+                p.projected = false;
+                var blend = p.normalMap && IsNormalMap(t) ? LayerBlendMode.NormalCombine : LayerBlendMode.Normal;
+                added.Add(AddImageLayer(t, img, p, blend));
+            }
+            return added;
+        }
+
+        /// <summary>Other wrapped layers made from the same image (one per material).</summary>
+        public List<(TextureSet set, PaintLayer layer)> WrapSiblings(PaintLayer layer)
+        {
+            var list = new List<(TextureSet, PaintLayer)>();
+            if (layer?.placement == null || !layer.placement.wrap) return list;
+            foreach (var s in sets)
+                foreach (var l in s.layers)
+                    if (l != layer && l.kind == LayerKind.Image && l.placement != null && l.placement.wrap && l.name == layer.name)
+                        list.Add((s, l));
+            return list;
+        }
+
+        /// <summary>Copies a wrapped layer's size, rotation, offset and normal settings to its siblings.</summary>
+        public void SyncWrapSettings(PaintLayer layer)
+        {
+            if (layer?.placement == null) return;
+            var v = layer.placement.Clone();
+            void Copy(ImagePlacement p)
+            {
+                p.tileSize = v.tileSize;
+                p.sharpness = v.sharpness;
+                p.axis = v.axis;
+                p.wrapOffset = v.wrapOffset;
+                p.rotation = v.rotation;
+                p.flipX = v.flipX;
+                p.normalMap = v.normalMap;
+                p.normalStrength = v.normalStrength;
+                p.greenDown = v.greenDown;
+                p.linked = v.linked;
+            }
+            if (v.linked)
+            {
+                // A linked edit reaches every sibling at once.
+                TextureSet owner = null;
+                foreach (var s in sets)
+                    if (s.layers.Contains(layer)) { owner = s; break; }
+                if (owner != null) EditPlacement(owner, layer, "wrap sync", Copy);
+                return;
+            }
+            foreach (var (s, l) in WrapSiblings(layer)) EditPlacement(s, l, "wrap sync", Copy);
         }
 
         public void DeleteLayer(TextureSet set, PaintLayer layer)
@@ -581,7 +698,7 @@ namespace AviCreatorEssentials
             set.selection.Clear();
             set.selectionDirty = true;
             foreach (var l in set.layers)
-                if (l.kind == LayerKind.Image && l.placement != null && l.placement.projected) engine.RenderImageLayer(set, l);
+                if (l.kind == LayerKind.Image && l.placement != null && (l.placement.projected || l.placement.wrap)) engine.RenderImageLayer(set, l);
             Changed(set);
         }
     }

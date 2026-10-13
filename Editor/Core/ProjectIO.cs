@@ -488,6 +488,7 @@ namespace AviCreatorEssentials
             else
             {
                 imp.textureCompression = TextureImporterCompression.CompressedHQ;
+                if (APSession.IsNormalMap(set)) imp.textureType = TextureImporterType.NormalMap;
             }
             imp.SaveAndReimport();
         }
@@ -509,6 +510,7 @@ namespace AviCreatorEssentials
                 pm.SetTexture(set.property, kv.Value);
                 if (set.createdProperty && set.property.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0)
                     APSession.EnableEmission(pm);
+                if (APSession.IsNormalMap(set)) APSession.EnableNormalMap(pm);
                 EditorUtility.SetDirty(pm);
             }
 

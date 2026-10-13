@@ -29,6 +29,7 @@ namespace AviCreatorEssentials
         public Mesh sharedMesh;
         public Mesh paintMesh;            // posed vertices + original UVs/indices, rendered into UV space
         public Mesh bakeTemp;
+        public Mesh restMesh;             // rest-pose vertices, normals and tangents in avatar-root space (for wrapped textures)
         public Matrix4x4 matrix = Matrix4x4.identity;
         public Vector3[] worldVerts = Array.Empty<Vector3>();
         public Vector3[] worldNormals = Array.Empty<Vector3>();
@@ -297,13 +298,98 @@ namespace AviCreatorEssentials
             return result;
         }
 
+        // ------------------------------------------------------------------ rest-pose meshes
+
+        /// <summary>Runs the given work with the avatar in its rest pose, then puts the pose back. Set by the session.</summary>
+        public Action<Action> runAtRest;
+        /// <summary>Avatar root; rest meshes are stored relative to it so every mesh shares one space.</summary>
+        public Transform projectionRoot;
+        bool m_RestBuilt;
+
+        public void InvalidateRest() => m_RestBuilt = false;
+
+        /// <summary>
+        /// Builds a rest-pose copy of every mesh in avatar-root space. Wrapped textures are projected onto these, so
+        /// the result does not depend on the current pose and lines up across body and clothing.
+        /// </summary>
+        public void EnsureRestMeshes()
+        {
+            if (m_RestBuilt) return;
+            m_RestBuilt = true;
+            void Build()
+            {
+                var rootM = projectionRoot != null
+                    ? Matrix4x4.TRS(projectionRoot.position, projectionRoot.rotation, Vector3.one).inverse
+                    : Matrix4x4.identity;
+                foreach (var e in entries)
+                {
+                    if (e.renderer == null) continue;
+                    Vector3[] v, n;
+                    Vector4[] t;
+                    Matrix4x4 m;
+                    if (e.skinned != null)
+                    {
+                        e.skinned.BakeMesh(e.bakeTemp, true);
+                        v = e.bakeTemp.vertices;
+                        n = e.bakeTemp.normals;
+                        t = e.bakeTemp.tangents;
+                        var tr = e.skinned.transform;
+                        m = Matrix4x4.TRS(tr.position, tr.rotation, Vector3.one);
+                    }
+                    else
+                    {
+                        v = e.sharedMesh.vertices;
+                        n = e.sharedMesh.normals;
+                        t = e.sharedMesh.tangents;
+                        m = e.renderer.transform.localToWorldMatrix;
+                    }
+                    if (v.Length != e.paintMesh.vertexCount) continue;
+                    m = rootM * m;
+                    var nm = m.inverse.transpose;
+                    float handed = m.determinant < 0f ? -1f : 1f;
+                    var pv = new Vector3[v.Length];
+                    var pn = new Vector3[v.Length];
+                    bool hasN = n != null && n.Length == v.Length;
+                    bool hasT = t != null && t.Length == v.Length;
+                    var pt = hasT ? new Vector4[v.Length] : null;
+                    for (int i = 0; i < v.Length; i++)
+                    {
+                        pv[i] = m.MultiplyPoint3x4(v[i]);
+                        if (hasN) pn[i] = nm.MultiplyVector(n[i]).normalized;
+                        if (hasT)
+                        {
+                            var d = m.MultiplyVector(new Vector3(t[i].x, t[i].y, t[i].z)).normalized;
+                            pt[i] = new Vector4(d.x, d.y, d.z, (t[i].w < 0f ? -1f : 1f) * handed);
+                        }
+                    }
+                    if (e.restMesh == null)
+                    {
+                        e.restMesh = Object.Instantiate(e.paintMesh);
+                        e.restMesh.name = "AP Rest " + e.sharedMesh.name;
+                        e.restMesh.hideFlags = HideFlags.HideAndDontSave;
+                    }
+                    var rm = e.restMesh;
+                    rm.vertices = pv;
+                    if (hasN) rm.normals = pn;
+                    else rm.RecalculateNormals();
+                    if (hasT) rm.tangents = pt;
+                    else rm.RecalculateTangents();
+                    rm.RecalculateBounds();
+                }
+            }
+            if (runAtRest != null) runAtRest(Build);
+            else Build();
+        }
+
         public void Dispose()
         {
             foreach (var e in entries)
             {
                 if (e.paintMesh != null) Object.DestroyImmediate(e.paintMesh);
                 if (e.bakeTemp != null) Object.DestroyImmediate(e.bakeTemp);
+                if (e.restMesh != null) Object.DestroyImmediate(e.restMesh);
             }
+            m_RestBuilt = false;
             entries.Clear();
             m_IslandCache.Clear();
             m_Bvh.Clear();

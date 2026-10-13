@@ -18,6 +18,8 @@ namespace AviCreatorEssentials
         public const int Stamp3DConservative = 7;
         public const int CoverageConservative = 8;
         public const int DecalConservative = 9;
+        public const int Wrap = 10;
+        public const int WrapConservative = 11;
 
         public static bool UseConservative => SystemInfo.supportsConservativeRaster;
         public static int Stamp3DPass => UseConservative ? Stamp3DConservative : Stamp3D;
@@ -46,6 +48,15 @@ namespace AviCreatorEssentials
     internal static class APIds
     {
         public static readonly int MainTex = Shader.PropertyToID("_MainTex");
+        public static readonly int WrapSize = Shader.PropertyToID("_WrapSize");
+        public static readonly int WrapSharp = Shader.PropertyToID("_WrapSharp");
+        public static readonly int WrapAxis = Shader.PropertyToID("_WrapAxis");
+        public static readonly int WrapOffset = Shader.PropertyToID("_WrapOffset");
+        public static readonly int WrapRot = Shader.PropertyToID("_WrapRot");
+        public static readonly int WrapNormal = Shader.PropertyToID("_WrapNormal");
+        public static readonly int WrapStrength = Shader.PropertyToID("_WrapStrength");
+        public static readonly int WrapGreenDown = Shader.PropertyToID("_WrapGreenDown");
+        public static readonly int WrapImageAspect = Shader.PropertyToID("_WrapImageAspect");
         public static readonly int LayerTex = Shader.PropertyToID("_LayerTex");
         public static readonly int MaskTex = Shader.PropertyToID("_MaskTex");
         public static readonly int StrokeTex = Shader.PropertyToID("_StrokeTex");

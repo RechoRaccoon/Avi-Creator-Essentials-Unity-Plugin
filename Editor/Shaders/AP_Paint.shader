@@ -180,6 +180,116 @@ Shader "Hidden/AviCreatorEssentials/Paint"
             c.a *= step(0.5, AP_SAMPLE_LOD(_IslandTex, i.uv, 0).r);
         return c;
     }
+
+    // ---------------- tiling image wrapped around the rest-pose model (triplanar) ----------------
+    // Same idea as a shader's world/local-position mapping, but evaluated once on the rest pose and written into the
+    // texture's own UV layout, so it stays stuck to the model when it moves.
+    float _WrapSize;        // world size of one repeat
+    float _WrapSharp;       // blend sharpness between the three projections
+    float _WrapAxis;        // -1 = all three sides, 0/1/2 = only X/Y/Z
+    float3 _WrapOffset;
+    float4 _WrapRot;        // cos, sin of the image rotation
+    float _WrapNormal;      // 1: the image is a tangent-space normal map
+    float _WrapStrength;
+    float _WrapGreenDown;
+    float _WrapImageAspect; // image width / height
+
+    struct ap_appdata_wrap
+    {
+        float4 vertex : POSITION;
+        float3 normal : NORMAL;
+        float4 tangent : TANGENT;
+        float4 uv0 : TEXCOORD0;
+        float4 uv1 : TEXCOORD1;
+        float4 uv2 : TEXCOORD2;
+        float4 uv3 : TEXCOORD3;
+    };
+
+    struct v2f_wrap
+    {
+        float4 pos : SV_POSITION;
+        float3 wpos : TEXCOORD0;
+        float3 wnrm : TEXCOORD1;
+        float4 wtan : TEXCOORD2;
+    };
+
+    v2f_wrap vert_wrap(ap_appdata_wrap v)
+    {
+        v2f_wrap o;
+        float2 uv = v.uv0.xy;
+        if (_UVChannel == 1) uv = v.uv1.xy;
+        else if (_UVChannel == 2) uv = v.uv2.xy;
+        else if (_UVChannel == 3) uv = v.uv3.xy;
+        o.pos = AP_UVToClip(uv);
+        o.wpos = mul(unity_ObjectToWorld, float4(v.vertex.xyz, 1.0)).xyz;
+        o.wnrm = UnityObjectToWorldNormal(v.normal);
+        o.wtan = float4(UnityObjectToWorldDir(v.tangent.xyz), v.tangent.w);
+        return o;
+    }
+
+    // Plane coordinates -> image coordinates (rotation, aspect, flip).
+    float2 WrapUV(float2 pl)
+    {
+        float2 r = float2(pl.x * _WrapRot.x - pl.y * _WrapRot.y, pl.x * _WrapRot.y + pl.y * _WrapRot.x);
+        r.y *= _WrapImageAspect;
+        if (_FlipX > 0.5) r.x = -r.x;
+        return r;
+    }
+
+    // Samples the normal map and expresses it along the plane's own axes (undoing WrapUV's transform).
+    float3 WrapSampleNormal(float2 pl)
+    {
+        float3 n = AP_SAMPLE(_MainTex, WrapUV(pl)).rgb * 2.0 - 1.0;
+        if (_WrapGreenDown > 0.5) n.y = -n.y;
+        n.xy *= _WrapStrength;
+        if (_FlipX > 0.5) n.x = -n.x;
+        n.y *= _WrapImageAspect;
+        n.xy = float2(_WrapRot.x * n.x + _WrapRot.y * n.y, -_WrapRot.y * n.x + _WrapRot.x * n.y);
+        return normalize(float3(n.xy, max(n.z, 1e-4)));
+    }
+
+    float4 frag_wrap(v2f_wrap i) : SV_Target
+    {
+        float3 N = normalize(i.wnrm);
+        float3 p = (i.wpos + _WrapOffset) / max(_WrapSize, 1e-5);
+
+        float3 w;
+        if (_WrapAxis < -0.5) w = pow(abs(N), _WrapSharp);
+        else w = float3(_WrapAxis < 0.5 ? 1.0 : 0.0, abs(_WrapAxis - 1.0) < 0.5 ? 1.0 : 0.0, _WrapAxis > 1.5 ? 1.0 : 0.0);
+        w /= max(w.x + w.y + w.z, 1e-6);
+
+        // Mirror the projection on the back sides so the image never reads backwards.
+        float3 sgn = float3(N.x < 0.0 ? -1.0 : 1.0, N.y < 0.0 ? -1.0 : 1.0, N.z < 0.0 ? -1.0 : 1.0);
+        float2 plX = float2(p.z * sgn.x, p.y);
+        float2 plY = float2(p.x * sgn.y, p.z);
+        float2 plZ = float2(-p.x * sgn.z, p.y);
+
+        if (_WrapNormal < 0.5)
+        {
+            float4 c = AP_SAMPLE(_MainTex, WrapUV(plX)) * w.x
+                     + AP_SAMPLE(_MainTex, WrapUV(plY)) * w.y
+                     + AP_SAMPLE(_MainTex, WrapUV(plZ)) * w.z;
+            return c;
+        }
+
+        // Whiteout-blended triplanar normal (world space).
+        float3 tX = WrapSampleNormal(plX); tX.x *= sgn.x;
+        float3 tY = WrapSampleNormal(plY); tY.x *= sgn.y;
+        float3 tZ = WrapSampleNormal(plZ); tZ.x *= -sgn.z;
+        tX = float3(tX.xy + N.zy, abs(tX.z) * N.x);
+        tY = float3(tY.xy + N.xz, abs(tY.z) * N.y);
+        tZ = float3(tZ.xy + N.xy, abs(tZ.z) * N.z);
+        float3 W = normalize(tX.zyx * w.x + tY.xzy * w.y + tZ.xyz * w.z);
+
+        // Into this mesh's tangent space, the same frame the avatar shader will decode it with.
+        float3 T = i.wtan.xyz - N * dot(N, i.wtan.xyz);
+        if (dot(T, T) < 1e-10)
+            T = abs(N.y) < 0.99 ? cross(float3(0, 1, 0), N) : cross(float3(1, 0, 0), N);
+        T = normalize(T);
+        float3 B = cross(N, T) * (i.wtan.w < 0.0 ? -1.0 : 1.0);
+        float3 ts = normalize(float3(dot(W, T), dot(W, B), dot(W, N)));
+        return float4(ts * 0.5 + 0.5, 1.0);
+    }
     ENDCG
 
     SubShader
@@ -304,6 +414,29 @@ Shader "Hidden/AviCreatorEssentials/Paint"
             #pragma target 4.5
             #pragma vertex ap_vert_uv
             #pragma fragment frag_decal
+            ENDCG
+        }
+
+        // 10 - wrapped (triplanar) image on the rest-pose mesh
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_wrap
+            #pragma fragment frag_wrap
+            ENDCG
+        }
+
+        // 11 - wrapped image, conservative
+        Pass
+        {
+            Blend Off
+            Conservative True
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_wrap
+            #pragma fragment frag_wrap
             ENDCG
         }
     }

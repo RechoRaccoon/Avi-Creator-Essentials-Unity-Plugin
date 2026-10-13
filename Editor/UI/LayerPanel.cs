@@ -99,7 +99,7 @@ namespace AviCreatorEssentials
         static readonly List<string> s_BlendNames = new List<string>
         {
             "Normal", "Multiply", "Screen", "Overlay", "Soft light", "Hard light", "Darken", "Lighten", "Color dodge",
-            "Color burn", "Add", "Subtract", "Difference", "Hue", "Saturation", "Color", "Luminosity",
+            "Color burn", "Add", "Subtract", "Difference", "Hue", "Saturation", "Color", "Luminosity", "Normal map combine",
         };
 
         APSession S => m_Ctx.session;
@@ -125,7 +125,7 @@ namespace AviCreatorEssentials
             actions.Add(W.IconButton(IconKind.FillLayer, "New fill layer (solid color). Painting on it reveals it through a mask.", () =>
                 S.AddFillLayer(Set, m_Ctx.primary, true)));
             actions.Add(W.IconButton(IconKind.Theme, "New adjustment layer: recolor, hue/saturation, or match colors. Uses the current UV selection as its area.", AdjustmentMenu));
-            actions.Add(W.IconButton(IconKind.Image, "Import an image as a new layer", ImportImage));
+            actions.Add(W.IconButton(IconKind.Image, "Import an image: place it on the texture, project it onto the model, or wrap a tiling texture (like a normal map) around the whole model", ImageMenu));
             actions.Add(W.IconButton(IconKind.Mask, "Add a mask to the selected layer", AddMaskMenu));
             actions.Add(W.IconButton(IconKind.Duplicate, "Duplicate layer", () => { if (Set?.ActiveLayer != null) S.DuplicateLayer(Set, Set.ActiveLayer); }));
             actions.Add(W.IconButton(IconKind.Merge, "Merge down", () => { if (Set?.ActiveLayer != null) S.MergeDown(Set, Set.ActiveLayer); }));
@@ -556,6 +556,68 @@ namespace AviCreatorEssentials
             menu.AddItem("Black mask (hide all)", false, () => S.AddMask(set, layer, 0f));
             var anchor = this.Q(className: "ap-layer-actions");
             menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
+        }
+
+        void ImageMenu()
+        {
+            if (Set == null) return;
+            var menu = new GenericDropdownMenu();
+            menu.AddItem("Image layer (place on texture or model)…", false, ImportImage);
+            menu.AddItem("Wrap tiling texture around the model…", false, ImportWrapTexture);
+            var anchor = this.Q(className: "ap-layer-actions");
+            menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
+        }
+
+        /// <summary>
+        /// Wraps a tiling image (cardboard, fabric, a normal map...) around the model from every side and bakes it into
+        /// the UV layout, like a shader's world/local position mapping but stuck to the model.
+        /// </summary>
+        public void ImportWrapTexture()
+        {
+            var set = Set;
+            if (set == null) return;
+            string path = EditorUtility.OpenFilePanelWithFilters("Wrap a texture around the model", EditorPrefs.GetString("AviCreatorEssentials.LastImageDir", ""),
+                new[] { "Images", "png,jpg,jpeg", "All files", "*" });
+            if (string.IsNullOrEmpty(path)) return;
+            EditorPrefs.SetString("AviCreatorEssentials.LastImageDir", Path.GetDirectoryName(path));
+            var tex = APUtil.LoadImageFile(path);
+            if (tex == null)
+            {
+                EditorUtility.DisplayDialog("Avi Creator Essentials", "That file couldn't be read as a PNG or JPG image.", "OK");
+                return;
+            }
+            bool normal = APUtil.LooksLikeNormalMap(tex) || APSession.IsNormalMap(set);
+            string what = normal
+                ? "This looks like a normal map, so it goes into the materials' normal map slots (one is added where a material has none), on top of any normal map already there."
+                : "The image goes into the materials' main textures as a new layer.";
+            int choice = EditorUtility.DisplayDialogComplex("Wrap texture around the model",
+                what + "\n\nWrap it around every material, or only " + (set.originalMaterial != null ? set.originalMaterial.name : "this material") + "?",
+                "Every material", "Cancel", "Only this material");
+            if (choice == 1)
+            {
+                UnityEngine.Object.DestroyImmediate(tex);
+                return;
+            }
+            var targets = S.WrapTargets(set, choice == 0, normal, out int skipped);
+            if (targets.Count == 0)
+            {
+                UnityEngine.Object.DestroyImmediate(tex);
+                EditorUtility.DisplayDialog("Avi Creator Essentials", normal
+                    ? "None of these materials' shaders has a normal map slot."
+                    : "None of these materials has a texture slot to paint.", "OK");
+                return;
+            }
+            var p = new ImagePlacement { wrap = true, normalMap = normal };
+            var b = S.meshes.VisibleBounds();
+            p.tileSize = Mathf.Clamp(b.size.y * 0.15f, 0.02f, 1f);
+            S.AddWrapLayers(targets, tex, p);
+            var show = targets.Find(t => t.originalMaterial == set.originalMaterial) ?? targets[0];
+            S.ActiveSet = show;
+            m_Ctx.Tool = PaintTool.Image;
+            m_Ctx.Render();
+            m_Ctx.ShowHint("Wrapped onto " + targets.Count + (targets.Count == 1 ? " texture" : " textures") +
+                           (skipped > 0 ? " (" + skipped + " skipped: no " + (normal ? "normal map" : "texture") + " slot)" : "") +
+                           ". Drag on the model to slide it, Shift-drag to scale, Ctrl-drag to rotate, then Bake.");
         }
 
         public void ImportImage()

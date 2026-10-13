@@ -43,6 +43,12 @@ Shader "Hidden/AviCreatorEssentials/Composite"
     {
         float4 c = AP_SAMPLE_LOD(_MainTex, i.uv, 0);
         if (_SrcToGamma > 0.5) c.rgb = LinearToGammaSpace(c.rgb);
+        if (_CopyMode > 3.5)
+        {
+            // packed normal map (DXT5nm / BC5) -> plain RGB normal
+            float3 n = UnpackNormalmapRGorAG(c);
+            return float4(n * 0.5 + 0.5, 1);
+        }
         if (_CopyMode > 2.5)
         {
             float l = dot(c.rgb, float3(0.299, 0.587, 0.114)) * c.a;
@@ -126,6 +132,14 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         if (mode == 14) return AP_SetLum(AP_SetSat(b, AP_Sat(s)), AP_Lum(b));
         if (mode == 15) return AP_SetLum(s, AP_Lum(b));
         if (mode == 16) return AP_SetLum(b, AP_Lum(s));
+        if (mode == 17)
+        {
+            // Reoriented normal mapping: the layer's bumps follow the normal map underneath.
+            float3 t = b * float3(2, 2, 2) + float3(-1, -1, 0);
+            float3 u = s * float3(-2, -2, 2) + float3(1, 1, -1);
+            float3 r = t * dot(t, u) / max(t.z, 1e-4) - u;
+            return normalize(r) * 0.5 + 0.5;
+        }
         return s;
     }
 

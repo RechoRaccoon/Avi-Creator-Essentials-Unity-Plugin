@@ -161,6 +161,19 @@ namespace AviCreatorEssentials
             pose = new PoseSystem();
             pose.Build(clone.transform, m_HumanPaths);
             BuildLinker();
+            meshes.projectionRoot = clone.transform;
+            meshes.runAtRest = work =>
+            {
+                var saved = pose.Capture();
+                pose.Restore(pose.RestSnapshot(), false);
+                if (view.linkClothing && linker != null) linker.Apply();
+                try { work(); }
+                finally
+                {
+                    pose.Restore(saved, false);
+                    if (view.linkClothing && linker != null) linker.Apply();
+                }
+            };
             pose.PoseChanged += () =>
             {
                 if (view.linkClothing && linker != null) linker.Apply();
@@ -391,6 +404,50 @@ namespace AviCreatorEssentials
             return null;
         }
 
+        /// <summary>The material's normal map property, if its shader has one.</summary>
+        public static string NormalProperty(Material m)
+        {
+            var props = TextureProperties(m);
+            foreach (var candidate in new[] { "_BumpMap", "_NormalMap", "_MainNormal", "_BumpTex" })
+                if (props.Contains(candidate)) return candidate;
+            foreach (var p in props)
+            {
+                if (p.IndexOf("Normal", StringComparison.OrdinalIgnoreCase) < 0 && p.IndexOf("Bump", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (p.IndexOf("Detail", StringComparison.OrdinalIgnoreCase) >= 0 || p.IndexOf("Mask", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                return p;
+            }
+            return null;
+        }
+
+        public static bool IsNormalProperty(string property)
+        {
+            string p = property.ToLowerInvariant();
+            return (p.Contains("bump") || p.Contains("normal")) && !p.Contains("mask");
+        }
+
+        /// <summary>True for a tangent-space normal map set.</summary>
+        public static bool IsNormalMap(TextureSet set)
+        {
+            if (set == null || !set.linearData) return false;
+            if (set.originalTexture != null)
+            {
+                var importer = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(set.originalTexture)) as TextureImporter;
+                if (importer != null) return importer.textureType == TextureImporterType.NormalMap;
+            }
+            return IsNormalProperty(set.property);
+        }
+
+        /// <summary>Makes sure the shader actually uses the normal map (Standard needs a keyword; Poiyomi and lilToon have toggles).</summary>
+        public static void EnableNormalMap(Material m)
+        {
+            if (m == null) return;
+            m.EnableKeyword("_NORMALMAP");
+            foreach (var toggle in new[] { "_UseBumpMap", "_UseNormalMap" })
+                if (m.HasProperty(toggle) && m.shader.FindPropertyIndex(toggle) >= 0 &&
+                    m.shader.GetPropertyType(m.shader.FindPropertyIndex(toggle)) != ShaderPropertyType.Texture)
+                    m.SetFloat(toggle, 1f);
+        }
+
         public static bool IsEmission(TextureSet set) =>
             set != null && set.property.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0;
 
@@ -506,6 +563,7 @@ namespace AviCreatorEssentials
             engine.InitializeSet(set, view.preferSourceFiles);
             // A new emission map only glows once it exists, so emission is switched on now rather than at startup.
             if (set.createdProperty && IsEmission(set)) EnableEmission(set.cloneMaterial);
+            if (IsNormalMap(set)) EnableNormalMap(set.cloneMaterial);
             engine.UpdateBounds(set);
             AssignDisplay(set);
             StructureChanged?.Invoke();

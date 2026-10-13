@@ -408,15 +408,14 @@ namespace AviCreatorEssentials
             style.display = DisplayStyle.Flex;
             var p = layer.placement;
 
-            Add(new W.Segmented(new[] { "On the texture", "Projected on model" }, () => p.projected ? 1 : 0, i =>
+            Add(new W.Segmented(new[] { "On texture", "Projected", "Wrapped" }, () => p.Mode, i =>
             {
-                bool proj = i == 1;
-                if (proj == p.projected) return;
-                if (proj && p.worldWidth <= 0f) p.worldWidth = 0.1f;
+                if (i == p.Mode) return;
                 s.EditPlacement(set, layer, "mode", pl =>
                 {
-                    pl.projected = proj;
-                    if (proj && pl.worldPos == Vector3.zero)
+                    pl.wrap = i == 2;
+                    pl.projected = i == 1;
+                    if (i == 1 && pl.worldPos == Vector3.zero)
                     {
                         var b = s.meshes.VisibleBounds();
                         pl.worldPos = b.center + Vector3.forward * b.extents.z;
@@ -428,7 +427,18 @@ namespace AviCreatorEssentials
                 });
                 m_Ctx.Render();
                 Rebuild();
-            }, new[] { "Lay the image out in texture space (like an overlay in the 2D view)", "Shine the image onto the model like a projector, across seams" }));
+            }, new[]
+            {
+                "Lay the image out in texture space (like an overlay in the 2D view)",
+                "Shine the image onto the model like a projector, across seams",
+                "Tile the image around the whole model from every side (like a shader's world/local position mapping), baked so it sticks to the model",
+            }));
+
+            if (p.wrap)
+            {
+                BuildWrap(s, set, layer, p);
+                return;
+            }
 
             Add(W.Text(p.projected
                 ? "With the Image tool, drag on the model to place it. Shift-drag scales, Ctrl-drag rotates."
@@ -483,6 +493,65 @@ namespace AviCreatorEssentials
                     Rebuild();
                 }, "ap-small"));
             }
+            row.Add(W.TextButton("Rasterize", () => s.RasterizeImage(set, layer), "ap-small"));
+            Add(row);
+        }
+
+        void BuildWrap(APSession s, TextureSet set, PaintLayer layer, ImagePlacement p)
+        {
+            Add(W.Text("Tiles the image around the model from every side, like Poiyomi's World Pos / Local Pos mapping, but " +
+                       "worked out on the rest pose and written into this texture's UVs, so it sticks to the model when it moves. " +
+                       "With the Image tool: drag on the model to slide it, Shift-drag to scale, Ctrl-drag to rotate.", "ap-hint"));
+
+            void Edit(string what, Action<ImagePlacement> change)
+            {
+                s.EditPlacement(set, layer, what, change);
+                m_Ctx.Render();
+            }
+
+            Add(new W.Segmented(new[] { "All sides", "Side", "Top", "Front" }, () => p.axis + 1, i =>
+            {
+                Edit("wrap axis", pl => pl.axis = i - 1);
+                Rebuild();
+            }, new[]
+            {
+                "Project from all six sides and blend between them (triplanar). Best for most textures.",
+                "Project only from the left/right (X), like a planar local-position mapping",
+                "Project only from above/below (Y)",
+                "Project only from the front/back (Z)",
+            }));
+            Add(new W.SliderRow("Tile size (cm)", 0.005f, 2f, () => p.tileSize, v => Edit("tile size", pl => pl.tileSize = v), 100f,
+                "How much of the model one copy of the image covers", true));
+            if (p.axis < 0)
+                Add(new W.SliderRow("Blend sharpness", 1f, 32f, () => p.sharpness, v => Edit("wrap blend", pl => pl.sharpness = v), 1f,
+                    "Low values blend the sides softly; high values give crisp hand-overs", true));
+            Add(new W.SliderRow("Rotation", -180f, 180f, () => p.rotation, v => Edit("rotate", pl => pl.rotation = v)));
+            Add(new W.ToggleRow("Flip horizontally", () => p.flipX, v => Edit("flip", pl => pl.flipX = v)));
+            Add(new W.ToggleRow("Image is a normal map", () => p.normalMap, v => { Edit("normal map", pl => pl.normalMap = v); Rebuild(); },
+                "Treat the image as a tangent-space normal map: it's re-oriented for every part of the model so the bumps light correctly"));
+            if (p.normalMap)
+            {
+                Add(new W.SliderRow("Bump strength", 0f, 4f, () => p.normalStrength, v => Edit("bump strength", pl => pl.normalStrength = v), 100f));
+                Add(new W.ToggleRow("Green channel down (DirectX)", () => p.greenDown, v => Edit("green", pl => pl.greenDown = v),
+                    "Turn on if the bumps look like dents. Normal maps made for DirectX/Unreal have green flipped compared to Unity."));
+                if (!APSession.IsNormalMap(set))
+                    Add(W.Text("This layer is on a color texture, so you'll see the normal map's colors instead of bumps. " +
+                               "Wrap it again from the Layers image button to put it in the normal map slot.", "ap-hint"));
+                else if (layer.blend != LayerBlendMode.NormalCombine)
+                    Add(W.Text("Tip: blend mode \"Normal map combine\" keeps the material's own normal map detail underneath.", "ap-hint"));
+            }
+
+            var siblings = s.WrapSiblings(layer);
+            if (siblings.Count > 0)
+                Add(new W.ToggleRow("Same settings on all " + (siblings.Count + 1) + " materials", () => p.linked, v =>
+                {
+                    // Turning linking back on lines every copy up with this one.
+                    p.linked = v;
+                    foreach (var sib in siblings) sib.layer.placement.linked = v;
+                    if (v) s.SyncWrapSettings(layer);
+                    m_Ctx.Render();
+                }, "Sliding, scaling or changing this layer changes the same texture on the other materials too, so seams between body and clothes line up"));
+            var row = W.Row("ap-row-gap");
             row.Add(W.TextButton("Rasterize", () => s.RasterizeImage(set, layer), "ap-small"));
             Add(row);
         }

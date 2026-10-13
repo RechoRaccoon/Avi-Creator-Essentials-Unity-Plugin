@@ -501,7 +501,7 @@ namespace AviCreatorEssentials
         ImagePlacement ActiveUVImage(out PaintLayer layer)
         {
             layer = Set?.ActiveLayer;
-            if (layer == null || layer.kind != LayerKind.Image || layer.placement == null || layer.placement.projected) return null;
+            if (layer == null || layer.kind != LayerKind.Image || layer.placement == null || layer.placement.projected || layer.placement.wrap) return null;
             return layer.placement;
         }
 
@@ -536,7 +536,9 @@ namespace AviCreatorEssentials
             if (p == null)
             {
                 ctx.ShowHint(Set?.ActiveLayer != null && Set.ActiveLayer.kind == LayerKind.Image
-                    ? "This image is projected onto the model. Move it in the 3D view, or switch it to texture placement in the Image panel."
+                    ? (Set.ActiveLayer.placement != null && Set.ActiveLayer.placement.wrap
+                        ? "This image is wrapped around the model. Slide, scale and rotate it in the 3D view or the Image panel."
+                        : "This image is projected onto the model. Move it in the 3D view, or switch it to texture placement in the Image panel.")
                     : "Select an image layer, or use Import Image in the Layers panel.");
                 return;
             }
