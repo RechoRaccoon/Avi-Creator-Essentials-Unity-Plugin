@@ -276,7 +276,7 @@ namespace AviCreatorEssentials
             m_DragStart = m_DragLast = m_Mouse;
 
             if (evt.button == 0 && alt) BeginNav(Drag.Orbit);
-            else if (evt.button == 2) BeginNav(alt ? Drag.Orbit : ctrl ? Drag.Zoom : Drag.Pan);
+            else if (evt.button == 2) BeginNav(ctrl ? Drag.Zoom : Drag.Pan);
             else if (evt.button == 1)
             {
                 if (ctrl && !ctx.PoseMode) BeginBrushSize();

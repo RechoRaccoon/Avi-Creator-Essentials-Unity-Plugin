@@ -1278,8 +1278,8 @@ namespace AviCreatorEssentials
             }
             Group("View", new[,]
             {
-                { "Right-drag / Alt+Middle-drag / Alt+Left-drag", "Orbit (around the point under the cursor)" },
-                { "Middle-drag / Shift+Right-drag", "Pan" },
+                { "Right-drag / Alt+Left-drag", "Orbit (around the point under the cursor)" },
+                { "Middle-drag (with or without Alt) / Shift+Right-drag", "Pan" },
                 { "Scroll / Alt+Right-drag / Ctrl+Middle-drag", "Zoom" },
                 { "F", "Frame the avatar (or fit the texture in the 2D view)" },
                 { "Tab", "Switch between painting and posing" },
