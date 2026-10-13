@@ -157,7 +157,8 @@ namespace AviCreatorEssentials
                         if (s <= 0f) continue;
                         ca /= s; cb /= s; cc /= s;
                         var P = Mirror(t.a * ca + t.b * cb + t.c * cc) + offset;
-                        if (!grid.Closest(P, maxDist, out int si, out Vector3 bary)) continue;
+                        if (!grid.Closest(P, maxDist * 0.1f, out int si, out Vector3 bary) &&
+                            !grid.Closest(P, maxDist, out si, out bary)) continue;
                         var st = source[si];
                         var suv = st.ua * bary.x + st.ub * bary.y + st.uc * bary.z;
                         outPx[y * w + x] = SampleBilinear(src, w, h, suv);
@@ -191,71 +192,33 @@ namespace AviCreatorEssentials
         {
             if (set == null) return "Pick a material first.";
             if (!set.initialized) InitializeSet(set);
-            int w = set.width, h = set.height;
+            // Done on the GPU in one pass, so it's instant at any texture size and any selection size.
             var exportRT = engine.CompositeForExport(set, 16);
-            var srcTex = APUtil.ReadToTexture(exportRT);
-            APUtil.Release(ref exportRT);
-            var src = srcTex.GetPixels32();
-            Object.DestroyImmediate(srcTex);
-
-            byte[] sel = null;
+            bool useSel = false;
             if (set.HasSelection)
             {
                 if (set.selectionDirty || set.selectionRT == null) engine.BuildSelection(set);
-                if (set.selectionRT != null)
-                {
-                    var st = APUtil.ReadToTexture(set.selectionRT);
-                    var sp = st.GetPixels32();
-                    Object.DestroyImmediate(st);
-                    sel = new byte[sp.Length];
-                    for (int i = 0; i < sp.Length; i++) sel[i] = sp[i].r;
-                }
+                useSel = set.selectionRT != null;
             }
+            var comp = APResources.Composite;
+            var content = engine.NewContentRT(set);
+            comp.SetFloat(APIds.MirrorMode, (float)mode);
+            comp.SetFloat(APIds.UseSel, useSel ? 1f : 0f);
+            comp.SetTexture(APIds.SelTex, useSel ? (Texture)set.selectionRT : APResources.White);
+            var prev = RenderTexture.active;
+            exportRT.filterMode = FilterMode.Point;
+            Graphics.Blit(exportRT, content, comp, CompPass.Mirror);
+            RenderTexture.active = prev;
+            comp.SetFloat(APIds.UseSel, 0f);
+            APUtil.Release(ref exportRT);
+            bool sel = useSel;
 
-            bool horizontal = mode == TextureMirror.LeftToRight || mode == TextureMirror.RightToLeft;
-            var outPx = new Color32[w * h];
-            int written = 0;
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    int sx = horizontal ? w - 1 - x : x;
-                    int sy = horizontal ? y : h - 1 - y;
-                    int si = sy * w + sx;
-                    if (sel != null)
-                    {
-                        // Copy the selected area onto its flipped position.
-                        if (sel[si] < 128) continue;
-                    }
-                    else
-                    {
-                        // Destination half only.
-                        bool dest = mode == TextureMirror.LeftToRight ? x >= w / 2
-                            : mode == TextureMirror.RightToLeft ? x < w / 2
-                            : mode == TextureMirror.BottomToTop ? y >= h / 2
-                            : y < h / 2;
-                        if (!dest) continue;
-                    }
-                    var c = src[si];
-                    c.a = 255;
-                    outPx[y * w + x] = c;
-                    written++;
-                }
-            }
-            if (written == 0) return "Nothing to copy.";
-
-            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave };
-            tex.SetPixels32(outPx);
-            tex.Apply(false);
             string label = mode == TextureMirror.LeftToRight ? "Left → right" : mode == TextureMirror.RightToLeft ? "Right → left"
                 : mode == TextureMirror.BottomToTop ? "Bottom → top" : "Top → bottom";
-            var layer = new PaintLayer { name = UniqueName(set, "Mirrored " + label), kind = LayerKind.Paint };
-            layer.content = engine.NewContentRT(set);
-            APUtil.Copy(tex, layer.content);
-            Object.DestroyImmediate(tex);
+            var layer = new PaintLayer { name = UniqueName(set, "Mirrored " + label), kind = LayerKind.Paint, content = content };
             InsertLayer(set, layer, set.layers.Count, "Mirror texture");
             Changed(set);
-            return sel != null
+            return sel
                 ? "Copied the selected area to the mirrored spot on the texture, as a new layer. Erase parts of it or delete the layer to undo."
                 : "Mirrored " + label.ToLowerInvariant() + " as a new layer on top. Erase the parts you want to keep different, or delete the layer to undo.";
         }
@@ -310,16 +273,19 @@ namespace AviCreatorEssentials
             readonly float m_Cell;
             readonly int m_N;
             readonly List<int>[] m_Cells;
+            readonly int[] m_Stamp;     // per-triangle query id, so no allocation per query
+            int m_Query;
 
             public TriGrid(List<Tri> tris, Vector3 min, Vector3 max)
             {
                 m_Tris = tris;
                 var size = max - min;
                 float extent = Mathf.Max(size.x, Mathf.Max(size.y, size.z), 1e-4f);
-                m_N = Mathf.Clamp(Mathf.CeilToInt(Mathf.Pow(tris.Count, 1f / 3f) * 1.5f), 1, 48);
+                m_N = Mathf.Clamp(Mathf.CeilToInt(Mathf.Pow(tris.Count, 1f / 3f) * 2f), 1, 96);
                 m_Cell = extent / m_N * 1.0001f;
                 m_Min = min;
                 m_Cells = new List<int>[m_N * m_N * m_N];
+                m_Stamp = new int[tris.Count];
                 for (int i = 0; i < tris.Count; i++)
                 {
                     var t = tris[i];
@@ -352,7 +318,7 @@ namespace AviCreatorEssentials
                 var gmax = m_Min + Vector3.one * (m_Cell * m_N);
                 if (p.x < m_Min.x - maxDist || p.y < m_Min.y - maxDist || p.z < m_Min.z - maxDist ||
                     p.x > gmax.x + maxDist || p.y > gmax.y + maxDist || p.z > gmax.z + maxDist) return false;
-                HashSet<int> seen = null;
+                m_Query++;
                 for (int z = lo.z; z <= hi.z; z++)
                     for (int y = lo.y; y <= hi.y; y++)
                         for (int x = lo.x; x <= hi.x; x++)
@@ -361,8 +327,8 @@ namespace AviCreatorEssentials
                             if (list == null) continue;
                             foreach (int i in list)
                             {
-                                if (seen == null) seen = new HashSet<int>();
-                                if (!seen.Add(i)) continue;
+                                if (m_Stamp[i] == m_Query) continue;
+                                m_Stamp[i] = m_Query;
                                 var t = m_Tris[i];
                                 var q = ClosestOnTriangle(p, t.a, t.b, t.c, out var b);
                                 float d = (q - p).sqrMagnitude;

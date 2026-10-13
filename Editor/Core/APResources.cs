@@ -43,11 +43,13 @@ namespace AviCreatorEssentials
         public const int Over = 11;
         public const int Remap = 12;
         public const int Adjust = 13;
+        public const int Mirror = 14;
     }
 
     internal static class APIds
     {
         public static readonly int MainTex = Shader.PropertyToID("_MainTex");
+        public static readonly int MirrorMode = Shader.PropertyToID("_MirrorMode");
         public static readonly int UseLut = Shader.PropertyToID("_UseLut");
         public static readonly int LutTex = Shader.PropertyToID("_LutTex");
         public static readonly int WrapSize = Shader.PropertyToID("_WrapSize");

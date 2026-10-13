@@ -398,6 +398,29 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         return float4(lerp(c, a, k), d.a);
     }
 
+    // ---------------- mirror (flip half the texture, or the selection, onto the other side) ----------------
+    float _MirrorMode;    // 0 left->right, 1 right->left, 2 bottom->top, 3 top->bottom
+
+    float4 frag_mirror(v2f_img i) : SV_Target
+    {
+        bool horizontal = _MirrorMode < 1.5;
+        float2 suv = horizontal ? float2(1.0 - i.uv.x, i.uv.y) : float2(i.uv.x, 1.0 - i.uv.y);
+        float keep;
+        if (_UseSel > 0.5)
+        {
+            // Selected area -> its flipped spot.
+            keep = step(0.5, AP_SAMPLE_LOD(_SelTex, suv, 0).r);
+        }
+        else
+        {
+            float d = horizontal ? i.uv.x : i.uv.y;
+            keep = (_MirrorMode < 0.5 || (_MirrorMode > 1.5 && _MirrorMode < 2.5)) ? step(0.5, d) : step(d, 0.5);
+        }
+        if (keep < 0.5) return 0;
+        float4 c = AP_SAMPLE_LOD(_MainTex, suv, 0);
+        return float4(c.rgb, 1.0);
+    }
+
     // ---------------- misc ----------------
     float4 frag_unpremultiply(v2f_img i) : SV_Target
     {
@@ -570,6 +593,17 @@ Shader "Hidden/AviCreatorEssentials/Composite"
             #pragma target 4.5
             #pragma vertex vert_img
             #pragma fragment frag_adjust
+            ENDCG
+        }
+
+        // 14 mirror
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_img
+            #pragma fragment frag_mirror
             ENDCG
         }
     }

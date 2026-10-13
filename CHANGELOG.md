@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4
+
+- Mirror texture runs on the GPU in a single pass: instant at any texture size, with any number of selected polygons.
+- The 3D "other side of the model" mirror no longer slows to a crawl with large selections.
+
 ## 0.5.3
 
 - Mirror the texture: copy the left half onto the right (or right onto left, top/bottom) as a new layer, from the Layers "⋯" menu. With a UV selection, the selected area is copied to its flipped spot on the texture instead.
