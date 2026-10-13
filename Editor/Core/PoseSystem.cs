@@ -23,6 +23,7 @@ namespace AviCreatorEssentials
         public Quaternion restRootRot;   // rest rotation relative to the avatar root
         public Vector3 restRootPos;
         public Bone tailChild;           // child the bone points at, or null for leaves
+        public bool linkHidden;          // a clothing bone that follows a body bone (not drawn or picked)
         public Vector3 leafTail;         // local-space tail offset for leaves
 
         public string Name => t != null ? t.name : "(missing)";
@@ -262,6 +263,23 @@ namespace AviCreatorEssentials
             }
             foreach (var b in bones) ComputeTail(b);
             Restore(current, false);
+        }
+
+        /// <summary>Hides clothing bones that just follow a body bone, so only one skeleton is drawn and picked.</summary>
+        public void SetLinkHidden(Func<Transform, bool> hidden)
+        {
+            foreach (var b in bones) b.linkHidden = hidden != null && hidden(b.t);
+            // Bones pointing at a hidden child should point at a visible one instead.
+            foreach (var b in bones)
+            {
+                if (b.tailChild != null && b.tailChild.linkHidden)
+                {
+                    Bone alt = null;
+                    foreach (var c in b.children)
+                        if (!c.linkHidden && (alt == null || c.descendants > alt.descendants)) alt = c;
+                    if (alt != null) b.tailChild = alt;
+                }
+            }
         }
 
         public void Select(Bone b)

@@ -520,6 +520,8 @@ namespace AviCreatorEssentials
             Add(new W.ToggleRow("Humanoid bones only", () => m_Ctx.view.humanoidOnly, v => { m_Ctx.view.humanoidOnly = v; m_Ctx.view.Save(); m_Ctx.Render(); },
                 "Hide hair, clothing and accessory bones"));
             Add(new W.SliderRow("Bone size", 0.3f, 3f, () => m_Ctx.view.boneSize, v => { m_Ctx.view.boneSize = v; m_Ctx.view.Save(); m_Ctx.Render(); }, 100f));
+            m_LinkRow = W.Column();
+            Add(m_LinkRow);
 
             Add(W.Text("Saved poses", "ap-subtle-heading"));
             var saveRow = W.Row("ap-row-gap");
@@ -590,8 +592,27 @@ namespace AviCreatorEssentials
             RefreshBone();
         }
 
+        VisualElement m_LinkRow;
+
+        void RefreshLink()
+        {
+            if (m_LinkRow == null) return;
+            m_LinkRow.Clear();
+            var linker = m_Ctx.session?.linker;
+            if (linker == null || !linker.HasClothing) return;
+            m_LinkRow.Add(new W.ToggleRow("Clothing follows the body (like VRCFury)", () => m_Ctx.view.linkClothing, v =>
+            {
+                m_Ctx.view.linkClothing = v;
+                m_Ctx.view.Save();
+                m_Ctx.session.ApplyLinkSetting();
+                m_Ctx.Render();
+            }, "Bones of separate clothing armatures follow the body bones with the same names. Clothing-only bones follow their parents."));
+            m_LinkRow.Add(W.Text(linker.Summary(), "ap-hint"));
+        }
+
         public void RefreshBone()
         {
+            RefreshLink();
             m_BoneBox.Clear();
             var s = m_Ctx.session;
             var b = s?.pose.selected;

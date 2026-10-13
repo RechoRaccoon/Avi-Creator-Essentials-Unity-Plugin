@@ -67,6 +67,17 @@ The *Bone Posing* panel also has reset bone or whole pose (back to the model's r
 
 Shortcuts: **Alt+R** resets the bone's rotation, **Alt+G** resets its position, and the handle follows Unity's Local/Global setting.
 
+To stop posing, press **Exit posing** in the panel or switch to any other tool (**W**, **E**, **R**...).
+
+### Clothing armatures
+
+Outfits often come with their own copy of the armature (Hoodie › Armature › Hips › ...). Posing finds these automatically and pairs their bones with the body's by name, the same way VRCFury's Armature Link does. It handles names like `Hoodie_Spine` or `Spine.001`, and outfits that skip a bone such as UpperChest. Bones that only exist on the outfit, like hoodie strings or skirt bones, stay attached to their parent and move with it.
+
+- **Keep clothing in sync** (on by default): clothing follows the body live while you pose or scrub an animation, without changing your hierarchy. Only the body bones need keys; at upload, VRCFury merges the outfit as usual.
+- **Merge into body armature…** really parents the clothing bones under the body bones, for setups that don't use VRCFury. Prefabs are unpacked first because Unity requires it. Ctrl+Z undoes the whole merge, and **Unmerge clothing** puts everything back (until Unity is restarted).
+
+The Avatar Painter's posing uses the same matching (*Clothing follows the body* in its Pose panel), so outfits stay on while you pose for painting.
+
 ## Themes
 
 The painter follows Unity's light or dark skin by default. Use the half-circle button in its toolbar, or Viewport › Theme, to force Dark or Light.

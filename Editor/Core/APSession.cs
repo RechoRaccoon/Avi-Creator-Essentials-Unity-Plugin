@@ -45,6 +45,7 @@ namespace AviCreatorEssentials
         public PaintEngine engine;
         public History history;
         public PoseSystem pose;
+        public ArmatureLinker linker;
         public readonly List<TextureSet> sets = new List<TextureSet>();
         TextureSet m_ActiveSet;
 
@@ -159,14 +160,49 @@ namespace AviCreatorEssentials
 
             pose = new PoseSystem();
             pose.Build(clone.transform, m_HumanPaths);
+            BuildLinker();
             pose.PoseChanged += () =>
             {
+                if (view.linkClothing && linker != null) linker.Apply();
                 meshes.MarkPoseDirty();
                 PoseEdited?.Invoke();
             };
 
             BuildTextureSets();
             if (sets.Count > 0) ActiveSet = sets[0];
+        }
+
+        void BuildLinker()
+        {
+            Transform hips = null;
+            foreach (var kv in m_HumanPaths)
+                if (kv.Value == HumanBodyBones.Hips) hips = APUtil.FindPath(clone.transform, kv.Key);
+            linker = ArmatureLinker.Detect(clone.transform, hips);
+            // Offsets come from the model's rest pose (prefab/FBX values of the scene avatar), so it works even if posed.
+            var src = sourceAvatar.transform;
+            linker.CaptureOffsets(t =>
+            {
+                var st = APUtil.FindPath(src, APUtil.GetPath(t, clone.transform));
+                if (st == null) return null;
+                var o = PrefabUtility.GetCorrespondingObjectFromOriginalSource(st);
+                if (o == null || o == st) return null;
+                return (o.localRotation, o.localPosition);
+            });
+            ApplyLinkSetting();
+        }
+
+        /// <summary>Turns clothing armature linking on or off for the painter's copy.</summary>
+        public void ApplyLinkSetting()
+        {
+            bool on = view.linkClothing && linker != null && linker.HasClothing;
+            pose.SetLinkHidden(on ? (Func<Transform, bool>)linker.IsLinkedClothBone : null);
+            if (on)
+            {
+                linker.Apply();
+                meshes.MarkPoseDirty();
+            }
+            if (pose.selected != null && pose.selected.linkHidden) pose.Select(null);
+            PoseEdited?.Invoke();
         }
 
         Light CreateLight(string name)

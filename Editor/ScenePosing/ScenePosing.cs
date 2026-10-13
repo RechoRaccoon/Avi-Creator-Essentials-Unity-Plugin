@@ -13,13 +13,40 @@ namespace AviCreatorEssentials
     /// Which avatar the Scene view bone tool is working on, and its armature.
     /// Edits go through Unity's Undo, so the Animation window records them while in record mode.
     /// </summary>
+    [InitializeOnLoad]
     public static class ScenePoseState
     {
         const string PrefKey = "AviCreatorEssentials.ScenePose.";
+        const string SessionAvatarKey = "AviCreatorEssentials.ScenePose.Avatar";
+        const string SessionMergeKey = "AviCreatorEssentials.ScenePose.Merged.";
 
         static Transform s_Avatar;
         static PoseSystem s_Pose;
+        static ArmatureLinker s_Linker;
         static bool s_Dirty = true;
+        static readonly HashSet<Transform> s_MergedCloth = new HashSet<Transform>();
+
+        /// <summary>Clothing armatures follow the body bones live, without changing the hierarchy.</summary>
+        public static bool SyncClothing
+        {
+            get => EditorPrefs.GetBool(PrefKey + "SyncClothing", true);
+            set
+            {
+                EditorPrefs.SetBool(PrefKey + "SyncClothing", value);
+                s_Dirty = true;
+                Changed?.Invoke();
+                SceneView.RepaintAll();
+            }
+        }
+
+        public static ArmatureLinker Linker
+        {
+            get
+            {
+                var p = Pose;
+                return p != null ? s_Linker : null;
+            }
+        }
 
         public static bool RotateMode
         {
@@ -51,7 +78,22 @@ namespace AviCreatorEssentials
         {
             EditorApplication.hierarchyChanged += () => s_Dirty = true;
             Selection.selectionChanged += OnSelectionChanged;
-            Undo.undoRedoPerformed += () => Changed?.Invoke();
+            Undo.undoRedoPerformed += () => { s_Dirty = true; Changed?.Invoke(); };
+            EditorApplication.update += SyncTick;
+            EditorApplication.delayCall += () =>
+            {
+                int id = SessionState.GetInt(SessionAvatarKey, 0);
+                if (id != 0 && s_Avatar == null) s_Avatar = EditorUtility.InstanceIDToObject(id) as Transform;
+            };
+        }
+
+        /// <summary>Keeps clothing bones on their body bones every editor frame (also while scrubbing animations).</summary>
+        static void SyncTick()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode || s_Avatar == null || !SyncClothing) return;
+            var linker = Linker;
+            if (linker == null || !linker.HasClothing) return;
+            if (linker.Apply()) SceneView.RepaintAll();
         }
 
         public static Transform Avatar => s_Avatar;
@@ -89,6 +131,7 @@ namespace AviCreatorEssentials
             if (root != null && root != s_Avatar)
             {
                 s_Avatar = root;
+                SessionState.SetInt(SessionAvatarKey, root.GetInstanceID());
                 s_Dirty = true;
             }
             Changed?.Invoke();
@@ -107,6 +150,7 @@ namespace AviCreatorEssentials
         public static void SetAvatar(Transform root)
         {
             s_Avatar = root;
+            SessionState.SetInt(SessionAvatarKey, root != null ? root.GetInstanceID() : 0);
             s_Dirty = true;
             Changed?.Invoke();
         }
@@ -135,6 +179,147 @@ namespace AviCreatorEssentials
             s_Pose = new PoseSystem();
             s_Pose.Build(s_Avatar, human);
             s_Pose.SetRest(RestOf);
+
+            Transform hips = null;
+            foreach (var kv in human)
+                if (kv.Value == HumanBodyBones.Hips) hips = APUtil.FindPath(s_Avatar, kv.Key);
+            s_Linker = ArmatureLinker.Detect(s_Avatar, hips);
+            s_Linker.CaptureOffsets(t =>
+            {
+                var o = PrefabUtility.GetCorrespondingObjectFromOriginalSource(t);
+                if (o == null || o == t) return null;
+                return (o.localRotation, o.localPosition);
+            });
+            LoadMergeRecord();
+            bool sync = SyncClothing && s_Linker.HasClothing;
+            s_Pose.SetLinkHidden(t => (sync && s_Linker.IsLinkedClothBone(t)) || IsMergedCloth(t));
+        }
+
+        static bool IsMergedCloth(Transform t)
+        {
+            if (t == null) return false;
+            if (s_MergedCloth.Contains(t)) return true;
+            // A bone sitting directly under a body bone of the same name was merged earlier (by us or by hand).
+            var p = t.parent;
+            return p != null && ArmatureLinker.Norm(t.name, "", "") == ArmatureLinker.Norm(p.name, "", "") &&
+                   p.parent != null && t.GetComponent<SkinnedMeshRenderer>() == null;
+        }
+
+        // ------------------------------------------------------------------ merging
+
+        [Serializable]
+        class MergeEntry
+        {
+            public int child;
+            public int oldParent;
+            public int siblingIndex;
+        }
+
+        [Serializable]
+        class MergeRecord
+        {
+            public List<MergeEntry> entries = new List<MergeEntry>();
+        }
+
+        static string MergeKey => SessionMergeKey + (s_Avatar != null ? s_Avatar.GetInstanceID().ToString() : "none");
+
+        static void LoadMergeRecord()
+        {
+            s_MergedCloth.Clear();
+            var json = SessionState.GetString(MergeKey, "");
+            if (string.IsNullOrEmpty(json)) return;
+            var rec = JsonUtility.FromJson<MergeRecord>(json);
+            foreach (var e in rec.entries)
+                if (EditorUtility.InstanceIDToObject(e.child) is Transform t) s_MergedCloth.Add(t);
+        }
+
+        public static bool CanUnmerge => !string.IsNullOrEmpty(SessionState.GetString(MergeKey, ""));
+
+        /// <summary>
+        /// Really parents every matching clothing bone under its body bone (what VRCFury does at upload time).
+        /// Extra clothing-only bones keep their clothing parent, which now lives on the body. Undoable.
+        /// </summary>
+        public static void MergeClothing()
+        {
+            var linker = Linker;
+            if (linker == null || !linker.HasClothing) return;
+            var root = s_Avatar.gameObject;
+            bool isPrefab = PrefabUtility.IsPartOfPrefabInstance(root) ||
+                            root.GetComponentsInChildren<Transform>(true).Length > 0 && AnyPrefabInstance(root);
+            string msg = "Parent " + linker.LinkCount + " clothing bones under the matching bones of the body armature?\n\n" +
+                         "Clothing-only bones (strings, skirt bones...) stay attached to their clothing parent, which moves onto the body.";
+            if (isPrefab)
+                msg += "\n\nThis avatar is (or contains) a prefab instance. Unity doesn't allow re-parenting inside prefabs, so it will be unpacked first.";
+            msg += "\n\nCtrl+Z undoes all of it. If you use VRCFury Armature Link, you don't need this: VRCFury merges at upload.";
+            if (!EditorUtility.DisplayDialog("Merge clothing armatures", msg, "Merge", "Cancel")) return;
+
+            Undo.IncrementCurrentGroup();
+            int group = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("Merge clothing armatures");
+            if (isPrefab && PrefabUtility.IsPartOfPrefabInstance(root))
+                PrefabUtility.UnpackPrefabInstance(PrefabUtility.GetOutermostPrefabInstanceRoot(root), PrefabUnpackMode.Completely, InteractionMode.UserAction);
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (!PrefabUtility.IsPartOfPrefabInstance(t.gameObject)) continue;
+                var outer = PrefabUtility.GetOutermostPrefabInstanceRoot(t.gameObject);
+                if (outer != null) PrefabUtility.UnpackPrefabInstance(outer, PrefabUnpackMode.Completely, InteractionMode.UserAction);
+            }
+
+            var rec = new MergeRecord();
+            foreach (var l in linker.Links)
+            {
+                if (l.body == null || l.cloth == null || l.cloth.parent == l.body) continue;
+                rec.entries.Add(new MergeEntry
+                {
+                    child = l.cloth.GetInstanceID(),
+                    oldParent = l.cloth.parent != null ? l.cloth.parent.GetInstanceID() : 0,
+                    siblingIndex = l.cloth.GetSiblingIndex(),
+                });
+            }
+            foreach (var l in linker.Links)
+            {
+                if (l.body == null || l.cloth == null || l.cloth.parent == l.body) continue;
+                // Snap onto the body bone's current pose first so the outfit sits exactly where it should.
+                Undo.RecordObject(l.cloth, "Merge clothing armatures");
+                l.cloth.SetPositionAndRotation(l.body.TransformPoint(l.offsetPos), l.body.rotation * l.offsetRot);
+                Undo.SetTransformParent(l.cloth, l.body, "Merge clothing armatures");
+            }
+            Undo.CollapseUndoOperations(group);
+            SessionState.SetString(MergeKey, JsonUtility.ToJson(rec));
+            s_Dirty = true;
+            Changed?.Invoke();
+            SceneView.RepaintAll();
+        }
+
+        static bool AnyPrefabInstance(GameObject root)
+        {
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
+                if (PrefabUtility.IsPartOfPrefabInstance(t.gameObject)) return true;
+            return false;
+        }
+
+        /// <summary>Puts merged clothing bones back under their own armatures (this editor session only; otherwise use Undo).</summary>
+        public static void UnmergeClothing()
+        {
+            var json = SessionState.GetString(MergeKey, "");
+            if (string.IsNullOrEmpty(json)) return;
+            var rec = JsonUtility.FromJson<MergeRecord>(json);
+            Undo.IncrementCurrentGroup();
+            int group = Undo.GetCurrentGroup();
+            for (int i = rec.entries.Count - 1; i >= 0; i--)
+            {
+                var e = rec.entries[i];
+                var child = EditorUtility.InstanceIDToObject(e.child) as Transform;
+                var parent = EditorUtility.InstanceIDToObject(e.oldParent) as Transform;
+                if (child == null || parent == null) continue;
+                Undo.SetTransformParent(child, parent, "Unmerge clothing armatures");
+                child.SetSiblingIndex(Mathf.Clamp(e.siblingIndex, 0, parent.childCount - 1));
+            }
+            Undo.CollapseUndoOperations(group);
+            SessionState.EraseString(MergeKey);
+            s_Dirty = true;
+            Changed?.Invoke();
+            SceneView.RepaintAll();
         }
 
         /// <summary>Rest pose of a bone: the value from the avatar's prefab or model file when there is one.</summary>
@@ -487,6 +672,10 @@ namespace AviCreatorEssentials
                 return;
             }
 
+            var top = Row();
+            top.Add(Btn("Exit posing", () => ToolManager.RestorePreviousPersistentTool(), "Back to Unity's normal tools (or press W / E / R)"));
+            m_Root.Add(top);
+
             var mode = Row();
             var rot = Btn("Rotate", () => { ScenePoseState.RotateMode = true; SceneView.RepaintAll(); Rebuild(); }, "Rotate the selected bone");
             var mov = Btn("Move", () => { ScenePoseState.RotateMode = false; SceneView.RepaintAll(); Rebuild(); }, "Move the selected bone");
@@ -531,6 +720,31 @@ namespace AviCreatorEssentials
             var opacity = new Slider("Opacity", 0.1f, 1f) { value = ScenePoseState.BoneOpacity };
             opacity.RegisterValueChangedCallback(e => { ScenePoseState.BoneOpacity = e.newValue; SceneView.RepaintAll(); });
             m_Root.Add(opacity);
+
+            // clothing armatures
+            var clothHeader = new Label("Clothing armatures");
+            clothHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+            clothHeader.style.marginTop = 6;
+            m_Root.Add(clothHeader);
+            var linker = ScenePoseState.Linker;
+            m_Root.Add(Hint(linker != null ? linker.Summary() : "No separate clothing armatures found."));
+            if (linker != null && linker.HasClothing)
+            {
+                var sync = new Toggle("Keep clothing in sync") { value = ScenePoseState.SyncClothing };
+                sync.tooltip = "Clothing bones follow the body bones with the same names, live, without changing your hierarchy (like VRCFury's Armature Link in the editor).";
+                sync.RegisterValueChangedCallback(e => ScenePoseState.SyncClothing = e.newValue);
+                m_Root.Add(sync);
+                var mergeRow = Row();
+                mergeRow.Add(Btn("Merge into body armature…", ScenePoseState.MergeClothing,
+                    "Really parent the clothing bones under the body bones. Undoable."));
+                m_Root.Add(mergeRow);
+            }
+            if (ScenePoseState.CanUnmerge)
+            {
+                var unRow = Row();
+                unRow.Add(Btn("Unmerge clothing", ScenePoseState.UnmergeClothing, "Put the clothing bones back under their own armatures"));
+                m_Root.Add(unRow);
+            }
 
             // saved poses
             var poses = new List<AvatarPose>();

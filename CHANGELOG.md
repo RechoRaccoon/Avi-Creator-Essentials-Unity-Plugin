@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Clothing armatures are matched to the body armature by name (like VRCFury's Armature Link), including prefixed/suffixed names and outfit-only extra bones.
+- Scene view posing: live "Keep clothing in sync", plus "Merge into body armature" and "Unmerge clothing".
+- Painter posing: clothing follows the body, and only one skeleton is drawn.
+- "Exit posing" button in the Bone Posing panel.
+
 ## 0.2.0
 
 - Renamed to Avi Creator Essentials and packaged for the Unity Package Manager.

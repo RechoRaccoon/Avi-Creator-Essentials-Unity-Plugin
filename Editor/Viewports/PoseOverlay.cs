@@ -73,7 +73,7 @@ namespace AviCreatorEssentials
         readonly List<BoneDraw> m_Order = new List<BoneDraw>();
         readonly Vector2[] m_Ring = new Vector2[97];
 
-        public static bool ShowBone(Bone b, bool humanoidOnly) => b.t != null && (!humanoidOnly || b.isHuman);
+        public static bool ShowBone(Bone b, bool humanoidOnly) => b.t != null && !b.linkHidden && (!humanoidOnly || b.isHuman);
 
         public void DrawBones(Painter2D p, PoseSystem pose, Projector pr, bool poseMode, Bone hover, float sizeMul, bool humanoidOnly)
         {
