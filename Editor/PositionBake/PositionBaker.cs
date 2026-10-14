@@ -188,7 +188,7 @@ namespace AviCreatorEssentials
         }
 
         /// <summary>Copies the nearest covered texel into empty texels, up to 64 texels out, then fills the rest.</summary>
-        static void Dilate(Color32[] px, bool[] covered, int w, int h, Color32 background)
+        internal static void Dilate(Color32[] px, bool[] covered, int w, int h, Color32 background)
         {
             const int maxDist = 64;
             var dist = new byte[px.Length];

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+
+- Flatten a material: right-click a material in the Inspector (or its ⋮ menu) → "Flatten to Main + Emission Textures (Avi Creator Essentials)…". Bakes the main texture × main color with every normal map shaded in, and the emission map × its color and mask, into two textures laid out on the avatar's UVs. Textures mapped by Local Pos / World Pos are sampled the way the shader does. Each texture slot gets a role you can change, a "Bump shading" slider sets how strong the bumps look, and a flattened copy of the material can be made and put on the avatar (undoable). Also in Tools › Avi Creator Essentials › Flatten Material.
+
 ## 0.7.0
 
 - Bake Local Pos to UV: right-click a material in the Inspector (or its ⋮ menu) → "Bake Local Pos to UV (Avi Creator Essentials)…". Textures the shader maps by Local Pos or World Pos (Poiyomi's UV dropdown) are baked into ordinary UV textures that look exactly like the shader shows them with the avatar standing still, but stay stuck to the model when it moves and work with any shader. Normal maps keep their look, with the normal strength baked in if you like; the material can be switched over to the baked texture automatically (undoable). Also in Tools › Avi Creator Essentials and the Project window's right-click menu.

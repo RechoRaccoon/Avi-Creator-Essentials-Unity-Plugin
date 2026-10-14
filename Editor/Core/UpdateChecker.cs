@@ -13,7 +13,7 @@ namespace AviCreatorEssentials
     /// </summary>
     public static class UpdateChecker
     {
-        public const string Version = "0.7.0";
+        public const string Version = "0.8.0";
         public const string Repo = "RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin";
         public const string GitUrl = "https://github.com/" + Repo + ".git";
         public const string ListingUrl = "https://rechoraccoon.github.io/Avi-Creator-Essentials-Unity-Plugin/index.json";
