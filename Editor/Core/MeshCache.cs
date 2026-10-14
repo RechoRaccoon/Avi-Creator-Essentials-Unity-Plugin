@@ -326,11 +326,9 @@ namespace AviCreatorEssentials
                 foreach (var e in entries)
                 {
                     if (e.renderer == null) continue;
-                    // Object space as an avatar shader sees it (Poiyomi's Local Pos): skinned meshes are drawn
-                    // relative to their root bone, everything else relative to its own transform.
-                    var localT = e.skinned != null ? (e.skinned.rootBone != null ? e.skinned.rootBone : e.skinned.transform) : e.renderer.transform;
+                    // Object space as an avatar shader sees it (Poiyomi's Local Pos): the matrix Unity draws the renderer with.
                     e.restRootToWorld = rootM.inverse;
-                    e.restRootToLocal = localT.worldToLocalMatrix * rootM.inverse;
+                    e.restRootToLocal = e.renderer.worldToLocalMatrix * rootM.inverse;
                     Vector3[] v, n;
                     Vector4[] t;
                     Matrix4x4 m;

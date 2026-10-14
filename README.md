@@ -73,6 +73,8 @@ Each adjustment layer remembers its area, so you can stack one per eye, hide the
 
 **Images.** Import a PNG or JPG from the Layers section. Place it on the texture, or project it onto the model like a sticker.
 
+**Baking a Local Pos / World Pos texture.** If your material already shows a texture or normal map with Poiyomi's *Local Pos* (or *World Pos*) UV mode, right-click the material in the Inspector (or open its ⋮ menu) and choose **Bake Local Pos to UV (Avi Creator Essentials)…**. It writes a normal UV texture that looks exactly like the shader shows it with the avatar standing still, but stays stuck to the model when it moves, and switches the material over to it.
+
 **Wrapping a texture around the model (cardboard, fabric, scales...).** Shader options like Poiyomi's *World Pos* or *Local Pos* make a tiling texture flow over the model without UV seams, but it slides when the avatar moves. Layers › image button › **Wrap tiling texture around the model…** does the same projection once (pick the texture from the material's slots, the project or a file; a slot already set to Local Pos / World Pos is matched exactly), on the avatar's rest pose, and writes it into each material's own UV layout, so it looks the same but stays stuck to the model.
 
 - Normal maps are detected automatically and go into each material's normal map slot (one is added if a material has none). They are converted to each mesh's tangent space, so the bumps light correctly everywhere, and the blend mode *Normal map combine* keeps the material's own normal detail underneath.

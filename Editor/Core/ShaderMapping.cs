@@ -16,6 +16,10 @@ namespace AviCreatorEssentials
         public int space;               // 0 normal UVs, 1 local position, 2 world position
         public int axisU, axisV = 1;
         public Vector4 st = new Vector4(1, 1, 0, 0);
+        public string uvProperty;       // the shader's UV-mode dropdown for this texture, if it has one
+        public int uv0Value;            // the dropdown value meaning plain UV0
+        public bool isNormalMap;
+        public string strengthProperty; // e.g. _BumpScale for _BumpMap
 
         public string SpaceName => space == 1 ? "Local Pos" : space == 2 ? "World Pos" : null;
     }
@@ -50,6 +54,18 @@ namespace AviCreatorEssentials
                 var offset = mat.GetTextureOffset(prop);
                 slot.st = new Vector4(scale.x, scale.y, offset.x, offset.y);
                 ReadMapping(mat, prop, slot);
+                var importer = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(tex)) as TextureImporter;
+                slot.isNormalMap = importer != null ? importer.textureType == TextureImporterType.NormalMap : APSession.IsNormalProperty(prop);
+                foreach (var candidate in new[] { prop.Replace("Map", "Scale"), prop + "Scale", prop + "Strength", prop + "Intensity" })
+                {
+                    if (candidate == prop || !mat.HasProperty(candidate)) continue;
+                    int ci = shader.FindPropertyIndex(candidate);
+                    if (ci < 0) continue;
+                    var ct = shader.GetPropertyType(ci);
+                    if (ct != ShaderPropertyType.Float && ct != ShaderPropertyType.Range) continue;
+                    slot.strengthProperty = candidate;
+                    break;
+                }
                 list.Add(slot);
             }
             return list;
@@ -61,14 +77,15 @@ namespace AviCreatorEssentials
             var shader = mat.shader;
             int uvIndex = shader.FindPropertyIndex(prop + "UV");
             if (uvIndex < 0 || !mat.HasProperty(prop + "UV")) return;
+            slot.uvProperty = prop + "UV";
             int value = Mathf.RoundToInt(mat.GetFloat(prop + "UV"));
             foreach (var (name, v) in EnumOptions(shader.GetPropertyAttributes(uvIndex)))
             {
-                if (v != value) continue;
                 string n = Normalize(name);
+                if (n == "uv0") slot.uv0Value = v;
+                if (v != value) continue;
                 if (n == "localpos" || n == "localposition") slot.space = 1;
                 else if (n == "worldpos" || n == "worldposition") slot.space = 2;
-                break;
             }
             if (slot.space == 0) return;
 

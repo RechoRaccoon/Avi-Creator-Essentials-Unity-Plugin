@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+
+- Bake Local Pos to UV: right-click a material in the Inspector (or its ⋮ menu) → "Bake Local Pos to UV (Avi Creator Essentials)…". Textures the shader maps by Local Pos or World Pos (Poiyomi's UV dropdown) are baked into ordinary UV textures that look exactly like the shader shows them with the avatar standing still, but stay stuck to the model when it moves and work with any shader. Normal maps keep their look, with the normal strength baked in if you like; the material can be switched over to the baked texture automatically (undoable). Also in Tools › Avi Creator Essentials and the Project window's right-click menu.
+
 ## 0.6.2
 
 - Wrap tiling texture now lets you pick the image from the material's own texture slots or from any texture in the project (Unity's texture picker), as well as from an image file.
