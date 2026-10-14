@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Fill Mask Shape: masks that are a colored image on a black background (like a painted texture with everything else black) now give a solid shape. Before, the shape was taken from the mask's brightness, so dark or colored parts came out see-through. Auto now picks the new "Anything not black (solid)" mode for these; black-and-white masks still use brightness and transparent masks still use alpha.
+
 ## 0.9.0
 
 - Fill a mask's shape with a texture: right-click a mask texture in the Project window › Avi Creator Essentials › "Fill Mask Shape With Texture (Avi Creator Essentials)…", then pick or drop the texture to fill it with. Makes a new PNG next to the mask, the same size as the mask, showing the new texture where the mask is white (or opaque) and transparent elsewhere. Choose whether the shape comes from the mask's alpha, brightness or one channel (Auto picks for you), invert it, tile the fill texture, and set the color outside the shape. A live preview shows the result. Also in Tools › Avi Creator Essentials.

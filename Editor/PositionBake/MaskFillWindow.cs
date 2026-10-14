@@ -33,9 +33,9 @@ namespace AviCreatorEssentials
             w.m_PreviewDirty = true;
         }
 
-        public enum Shape { Auto, Alpha, Brightness, Red, Green, Blue }
+        public enum Shape { Auto, Alpha, NotBlack, Brightness, Red, Green, Blue }
 
-        static readonly string[] s_Shapes = { "Auto", "Alpha", "Brightness", "Red", "Green", "Blue" };
+        static readonly string[] s_Shapes = { "Auto", "Alpha", "Anything not black (solid)", "Brightness", "Red", "Green", "Blue" };
         const int PreviewSize = 192;
 
         Texture2D m_Mask;
@@ -71,7 +71,8 @@ namespace AviCreatorEssentials
 
             EditorGUILayout.Space(6);
             m_Shape = (Shape)EditorGUILayout.Popup(new GUIContent("Shape from",
-                "Which part of the mask holds the shape. Auto uses the alpha when the mask has transparency, otherwise its brightness."),
+                "Which part of the mask holds the shape. Auto uses the alpha when the mask has transparency, the brightness when it's a black-and-white mask, " +
+                "and everything that isn't black (at full strength) when it's a colored image on black."),
                 (int)m_Shape, s_Shapes);
             m_Invert = EditorGUILayout.Toggle(new GUIContent("Invert", "Fill outside the shape instead"), m_Invert);
             m_Tile = EditorGUILayout.Toggle(new GUIContent("Tile", "Repeat the fill texture instead of stretching it once over the mask"), m_Tile);
@@ -129,7 +130,7 @@ namespace AviCreatorEssentials
             try
             {
                 var px = Compose(m_Mask, m_Fill, PreviewSize, PreviewSize, out var used);
-                m_ShapeNote = m_Shape == Shape.Auto ? "Using the mask's " + (used == Shape.Alpha ? "alpha" : "brightness") : null;
+                m_ShapeNote = m_Shape == Shape.Auto ? "Auto: using " + ShapeName(used) : null;
                 m_Preview = new Texture2D(PreviewSize, PreviewSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave };
                 m_Preview.SetPixels32(px);
                 m_Preview.Apply(false);
@@ -147,7 +148,7 @@ namespace AviCreatorEssentials
             var fillPx = m_Tile ? ReadResized(fill, w, h, m_Tiling, m_Offset, true) : ReadResized(fill, w, h, Vector2.one, Vector2.zero, false);
 
             used = m_Shape;
-            if (used == Shape.Auto) used = HasTransparency(maskPx) ? Shape.Alpha : Shape.Brightness;
+            if (used == Shape.Auto) used = HasTransparency(maskPx) ? Shape.Alpha : IsColored(maskPx) ? Shape.NotBlack : Shape.Brightness;
 
             Color32 bg = m_Outside;
             var outPx = new Color32[w * h];
@@ -158,6 +159,7 @@ namespace AviCreatorEssentials
                 switch (used)
                 {
                     case Shape.Alpha: v = m.a; break;
+                    case Shape.NotBlack: v = NotBlack(m); break;
                     case Shape.Red: v = m.r; break;
                     case Shape.Green: v = m.g; break;
                     case Shape.Blue: v = m.b; break;
@@ -172,6 +174,42 @@ namespace AviCreatorEssentials
                     (byte)(bg.a + (f.a - bg.a) * v / 255));
             }
             return outPx;
+        }
+
+        static string ShapeName(Shape s)
+        {
+            switch (s)
+            {
+                case Shape.Alpha: return "the mask's alpha";
+                case Shape.NotBlack: return "everything that isn't black, at full strength";
+                case Shape.Brightness: return "the mask's brightness";
+                default: return "the mask's " + s.ToString().ToLowerInvariant() + " channel";
+            }
+        }
+
+        // Anything brighter than near-black counts fully; the short ramp keeps anti-aliased edges soft.
+        const int NotBlackLow = 4, NotBlackHigh = 20;
+
+        static int NotBlack(Color32 c)
+        {
+            int max = Math.Max(c.r, Math.Max(c.g, c.b));
+            return Mathf.Clamp((max - NotBlackLow) * 255 / (NotBlackHigh - NotBlackLow), 0, 255);
+        }
+
+        /// <summary>True when the mask is a colored image (on black) rather than a black-and-white mask.</summary>
+        static bool IsColored(Color32[] px)
+        {
+            int step = Mathf.Max(1, px.Length / 65536);
+            int lit = 0, colored = 0;
+            for (int i = 0; i < px.Length; i += step)
+            {
+                var c = px[i];
+                int max = Math.Max(c.r, Math.Max(c.g, c.b)), min = Math.Min(c.r, Math.Min(c.g, c.b));
+                if (max <= NotBlackHigh) continue;
+                lit++;
+                if (max - min > 24) colored++;
+            }
+            return lit > 0 && colored * 20 > lit;
         }
 
         static bool HasTransparency(Color32[] px)
