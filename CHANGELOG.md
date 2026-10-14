@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2
+
+- Fill Mask Shape: the area outside the shape is now black by default instead of transparent, like a normal mask. Pick another color under "Outside the shape", or turn its alpha down to 0 to keep it transparent.
+
 ## 0.9.1
 
 - Fill Mask Shape: masks that are a colored image on a black background (like a painted texture with everything else black) now give a solid shape. Before, the shape was taken from the mask's brightness, so dark or colored parts came out see-through. Auto now picks the new "Anything not black (solid)" mode for these; black-and-white masks still use brightness and transparent masks still use alpha.

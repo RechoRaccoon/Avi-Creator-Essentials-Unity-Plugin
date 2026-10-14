@@ -45,7 +45,7 @@ namespace AviCreatorEssentials
         bool m_Tile;
         Vector2 m_Tiling = Vector2.one;
         Vector2 m_Offset = Vector2.zero;
-        Color m_Outside = Color.clear;
+        Color m_Outside = Color.black;
         Texture2D m_Preview;
         bool m_PreviewDirty = true;
         string m_ShapeNote;
@@ -57,7 +57,7 @@ namespace AviCreatorEssentials
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField(
                 "Makes a new texture in the shape of the mask, filled with another texture. Where the mask is white (or opaque) " +
-                "the new texture shows; elsewhere it's transparent. The result is saved next to the mask; the mask isn't changed.",
+                "the new texture shows; elsewhere it's black (or the color you pick below). The result is saved next to the mask; the mask isn't changed.",
                 EditorStyles.wordWrappedMiniLabel);
             EditorGUILayout.Space(6);
 
@@ -81,7 +81,7 @@ namespace AviCreatorEssentials
                 m_Tiling = EditorGUILayout.Vector2Field("Tiling", m_Tiling);
                 m_Offset = EditorGUILayout.Vector2Field("Offset", m_Offset);
             }
-            m_Outside = EditorGUILayout.ColorField(new GUIContent("Outside the shape", "Color where the mask is empty. Transparent by default."), m_Outside);
+            m_Outside = EditorGUILayout.ColorField(new GUIContent("Outside the shape", "Color where the mask is empty. Black by default; turn the alpha down for transparent."), m_Outside);
             if (EditorGUI.EndChangeCheck()) m_PreviewDirty = true;
 
             if (m_Mask == null || m_Fill == null)
