@@ -56,6 +56,16 @@ namespace AviCreatorEssentials
         public bool paintAllMaterials;         // a stroke paints every material it touches
         public bool autoSelectMaterial = true; // a stroke starting on another material switches to it
 
+        // Paint mode and brush texture
+        public bool paintMode;                 // wet paint: dabs build up and carry color instead of stamping one flat color
+        public float bristles;                 // 0..1 how much bristle streaks show along the stroke
+        public float bristleDensity = 0.5f;    // 0..1 few thick to many fine bristles
+        public float colorMixing;              // 0..1 paint mode: the brush picks up colors it passes over
+        public float colorVariation;           // 0..1 paint mode: each bristle carries a slightly different shade
+        public float grain;                    // 0..1 canvas grain
+        public float taperIn;                  // stroke start grows over this many brush diameters
+        public float taperOut;                 // stroke end thins out over this many brush diameters
+
         public static BrushSettings Load()
         {
             var s = new BrushSettings();
@@ -79,6 +89,7 @@ namespace AviCreatorEssentials
         public Texture2D preview;   // RGBA, white with alpha, for the UI
         public string filePath;
         public bool builtIn;
+        public bool followsStroke;  // bristle-style tips always turn with the stroke
     }
 
     /// <summary>Built-in and user brush tips. User tips are PNG/JPG files in Assets/Avi Creator Essentials Data/Brushes.</summary>
@@ -168,8 +179,124 @@ namespace AviCreatorEssentials
                 return Mathf.Clamp01(-d / s * 40f + 0.5f);
             }));
 
+            AddPaintTips(rng);
+
             LoadUserTips();
             Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// Tips made of many thin lines, for painterly strokes and fur. They point along the stroke (x), so the
+        /// strands across them (y) drag out into streaks as the brush moves.
+        /// </summary>
+        static void AddPaintTips(System.Random rng)
+        {
+            float R() => (float)rng.NextDouble();
+
+            // Bristles: a row of small round bristle ends across the stroke.
+            var bristles = new List<Vector4>();
+            for (int i = 0; i < 18; i++)
+            {
+                float y = Mathf.Lerp(-0.86f, 0.86f, (i + 0.5f) / 18f) + (R() - 0.5f) * 0.05f;
+                bristles.Add(new Vector4((R() - 0.5f) * 0.25f, y, 0.035f + R() * 0.045f, 0.5f + R() * 0.5f));
+            }
+            AddTip(MakeProcedural("Bristles", (x, y) => Dots(bristles, x, y, 1.6f)));
+
+            // Dry brush: fewer, uneven bristles with gaps, for broken scratchy strokes.
+            var dry = new List<Vector4>();
+            for (int i = 0; i < 26; i++)
+            {
+                if (R() < 0.3f) continue;
+                dry.Add(new Vector4((R() - 0.5f) * 0.5f, (R() * 2f - 1f) * 0.9f, 0.015f + R() * 0.035f, 0.35f + R() * 0.65f));
+            }
+            AddTip(MakeProcedural("Dry Brush", (x, y) => Dots(dry, x, y, 2.2f)));
+
+            // Fur strands: thin hairs lying along the stroke, tapered at both ends, of different lengths.
+            var strands = new List<Strand>();
+            for (int i = 0; i < 11; i++)
+            {
+                float y = Mathf.Lerp(-0.7f, 0.7f, (i + 0.5f) / 11f) + (R() - 0.5f) * 0.08f;
+                float len = 0.55f + R() * 0.4f;
+                float x0 = -0.95f + R() * (1.9f - 2f * len);
+                strands.Add(new Strand
+                {
+                    a = new Vector2(x0, y),
+                    b = new Vector2(x0 + 2f * len, y + (R() - 0.5f) * 0.25f),
+                    bend = (R() - 0.5f) * 0.25f,
+                    width = 0.022f + R() * 0.02f,
+                    strength = 0.6f + R() * 0.4f,
+                });
+            }
+            AddTip(MakeProcedural("Fur Strands", (x, y) => Strands(strands, x, y)));
+
+            // Fur tuft: a clump of pointed hairs fanning out from one root, like the spiky tufts on a fluffy chest.
+            var tuft = new List<Strand>();
+            for (int i = 0; i < 5; i++)
+            {
+                float spread = (i - 2f) / 2f;
+                var root = new Vector2(-0.85f, spread * 0.18f);
+                var tip = new Vector2(0.55f + R() * 0.38f - Mathf.Abs(spread) * 0.25f, spread * 0.62f + (R() - 0.5f) * 0.12f);
+                tuft.Add(new Strand { a = root, b = tip, bend = spread * 0.18f + (R() - 0.5f) * 0.1f, width = 0.11f, strength = 1f, pointed = true });
+            }
+            AddTip(MakeProcedural("Fur Tuft", (x, y) => Strands(tuft, x, y)));
+        }
+
+        static void AddTip(BrushTip tip)
+        {
+            tip.followsStroke = true;
+            s_Tips.Add(tip);
+        }
+
+        struct Strand
+        {
+            public Vector2 a, b;
+            public float bend;      // sideways bow at the middle, in tip units
+            public float width;     // half width at the thickest point
+            public float strength;
+            public bool pointed;    // thick at the root (a), sharp at the tip (b); otherwise tapered at both ends
+        }
+
+        static float Dots(List<Vector4> dots, float x, float y, float stretch)
+        {
+            float v = 0f;
+            foreach (var d in dots)
+            {
+                // Slightly stretched along the stroke so overlapping dabs merge into smooth streaks.
+                float dx = (x - d.x) / stretch, dy = y - d.y;
+                float dist = Mathf.Sqrt(dx * dx + dy * dy);
+                v = Mathf.Max(v, Mathf.Clamp01((d.z - dist) / 0.012f + 0.5f) * d.w);
+            }
+            return v;
+        }
+
+        static float Strands(List<Strand> strands, float x, float y)
+        {
+            float v = 0f;
+            var p = new Vector2(x, y);
+            foreach (var s in strands)
+            {
+                // Closest point on a gently bowed line, by sampling: cheap enough for a one-off 256² tip.
+                float reach = Mathf.Abs(s.bend) + s.width + 0.02f;
+                if (x < Mathf.Min(s.a.x, s.b.x) - reach || x > Mathf.Max(s.a.x, s.b.x) + reach ||
+                    y < Mathf.Min(s.a.y, s.b.y) - reach || y > Mathf.Max(s.a.y, s.b.y) + reach) continue;
+                const int n = 24;
+                var dir = s.b - s.a;
+                var side = new Vector2(-dir.y, dir.x).normalized;
+                float best = float.MaxValue, bestT = 0f;
+                for (int i = 0; i <= n; i++)
+                {
+                    float t = i / (float)n;
+                    var q = s.a + dir * t + side * (s.bend * 4f * t * (1f - t));
+                    float d = (p - q).sqrMagnitude;
+                    if (d < best) { best = d; bestT = t; }
+                }
+                float taper = s.pointed ? Mathf.Pow(1f - bestT, 0.8f) : Mathf.Sin(bestT * Mathf.PI);
+                float w = s.width * taper;
+                if (w <= 0f) continue;
+                float dist = Mathf.Sqrt(best);
+                v = Mathf.Max(v, Mathf.Clamp01((w - dist) / 0.012f + 0.5f) * s.strength);
+            }
+            return v;
         }
 
         static void LoadUserTips()

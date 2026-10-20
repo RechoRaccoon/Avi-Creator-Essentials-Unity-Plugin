@@ -67,7 +67,7 @@ namespace AviCreatorEssentials
         string m_LastActiveLayerId;
         bool m_SuppressLayerColor;
         PosePanel m_PosePanel;
-        W.Section m_ColorSection, m_BrushSection, m_LayerSection, m_ImageSection, m_MaterialSection, m_MeshSection, m_ViewSection, m_PoseSection;
+        W.Section m_ColorSection, m_BrushSection, m_LayerSection, m_ImageSection, m_MaterialSection, m_MeshSection, m_ViewSection, m_PoseSection, m_StarsSection;
 
         readonly Dictionary<PaintTool, Button> m_ToolButtons = new Dictionary<PaintTool, Button>();
         readonly Dictionary<PoseTool, Button> m_PoseButtons = new Dictionary<PoseTool, Button>();
@@ -662,6 +662,7 @@ namespace AviCreatorEssentials
                 T(PaintTool.Brush, IconKind.Brush, "Brush (B)");
                 T(PaintTool.Eraser, IconKind.Eraser, "Eraser (E)");
                 T(PaintTool.Fill, IconKind.Fill, "Fill (G) — fill a UV island, mesh part, material or similar colors");
+                T(PaintTool.Gradient, IconKind.Gradient, "Gradient (D) — drag across the model for a gradient laid out in 3D, unaffected by UV seams");
                 T(PaintTool.Picker, IconKind.Picker, "Color picker (I). Shift-click picks the secondary color.");
                 T(PaintTool.Image, IconKind.Image, "Image (T) — move, scale and rotate image layers");
                 T(PaintTool.Select, IconKind.Select, "Select UV islands or polygons (S). Painting then stays inside the selection.");
@@ -726,6 +727,10 @@ namespace AviCreatorEssentials
             m_AdjustSection.Body.Add(m_AdjustPanel);
             m_RightPanel.Add(m_AdjustSection);
 
+            m_StarsSection = new W.Section("Stars", IconKind.Stars, "stars", false);
+            m_StarsSection.Body.Add(new StarsPanel(m_Ctx));
+            m_RightPanel.Add(m_StarsSection);
+
             m_ImageSection = new W.Section("Image", IconKind.Image, "image");
             m_ImagePanel = new ImagePanel(m_Ctx);
             m_ImageSection.Body.Add(m_ImagePanel);
@@ -756,6 +761,7 @@ namespace AviCreatorEssentials
             Show(m_BrushSection, !pose);
             Show(m_LayerSection, !pose);
             Show(m_MaterialSection, !pose);
+            Show(m_StarsSection, !pose);
             var layer = m_Session.ActiveSet?.ActiveLayer;
             Show(m_ImageSection, !pose && layer != null && layer.kind == LayerKind.Image);
             Show(m_AdjustSection, !pose && layer != null && layer.kind == LayerKind.Adjustment);
@@ -775,7 +781,9 @@ namespace AviCreatorEssentials
             }
             m_MeshesPanel?.Rebuild();
             var title = m_BrushSection?.Q<Label>(className: "ap-section-title");
-            if (title != null) title.text = m_Ctx.Tool == PaintTool.Fill ? "Fill" : m_Ctx.Tool == PaintTool.Select ? "Select" : m_Ctx.Tool == PaintTool.Transform ? "Transform" : "Brush";
+            if (title != null)
+                title.text = m_Ctx.Tool == PaintTool.Fill ? "Fill" : m_Ctx.Tool == PaintTool.Select ? "Select" : m_Ctx.Tool == PaintTool.Transform ? "Transform" :
+                    m_Ctx.Tool == PaintTool.Gradient ? "Gradient" : "Brush";
             foreach (var r in m_TopBarRefresh) r();
             RefreshToolButtons();
             RefreshHistoryButtons();
@@ -967,6 +975,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Picker: return "Click to pick a color. Shift-click sets the secondary color.";
                 case PaintTool.Image: return "Import an image from the Layers section, then drag it on the model or in the texture view.";
                 case PaintTool.Transform: return "Draw around part of the layer in the texture view, or click a color, to pick it up. Then drag, scale, rotate or warp it. Enter applies, Esc cancels.";
+                case PaintTool.Gradient: return "Drag across the model from where the gradient starts to where it ends. It follows the model in 3D, across every UV seam. Esc cancels.";
                 default:
                     return "Left-drag to paint. Right-drag orbits, middle-drag pans, scroll zooms. Right-click for the color wheel. Ctrl+right-drag resizes the brush.";
             }
@@ -1093,6 +1102,7 @@ namespace AviCreatorEssentials
                     case KeyCode.B: m_Ctx.Tool = PaintTool.Brush; break;
                     case KeyCode.E: m_Ctx.Tool = PaintTool.Eraser; break;
                     case KeyCode.G: m_Ctx.Tool = PaintTool.Fill; break;
+                    case KeyCode.D: m_Ctx.Tool = PaintTool.Gradient; break;
                     case KeyCode.I: m_Ctx.Tool = PaintTool.Picker; break;
                     case KeyCode.T: m_Ctx.Tool = PaintTool.Image; break;
                     case KeyCode.S: m_Ctx.Tool = PaintTool.Select; break;

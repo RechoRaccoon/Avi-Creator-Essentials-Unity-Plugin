@@ -40,6 +40,7 @@ namespace AviCreatorEssentials
         readonly StrokeSampler m_Sampler = new StrokeSampler();
         readonly System.Random m_Rng = new System.Random();
         readonly List<Dab2D> m_Dabs = new List<Dab2D>();
+        readonly StrokeTaper<Dab2D> m_Taper = new StrokeTaper<Dab2D>();
 
         // image drag
         Vector2 m_ImgStartCenter;
@@ -185,6 +186,9 @@ namespace AviCreatorEssentials
                     case PaintTool.Transform:
                         BeginTransform(shift);
                         break;
+                    case PaintTool.Gradient:
+                        ctx.ShowHint("The gradient tool works on the model: drag across it in the 3D view.");
+                        break;
                     case PaintTool.Select:
                         m_Drag = Drag.Select;
                         m_SelOp = shift ? SelectOp.Add : ctrl ? SelectOp.Subtract : SelectOp.Replace;
@@ -307,10 +311,12 @@ namespace AviCreatorEssentials
             var tool = ctx.Tool == PaintTool.Eraser ? StrokeTool.Erase : StrokeTool.Paint;
             m_Stroke = s.engine.BeginStroke(new[] { set }, tool, ctx.primary, ctx.brush.opacity,
                 tool == StrokeTool.Erase ? "Erase" : "Paint", Matrix4x4.identity, false);
+            m_Stroke.paintMode = ctx.brush.paintMode;
             m_StrokeSet = set;
             if (tool == StrokeTool.Paint && !set.editingMask) ctx.colors.Use(ctx.primary);
             var t = UVToTexel(LocalToUV(m_Mouse));
             m_Sampler.Begin(t, pressure);
+            m_Taper.Begin(ctx.brush);
             m_Drag = Drag.Paint;
             ctx.strokeActive = true;
             m_Dabs.Clear();
@@ -332,6 +338,7 @@ namespace AviCreatorEssentials
         {
             var b = ctx.brush;
             float sizeK = (b.pressureSize ? Mathf.Lerp(0.15f, 1f, pressure) : 1f) * (1f - b.sizeJitter * (float)m_Rng.NextDouble());
+            sizeK *= m_Taper.Next();
             float r = b.radius2D * TexW * sizeK;
             if (b.scatter > 0f)
             {
@@ -341,17 +348,18 @@ namespace AviCreatorEssentials
             }
             // texel space has v pointing up, screen y points down
             float angle = b.angle + (b.angleJitter > 0f ? RandomRange(m_Rng, -b.angleJitter, b.angleJitter) : 0f);
-            if (b.followStroke) angle += Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+            if (ctx.FollowStroke) angle += Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
             float strength = b.flow * (b.pressureOpacity ? pressure : 1f) * (1f - b.opacityJitter * (float)m_Rng.NextDouble());
-            m_Dabs.Add(new Dab2D { uv = TexelToUV(texel), radiusPx = r, angle = angle * Mathf.Deg2Rad, strength = strength });
-            if (b.symmetry) EmitMirrored(texel, r, angle * Mathf.Deg2Rad, strength);
+            var across = dir.sqrMagnitude > 1e-10f ? new Vector2(-dir.y, dir.x).normalized : Vector2.up;
+            m_Taper.Add(new Dab2D { uv = TexelToUV(texel), radiusPx = r, angle = angle * Mathf.Deg2Rad, strength = strength, across = across }, m_Dabs);
+            if (b.symmetry) EmitMirrored(texel, r, angle * Mathf.Deg2Rad, strength, across);
         }
 
         /// <summary>
         /// Symmetry in the texture view: the dab is repeated where the mirrored point of the model sits on the texture,
         /// just like the 3D brush. Size and angle follow the other side's texture layout.
         /// </summary>
-        void EmitMirrored(Vector2 texel, float r, float angle, float strength)
+        void EmitMirrored(Vector2 texel, float r, float angle, float strength, Vector2 across)
         {
             var s = ctx.session;
             var set = m_StrokeSet ?? Set;
@@ -371,12 +379,18 @@ namespace AviCreatorEssentials
                 }
             }
             if ((UVToTexel(muv) - texel).sqrMagnitude < 0.25f) return;
-            m_Dabs.Add(new Dab2D { uv = muv, radiusPx = mr, angle = mAngle, strength = strength });
+            // The bristle direction turns the same way the dab does on the other side.
+            float turn = mAngle - angle;
+            float c = Mathf.Cos(turn), sn = Mathf.Sin(turn);
+            var mAcross = new Vector2(across.x * c - across.y * sn, across.x * sn + across.y * c);
+            m_Taper.Add(new Dab2D { uv = muv, radiusPx = mr, angle = mAngle, strength = strength, across = mAcross }, m_Dabs);
         }
 
         void Flush()
         {
-            if (m_Stroke == null || m_Dabs.Count == 0) return;
+            if (m_Stroke == null) return;
+            m_Taper.Release(m_Dabs);
+            if (m_Dabs.Count == 0) return;
             ctx.session.engine.Dabs2D(m_Stroke, m_StrokeSet, m_Dabs, ctx.Tip, ctx.brush);
             m_Dabs.Clear();
             ctx.session.engine.Apply(m_Stroke);
@@ -391,6 +405,8 @@ namespace AviCreatorEssentials
                 m_Sampler.Finish(StrokeStep, Emit);
                 Flush();
             }
+            m_Taper.Finish(m_Dabs, (d, k) => { d.radiusPx *= k; return d; });
+            Flush();
             var entry = ctx.session.engine.EndStroke(m_Stroke);
             if (entry != null) ctx.session.Push(entry);
             m_Stroke = null;
@@ -401,6 +417,8 @@ namespace AviCreatorEssentials
 
         public void CancelStroke()
         {
+            m_Taper.Clear();
+            m_Dabs.Clear();
             if (m_Stroke == null) return;
             ctx.session.engine.CancelStroke(m_Stroke);
             m_Stroke = null;

@@ -46,6 +46,7 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 | Steadier lines | Brush → Stabilizer: set the intensity, Smooth or Rope mode |
 | Opacity | **1** … **0** |
 | Fill an area | **G**, then click a UV island, mesh part, material or similar color |
+| 3D gradient | **D**, then drag across the model |
 | Pick a color | **I**, then click |
 | Undo / redo | Ctrl+Z / Ctrl+Y |
 | Save | Ctrl+S |
@@ -54,6 +55,23 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 - **No seams:** paint is worked out from the 3D surface, so both sides of a UV seam match exactly.
 - **Only visible surfaces** stops paint from going through to hidden areas such as the inside of sleeves. Turn it off under Brush › Projection.
 - **Symmetry** (top bar) mirrors your strokes left to right.
+
+**Painting like paint.** Brush › **Paint** turns on **Wet paint**: overlapping dabs build up like real paint instead of laying down one flat color, and strokes can carry texture:
+
+- **Bristles** streak the stroke with separate bristle lines running along it (**Bristle detail** goes from a few thick ones to many fine ones). This works with any tip.
+- **Color mixing** makes the brush pick up the colors it passes over and drag them along, so dark fur blends into glowing green the way it does in a painting.
+- **Color variation** gives each bristle a slightly lighter or darker shade.
+- **Canvas grain** adds a rough texture the paint catches on. It is fixed to the model, so strokes on top of each other share it.
+- **Taper start / Taper end** make strokes thin to a point without a pen, for fur and hair. The tapered end appears when you let go.
+- The presets (**Fur strokes**, **Fur tufts**, **Oil paint**, **Soft blend**, **Plain**) are good starting points.
+
+New tips made of thin lines: **Bristles**, **Dry Brush**, **Fur Strands** and **Fur Tuft** (a clump of pointed hairs, for fluffy edges). They always turn with the stroke.
+
+**3D gradients.** Press **D** (Gradient tool) and drag across the model from where the gradient starts to where it ends. It is laid out in 3D on the model, not on the texture, so it flows smoothly across UV seams. Choose **Linear**, **Radial** (spreads out in a sphere from where you start) or **Reflected**, and fade the paint color out or blend it into the second color. It paints the selected layer or mask, stays inside a UV selection, and with **Across every material** one gradient runs over every body part.
+
+**Stars and space looks.** The **Stars** section scatters glowing stars over the model: tiny specks and bigger stars with soft halos, four-point sparkles, two star colors and optional nebula clouds. They are placed in 3D on the avatar's rest pose (like Local Pos), so they spread evenly across UV seams, and baked into a new layer, so they stay stuck to the model and work in any shader. With **Glow** on, they also go on the emission texture so they shine in the dark. The new layer updates live while you change the settings (until you do something else); add a mask to keep stars only where you want them.
+
+Stars that shift as you look around (parallax, matcap, World Pos) are worked out live by the avatar's shader, so they can't be painted into a texture. For those, **Save tiling texture…** makes a seamless star texture for a parallax or Local / World Pos slot, and **Save matcap…** makes a star matcap with a glowing rim to add on top (Add or Screen blend).
 
 **Layers.** Paint layers, fill layers (solid color revealed where you paint) and image layers, with blend modes, opacity and masks. Right-click a layer for every option, and drag layers to reorder them.
 

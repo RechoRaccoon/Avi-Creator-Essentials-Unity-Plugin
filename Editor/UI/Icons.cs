@@ -8,7 +8,7 @@ namespace AviCreatorEssentials
     {
         Brush, Eraser, Fill, Picker, Image, Bone, Rotate, Move, Undo, Redo, Save, Bake, Eye, EyeOff, Plus, Trash,
         Duplicate, Mask, Merge, Gear, Frame, Symmetry, Emission, Armature, Layers, Swap, Folder, More, Close, Light,
-        View3D, View2D, Split, Reset, Mirror, Lock, Unlock, FillLayer, Help, Select, Theme, Record, Key,
+        View3D, View2D, Split, Reset, Mirror, Lock, Unlock, FillLayer, Help, Select, Theme, Record, Key, Gradient, Stars,
     }
 
     /// <summary>Vector icons drawn with Painter2D, so the tool needs no image assets and stays crisp at any DPI.</summary>
@@ -315,6 +315,17 @@ namespace AviCreatorEssentials
                     break;
                 case IconKind.Key:
                     Closed(true, 8f, 2.5f, 13.5f, 8f, 8f, 13.5f, 2.5f, 8f);
+                    break;
+                case IconKind.Gradient:
+                    Closed(false, 2.5f, 2.5f, 13.5f, 2.5f, 13.5f, 13.5f, 2.5f, 13.5f);
+                    Closed(true, 2.5f, 2.5f, 6f, 2.5f, 6f, 13.5f, 2.5f, 13.5f);
+                    L(8f, 3f, 8f, 13f);
+                    L(10.5f, 4f, 10.5f, 12f);
+                    break;
+                case IconKind.Stars:
+                    Closed(true, 6f, 1.5f, 7.2f, 5f, 10.5f, 6.2f, 7.2f, 7.4f, 6f, 11f, 4.8f, 7.4f, 1.5f, 6.2f, 4.8f, 5f);
+                    Closed(true, 12f, 8.5f, 12.7f, 10.6f, 14.8f, 11.3f, 12.7f, 12f, 12f, 14.3f, 11.3f, 12f, 9.2f, 11.3f, 11.3f, 10.6f);
+                    Circ(12.5f, 3.5f, 0.9f, true);
                     break;
                 case IconKind.Help:
                     Circ(8f, 8f, 6f, false);

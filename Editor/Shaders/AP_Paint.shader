@@ -38,6 +38,59 @@ Shader "Hidden/AviCreatorEssentials/Paint"
     AP_TEX(_IslandTex);
     float _ClipIslands;
 
+    // ---------------- paint texture (bristles, canvas grain) ----------------
+    float3 _BrushAcross;    // 3D: world direction across the stroke (bristles run along the stroke)
+    float _Bristles;        // 0..1 how much the bristle streaks show
+    float _BristleScale;    // bristles per brush radius
+    float _BristleSeed;
+    float _Grain;           // 0..1 canvas grain
+    float _GrainScale;      // 3D: world size of one grain cell; 2D: texels
+    float2 _GrainTexSize;   // 2D: texture size in texels
+    float _PaintAccum;      // 1: output for the paint mode (summed coverage, coverage * bristle id)
+    float _PaintGain;
+
+    // One bristle per cell across the stroke, each with its own width, offset and strength. Filtered so bristles
+    // thinner than a texel fade to their average instead of flickering. vary returns the bristle's id (0..1),
+    // which the paint mode turns into a slight color difference per bristle.
+    float AP_Bristles(float across, float acrossW, out float vary)
+    {
+        float x = across * _BristleScale + _BristleSeed;
+        float cell = floor(x);
+        float f = frac(x) - 0.5;
+        float h1 = AP_Hash11(cell * 1.37 + 0.11);
+        float h2 = AP_Hash11(cell * 2.71 + 5.3);
+        float h3 = AP_Hash11(cell * 0.73 + 9.1);
+        float halfW = lerp(0.16, 0.44, h2);
+        float off = (h1 - 0.5) * (0.5 - halfW) * 2.0;
+        float w = max(acrossW * _BristleScale, 1e-4);
+        float strand = saturate((halfW - abs(f - off)) / w + 0.5);
+        strand = lerp(strand, halfW * 2.0, saturate(w * 2.0 - 0.5));
+        vary = h3;
+        return strand * lerp(0.45, 1.0, h1 * 0.5 + h3 * 0.5);
+    }
+
+    float AP_PaintTexture(float across, float acrossW, float3 grainPos, out float vary)
+    {
+        float m = lerp(1.0, AP_Bristles(across, acrossW, vary), _Bristles);
+        if (_Grain > 0.001)
+        {
+            float g = AP_ValueNoise(grainPos) * 0.6 + AP_ValueNoise(grainPos * 2.7 + 7.1) * 0.4;
+            m *= lerp(1.0, saturate(g * 1.8 - 0.35), _Grain);
+        }
+        return m;
+    }
+
+    float4 AP_StampOut(float a, float vary)
+    {
+        if (_PaintAccum > 0.5)
+        {
+            float s = max(a, 0.0) * _Strength * _PaintGain;
+            return float4(s, s * vary, 0, 0);
+        }
+        a = saturate(a * _Strength);
+        return float4(a, a, a, a);
+    }
+
     float BrushShape(float2 xy, float distForRound, float aa)
     {
         if (_UseTip > 0.5)
@@ -55,6 +108,8 @@ Shader "Hidden/AviCreatorEssentials/Paint"
         float x = dot(d, _BrushRight) * invR;
         float y = dot(d, _BrushUp) * invR;
         float z = dot(d, _BrushFwd) * invR;
+        float across = dot(d, _BrushAcross) * invR;
+        float acrossW = fwidth(across);
 
         float dist = (_ProjMode < 0.5) ? length(float3(x, y, z)) : length(float2(x, y));
         float aa = max(fwidth(dist), 1e-4);
@@ -86,20 +141,75 @@ Shader "Hidden/AviCreatorEssentials/Paint"
             }
         }
 
-        a = saturate(a * _Strength);
-        return float4(a, a, a, a);
+        float vary;
+        a *= AP_PaintTexture(across, acrossW, i.wpos / max(_GrainScale, 1e-6), vary);
+        return AP_StampOut(a, vary);
     }
 
     // ---------------- 2D (texture space) dab ----------------
-    float4 frag_stamp2d(ap_v2f_quad i) : SV_Target
+    struct ap_appdata_dab
     {
+        float4 vertex : POSITION;   // xy = position in UV space, z = per-dab strength
+        float2 local : TEXCOORD0;   // -1..1 brush local coordinates
+        float2 extra : TEXCOORD1;   // x = position across the stroke, in brush radii
+    };
+
+    struct v2f_dab
+    {
+        float4 pos : SV_POSITION;
+        float2 local : TEXCOORD0;
+        float2 uv : TEXCOORD1;
+        float strength : TEXCOORD2;
+        float across : TEXCOORD3;
+    };
+
+    v2f_dab ap_vert_dab(ap_appdata_dab v)
+    {
+        v2f_dab o;
+        o.pos = AP_UVToClip(v.vertex.xy);
+        o.local = v.local;
+        o.uv = v.vertex.xy;
+        o.strength = v.vertex.z;
+        o.across = v.extra.x;
+        return o;
+    }
+
+    float4 frag_stamp2d(v2f_dab i) : SV_Target
+    {
+        float acrossW = fwidth(i.across);
         float dist = length(i.local);
         float aa = max(fwidth(dist), 1e-4);
         float a = BrushShape(i.local, dist, aa);
         if (_ClipIslands > 0.5)
             a *= step(0.5, AP_SAMPLE_LOD(_IslandTex, i.uv, 0).r);
-        a = saturate(a * _Strength * i.strength);
-        return float4(a, a, a, a);
+        float vary;
+        float3 grainPos = float3(i.uv * _GrainTexSize / max(_GrainScale, 1e-4), 0.37);
+        a *= AP_PaintTexture(i.across, acrossW, grainPos, vary);
+        return AP_StampOut(a * i.strength, vary);
+    }
+
+    // ---------------- 3D gradient (premultiplied color, by world position) ----------------
+    float3 _GradStart;
+    float3 _GradDir;        // end - start, divided by its squared length
+    float _GradLength;
+    float _GradShape;       // 0 linear, 1 radial, 2 reflected
+    float4 _GradColorA;     // straight alpha, gamma
+    float4 _GradColorB;
+
+    float4 frag_gradient(ap_v2f_uv i) : SV_Target
+    {
+        float3 d = i.wpos - _GradStart;
+        float t;
+        if (_GradShape < 0.5) t = dot(d, _GradDir);
+        else if (_GradShape < 1.5) t = length(d) / max(_GradLength, 1e-6);
+        else t = abs(dot(d, _GradDir));
+        t = saturate(t);
+        float4 a = float4(_GradColorA.rgb * _GradColorA.a, _GradColorA.a);
+        float4 b = float4(_GradColorB.rgb * _GradColorB.a, _GradColorB.a);
+        float4 c = lerp(a, b, t);
+        // A little dither so smooth gradients do not band once stored in an 8-bit layer.
+        c.rgb += (AP_Hash12(i.pos.xy) - 0.5) / 255.0 * c.a;
+        return c;
     }
 
     // ---------------- coverage (island mask / triangle fills) ----------------
@@ -300,6 +410,139 @@ Shader "Hidden/AviCreatorEssentials/Paint"
         float3 ts = normalize(float3(dot(W, T), dot(W, B), dot(W, N)));
         return float4(ts * 0.5 + 0.5, 1.0);
     }
+    // ---------------- star field ----------------
+    // Stars are scattered through 3D space in cells; the ones near the surface show. Because the position comes
+    // from the mesh (rest pose), they spread evenly across the model whatever its UV layout, without seams.
+    float _StarCell;        // size of one cell (world units on the model, or one tile in flat mode)
+    float _StarAmount;      // chance a cell holds a star
+    float _StarSize;        // core radius, fraction of a cell
+    float _StarSizeVar;
+    float _StarGlow;        // glow radius, multiple of the core
+    float _StarGlowStrength;
+    float _StarSparkle;     // share of stars with four-point flares
+    float _StarFlare;       // flare length, multiple of the core
+    float _StarWhite;       // how white the star cores are
+    float _StarSeed;
+    float4 _StarColorA;
+    float4 _StarColorB;
+    float _Nebula;          // soft glowing clouds under the stars
+    float _NebulaScale;     // in cells
+    float _StarPeriod;      // flat mode: cells across the texture (makes it tile); 0 = no tiling
+    float _StarMatcap;      // flat mode: draw as a matcap disc with a glowing rim
+
+    void AP_StarField(float3 p, float3 N, float3 up, float3 rt, float aa, bool isFlat, out float3 color, out float alpha)
+    {
+        float3 base = floor(p);
+        float sumI = 0.0;
+        float3 sumC = float3(0, 0, 0);
+        int zr = isFlat ? 0 : 1;
+        [loop] for (int oz = -zr; oz <= zr; oz++)
+        {
+        [unroll] for (int oy = -1; oy <= 1; oy++)
+        {
+        [unroll] for (int ox = -1; ox <= 1; ox++)
+        {
+            float3 c = base + float3(ox, oy, oz);
+            float3 key = c;
+            if (_StarPeriod > 0.5) key.xy = c.xy - _StarPeriod * floor(c.xy / _StarPeriod);
+            key += _StarSeed * float3(1.731, 2.917, 0.413);
+            float3 h = AP_Hash33(key);
+            float3 h2 = AP_Hash33(key + 19.19);
+            float3 sp = c + 0.15 + h2 * 0.7;
+            if (isFlat) sp.z = p.z;
+            float3 v = p - sp;
+            float hgt = dot(v, N);
+            float vis = 1.0 - smoothstep(0.25, 0.5, abs(hgt));
+            if (h.x <= _StarAmount && vis > 0.0)
+            {
+                float2 q = float2(dot(v, rt), dot(v, up));
+                float dq = length(q);
+
+                float smallK = h.y * h.y * h.y * 1.6 + 0.15;
+                float r = _StarSize * lerp(1.0, smallK, _StarSizeVar);
+                float bright = lerp(0.55, 1.0, h.z);
+
+                float core = saturate((r - dq) / max(aa + r * 0.35, 1e-4));
+                float gr = min(r * _StarGlow, 0.5);
+                float glow = _StarGlowStrength * exp(-dq * dq / max(gr * gr, 1e-6));
+                float flare = 0.0;
+                if (h2.z < _StarSparkle)
+                {
+                    float fl = min(r * _StarFlare, 0.95);
+                    float w = max(r * 0.2, aa * 0.6);
+                    float ax = saturate(abs(q.x) / fl);
+                    float ay = saturate(abs(q.y) / fl);
+                    float wx = w * (1.0 - ax) + 1e-5;
+                    float wy = w * (1.0 - ay) + 1e-5;
+                    flare = (1.0 - ax) * (1.0 - ax) * exp(-q.y * q.y / (wx * wx))
+                          + (1.0 - ay) * (1.0 - ay) * exp(-q.x * q.x / (wy * wy));
+                }
+                float window = 1.0 - smoothstep(0.75, 1.0, dq);
+                float I = (core + glow + flare) * vis * window * bright;
+                float3 tint = lerp(_StarColorA.rgb, _StarColorB.rgb, h2.y);
+                float3 col = lerp(tint, float3(1, 1, 1), saturate(core + flare * 0.5) * _StarWhite);
+                sumC += col * I;
+                sumI += I;
+            }
+        }
+        }
+        }
+        alpha = saturate(sumI);
+        color = sumI > 1e-5 ? saturate(sumC / sumI) : _StarColorA.rgb;
+
+        if (_Nebula > 0.001)
+        {
+            float3 np = p / max(_NebulaScale, 1e-3) + _StarSeed * 0.137;
+            float n = AP_ValueNoise(np) * 0.55 + AP_ValueNoise(np * 2.1 + 3.7) * 0.3 + AP_ValueNoise(np * 4.3 + 9.1) * 0.15;
+            float n2 = AP_ValueNoise(np * 0.6 + 31.7);
+            float an = saturate((n - 0.42) * 2.6) * _Nebula;
+            float3 cn = lerp(_StarColorA.rgb, _StarColorB.rgb, n2);
+            float ao = alpha + an * (1.0 - alpha);
+            color = ao > 1e-5 ? (color * alpha + cn * an * (1.0 - alpha)) / ao : color;
+            alpha = ao;
+        }
+    }
+
+    // On the model: written into the texture's UV layout, positions from the rest pose (like Local Pos).
+    float4 frag_stars(v2f_wrap i) : SV_Target
+    {
+        float3 p = i.wpos / max(_StarCell, 1e-5);
+        float aa = length(fwidth(p));
+        float3 N = normalize(i.wnrm);
+        float3 up = float3(0, 1, 0) - N * N.y;
+        if (dot(up, up) < 1e-4) up = float3(0, 0, 1) - N * N.z;
+        up = normalize(up);
+        float3 rt = cross(up, N);
+        float3 color;
+        float alpha;
+        AP_StarField(p, N, up, rt, aa, false, color, alpha);
+        return float4(color, alpha);
+    }
+
+    // Flat: a tiling star texture, or a matcap, for shaders that move the stars themselves (parallax, matcap).
+    float4 frag_stars_flat(v2f_img i) : SV_Target
+    {
+        float2 uv = i.uv;
+        float3 p = float3(uv * _StarPeriod, 0.5);
+        if (_StarPeriod < 0.5) p = float3(uv / max(_StarCell, 1e-4), 0.5);
+        float aa = length(fwidth(p));
+        float rim = 0.0;
+        if (_StarMatcap > 0.5)
+        {
+            float2 c = uv * 2.0 - 1.0;
+            float r = length(c);
+            if (r > 1.0) return float4(0, 0, 0, 1);
+            rim = pow(saturate((r - 0.55) / 0.45), 2.2);
+        }
+        float3 color;
+        float alpha;
+        AP_StarField(p, float3(0, 0, 1), float3(0, 1, 0), float3(1, 0, 0), aa, true, color, alpha);
+        float3 outC = color * alpha;
+        if (_StarMatcap > 0.5)
+            outC += lerp(_StarColorA.rgb, _StarColorB.rgb, 0.5) * rim * _StarGlowStrength;
+        return float4(saturate(outC), 1.0);
+    }
+
     ENDCG
 
     SubShader
@@ -325,7 +568,7 @@ Shader "Hidden/AviCreatorEssentials/Paint"
             Blend One One
             CGPROGRAM
             #pragma target 4.5
-            #pragma vertex ap_vert_quad
+            #pragma vertex ap_vert_dab
             #pragma fragment frag_stamp2d
             ENDCG
         }
@@ -447,6 +690,99 @@ Shader "Hidden/AviCreatorEssentials/Paint"
             #pragma target 4.5
             #pragma vertex vert_wrap
             #pragma fragment frag_wrap
+            ENDCG
+        }
+
+        // 12 - 3D brush dab, paint mode: coverage is summed so overlapping dabs build up like real paint
+        Pass
+        {
+            Blend One One
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex ap_vert_uv
+            #pragma fragment frag_stamp3d
+            ENDCG
+        }
+
+        // 13 - 3D dab, paint mode, conservative and max-combined: only fills texels the exact pass missed
+        // (thin triangles, island borders), so shared triangle edges are never counted twice
+        Pass
+        {
+            BlendOp Max
+            Blend One One
+            Conservative True
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex ap_vert_uv
+            #pragma fragment frag_stamp3d
+            ENDCG
+        }
+
+        // 14 - 2D dab, paint mode (summed)
+        Pass
+        {
+            Blend One One
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex ap_vert_dab
+            #pragma fragment frag_stamp2d
+            ENDCG
+        }
+
+        // 15 - 3D gradient
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex ap_vert_uv
+            #pragma fragment frag_gradient
+            ENDCG
+        }
+
+        // 16 - 3D gradient, conservative
+        Pass
+        {
+            Blend Off
+            Conservative True
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex ap_vert_uv
+            #pragma fragment frag_gradient
+            ENDCG
+        }
+
+        // 17 - stars on the rest-pose mesh
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_wrap
+            #pragma fragment frag_stars
+            ENDCG
+        }
+
+        // 18 - stars, conservative
+        Pass
+        {
+            Blend Off
+            Conservative True
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_wrap
+            #pragma fragment frag_stars
+            ENDCG
+        }
+
+        // 19 - flat star texture (tiling or matcap)
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_img
+            #pragma fragment frag_stars_flat
             ENDCG
         }
     }

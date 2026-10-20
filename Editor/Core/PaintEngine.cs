@@ -20,6 +20,7 @@ namespace AviCreatorEssentials
         public Vector3 position;
         public float radius;
         public Vector3 right, up, forward;   // tip orientation; forward = projection direction (towards the viewer)
+        public Vector3 across;               // world direction across the stroke (bristles run along it)
         public float strength;
         public Vector3 camPos;
         public bool occlusion;
@@ -33,6 +34,23 @@ namespace AviCreatorEssentials
         public float radiusPx;
         public float angle;   // radians
         public float strength;
+        public Vector2 across; // texel-space direction across the stroke (bristles run along it)
+    }
+
+    public enum GradientShape
+    {
+        Linear,
+        Radial,
+        Reflected,
+    }
+
+    /// <summary>A gradient laid over the model in 3D, from one point to another.</summary>
+    public struct GradientParams
+    {
+        public Vector3 start, end;
+        public GradientShape shape;
+        public Color colorA;   // gamma, straight alpha
+        public Color colorB;
     }
 
     public class StrokeTarget
@@ -44,6 +62,11 @@ namespace AviCreatorEssentials
         public RenderTexture snapshot;
         public RenderTexture stroke;
         public RenderTexture stamp;
+        public RenderTexture paint;         // paint mode and gradients: premultiplied color laid down by this stroke
+        public RenderTexture paintStamp;    // paint mode: summed coverage of one batch of dabs
+        public RenderTexture mixSample;     // color mixing: colors under the dabs, averaged by its mips
+        public RenderTexture mixColor;      // color mixing: the color the brush carries (1x1), and its ping-pong partner
+        public RenderTexture mixColorNext;
         public bool touched;
         public bool pending;
     }
@@ -59,6 +82,8 @@ namespace AviCreatorEssentials
         public readonly List<IHistoryEntry> prefix = new List<IHistoryEntry>();
         public Matrix4x4 viewVP = Matrix4x4.identity;
         public bool hasDepth;
+        public bool paintMode;              // set by the viewport: dabs build up as wet paint (paint tool, not on masks)
+        public float seed;                  // varies the bristle pattern from stroke to stroke
 
         public StrokeTarget Find(TextureSet set)
         {
@@ -613,6 +638,7 @@ namespace AviCreatorEssentials
                 viewVP = viewVP,
                 hasDepth = hasDepth,
                 maskValue = tool == StrokeTool.Erase ? 0f : APUtil.Luminance(color),
+                seed = UnityEngine.Random.value * 997f,
             };
             foreach (var set in sets) AddTarget(ctx, set);
             return ctx;
@@ -698,6 +724,41 @@ namespace AviCreatorEssentials
             m.SetFloat(APIds.Hardness, bs.hardness);
         }
 
+        /// <summary>Bristle streaks and canvas grain, shared by the 3D and 2D dabs.</summary>
+        void SetupPaintTexture(Material m, StrokeContext ctx, BrushSettings bs)
+        {
+            m.SetFloat(APIds.Bristles, Mathf.Clamp01(bs.bristles));
+            m.SetFloat(APIds.BristleScale, Mathf.Lerp(3f, 40f, Mathf.Clamp01(bs.bristleDensity)));
+            m.SetFloat(APIds.BristleSeed, ctx.seed);
+            m.SetFloat(APIds.Grain, Mathf.Clamp01(bs.grain));
+        }
+
+        /// <summary>Paint mode applies to painting (not erasing) on layer content, not on masks.</summary>
+        static bool UsesPaint(StrokeContext ctx, StrokeTarget t) => ctx.paintMode && ctx.tool == StrokeTool.Paint && !t.mask;
+
+        /// <summary>
+        /// Paint mode coverage per dab, scaled by spacing so a stroke at full flow covers about the same however
+        /// tightly the dabs are packed (about 1 / spacing dabs overlap each texel along the stroke).
+        /// </summary>
+        static float PaintGain(BrushSettings bs) => Mathf.Clamp(bs.spacing, 0.02f, 1f) * 3f;
+
+        void EnsurePaintBuffers(StrokeTarget t, bool stamp)
+        {
+            if (t.paint == null)
+            {
+                var desc = new RenderTextureDescriptor(t.set.width, t.set.height, APResources.PaintStrokeFormat, 0);
+                t.paint = RenderTexture.GetTemporary(desc);
+                t.paint.filterMode = FilterMode.Bilinear;
+                APUtil.Clear(t.paint, new Color(0, 0, 0, 0));
+            }
+            if (stamp && t.paintStamp == null)
+            {
+                var desc = new RenderTextureDescriptor(t.set.width, t.set.height, APResources.PaintStampFormat, 0);
+                t.paintStamp = RenderTexture.GetTemporary(desc);
+                t.paintStamp.filterMode = FilterMode.Bilinear;
+            }
+        }
+
         public void Dabs3D(StrokeContext ctx, List<Dab3D> dabs, BrushTip tip, BrushSettings bs)
         {
             if (dabs.Count == 0) return;
@@ -706,6 +767,9 @@ namespace AviCreatorEssentials
             var m = APResources.Paint;
             var comp = APResources.Composite;
             SetupTip(m, tip, bs);
+            SetupPaintTexture(m, ctx, bs);
+            m.SetFloat(APIds.GrainScale, Mathf.Max(1e-4f, bs.radius * 0.12f));
+            m.SetFloat(APIds.PaintGain, PaintGain(bs));
             m.SetFloat(APIds.ProjMode, bs.projection == BrushProjection.Projected ? 1f : 0f);
             m.SetFloat(APIds.DepthRange, Mathf.Max(0.05f, bs.depthRange));
             m.SetFloat(APIds.BackfaceCos, Mathf.Cos(bs.backfaceAngle * Mathf.Deg2Rad));
@@ -715,44 +779,108 @@ namespace AviCreatorEssentials
 
             foreach (var t in ctx.targets)
             {
+                bool paint = UsesPaint(ctx, t);
+                if (paint) EnsurePaintBuffers(t, true);
+                m.SetFloat(APIds.PaintAccum, paint ? 1f : 0f);
                 bool any = false;
+                int count = 0;
                 foreach (var dab in dabs)
                 {
                     if (!SphereTouches(t.set.worldBounds, dab.position, dab.radius * Mathf.Max(1f, bs.depthRange))) continue;
                     if (!any)
                     {
-                        Graphics.SetRenderTarget(t.stamp);
+                        Graphics.SetRenderTarget(paint ? t.paintStamp : t.stamp);
                         GL.Clear(false, true, Color.black);
                         any = true;
                     }
+                    count++;
                     m.SetVector(APIds.BrushPos, dab.position);
                     m.SetFloat(APIds.BrushRadius, dab.radius);
                     m.SetVector(APIds.BrushRight, dab.right);
                     m.SetVector(APIds.BrushUp, dab.up);
                     m.SetVector(APIds.BrushFwd, dab.forward);
+                    m.SetVector(APIds.BrushAcross, dab.across);
                     m.SetFloat(APIds.Strength, dab.strength);
                     m.SetVector(APIds.CamPos, dab.camPos);
                     m.SetFloat(APIds.UseOcclusion, dab.occlusion && ctx.hasDepth && m_Depth != null ? 1f : 0f);
                     m.SetFloat(APIds.OcclusionBias, occlusionBias + dab.radius * 0.15f);
                     m.SetFloat(APIds.UseBackface, dab.backface ? 1f : 0f);
                     m.SetInt(APIds.UVChannel, t.set.uvChannel);
-                    m.SetPass(PaintPass.Stamp3DPass);
-                    foreach (var u in t.set.users)
+                    // Paint mode sums dabs, so it rasterises exactly (each texel once per triangle pair) and then only
+                    // tops up the texels a conservative pass would add, without counting shared edges twice.
+                    int passes = paint ? (PaintPass.UseConservative ? 2 : 1) : 1;
+                    for (int pi = 0; pi < passes; pi++)
                     {
-                        if (u.renderer < 0 || u.renderer >= m_Meshes.entries.Count) continue;
-                        var e = m_Meshes.entries[u.renderer];
-                        if (!e.Visible || u.submesh >= e.SubmeshCount) continue;
-                        Graphics.DrawMeshNow(e.paintMesh, e.matrix, u.submesh);
+                        m.SetPass(paint ? (pi == 0 ? PaintPass.Stamp3DPaint : PaintPass.Stamp3DPaintConservative) : PaintPass.Stamp3DPass);
+                        foreach (var u in t.set.users)
+                        {
+                            if (u.renderer < 0 || u.renderer >= m_Meshes.entries.Count) continue;
+                            var e = m_Meshes.entries[u.renderer];
+                            if (!e.Visible || u.submesh >= e.SubmeshCount) continue;
+                            Graphics.DrawMeshNow(e.paintMesh, e.matrix, u.submesh);
+                        }
                     }
                 }
                 if (any)
                 {
-                    Graphics.Blit(t.stamp, t.stroke, comp, CompPass.Accumulate);
+                    if (paint) FinishPaintBatch(ctx, t, bs, count);
+                    else Graphics.Blit(t.stamp, t.stroke, comp, CompPass.Accumulate);
                     t.pending = true;
                     t.touched = true;
                 }
             }
+            m.SetFloat(APIds.PaintAccum, 0f);
             RenderTexture.active = prev;
+        }
+
+        /// <summary>
+        /// Lays a batch of paint-mode dabs over the stroke. With color mixing, the brush first picks up some of the
+        /// color under the dabs (averaged on the GPU through a mip chain, so nothing is read back).
+        /// </summary>
+        void FinishPaintBatch(StrokeContext ctx, StrokeTarget t, BrushSettings bs, int dabCount)
+        {
+            var comp = APResources.Composite;
+            float mix = Mathf.Clamp01(bs.colorMixing);
+            bool mixing = mix > 0.001f && t.set.lastComposite != null;
+            if (mixing)
+            {
+                if (t.mixSample == null)
+                {
+                    int w = Mathf.Max(1, Mathf.Min(512, t.set.width));
+                    int h = Mathf.Max(1, Mathf.Min(512, t.set.height));
+                    var desc = new RenderTextureDescriptor(w, h, APResources.MixFormat, 0)
+                    {
+                        useMipMap = true,
+                        autoGenerateMips = true,
+                    };
+                    t.mixSample = RenderTexture.GetTemporary(desc);
+                    t.mixSample.filterMode = FilterMode.Trilinear;
+                    var one = new RenderTextureDescriptor(1, 1, APResources.MixFormat, 0);
+                    t.mixColor = RenderTexture.GetTemporary(one);
+                    t.mixColorNext = RenderTexture.GetTemporary(one);
+                    t.mixColor.filterMode = t.mixColorNext.filterMode = FilterMode.Point;
+                    APUtil.Clear(t.mixColor, new Color(ctx.color.r, ctx.color.g, ctx.color.b, 1f));
+                }
+                comp.SetTexture(APIds.LayerTex, t.set.lastComposite);
+                Graphics.Blit(t.paintStamp, t.mixSample, comp, CompPass.MixSample);
+                // mixSample's mips are regenerated as soon as it stops being the render target.
+                int lastMip = Mathf.FloorToInt(Mathf.Log(Mathf.Max(t.mixSample.width, t.mixSample.height), 2f));
+                comp.SetTexture(APIds.LayerTex, t.mixSample);
+                comp.SetFloat(APIds.MixLod, lastMip);
+                comp.SetFloat(APIds.MixPick, 1f - Mathf.Pow(1f - mix * 0.1f, dabCount));
+                comp.SetFloat(APIds.MixReload, 1f - Mathf.Pow(1f - (1f - mix) * 0.1f, dabCount));
+                comp.SetVector(APIds.BrushColor, APUtil.V(ctx.color));
+                Graphics.Blit(t.mixColor, t.mixColorNext, comp, CompPass.MixUpdate);
+                var tmp = t.mixColor;
+                t.mixColor = t.mixColorNext;
+                t.mixColorNext = tmp;
+            }
+            comp.SetFloat(APIds.UseRes, mixing ? 1f : 0f);
+            comp.SetTexture(APIds.ResTex, mixing ? (Texture)t.mixColor : APResources.White);
+            comp.SetVector(APIds.BrushColor, APUtil.V(ctx.color));
+            comp.SetFloat(APIds.ColorVar, Mathf.Clamp01(bs.colorVariation));
+            Graphics.Blit(t.paintStamp, t.paint, comp, CompPass.PaintAccum);
+            comp.SetFloat(APIds.UseRes, 0f);
         }
 
         public void Dabs2D(StrokeContext ctx, TextureSet set, List<Dab2D> dabs, BrushTip tip, BrushSettings bs)
@@ -761,33 +889,60 @@ namespace AviCreatorEssentials
             if (t == null || dabs.Count == 0) return;
             var verts = new List<Vector3>();
             var locals = new List<Vector2>();
+            var extras = new List<Vector2>();
             var tris = new List<int>();
             foreach (var d in dabs)
             {
-                AddQuad(verts, locals, tris, d.uv, d.radiusPx, d.radiusPx, d.angle, set.width, set.height, false, d.strength);
+                AddDabQuad(verts, locals, extras, tris, d.uv, d.radiusPx, d.angle, d.across, set.width, set.height, false, d.strength);
                 if (bs.mirrorU2D)
-                    AddQuad(verts, locals, tris, new Vector2(1f - d.uv.x, d.uv.y), d.radiusPx, d.radiusPx, -d.angle, set.width, set.height, true, d.strength);
+                    AddDabQuad(verts, locals, extras, tris, new Vector2(1f - d.uv.x, d.uv.y), d.radiusPx, -d.angle,
+                        new Vector2(-d.across.x, d.across.y), set.width, set.height, true, d.strength);
             }
             var mesh = TempMesh();
             mesh.SetVertices(verts);
             mesh.SetUVs(0, locals);
+            mesh.SetUVs(1, extras);
             mesh.SetTriangles(tris, 0, false);
 
+            bool paint = UsesPaint(ctx, t);
+            if (paint) EnsurePaintBuffers(t, true);
             var prev = RenderTexture.active;
             var m = APResources.Paint;
             SetupTip(m, tip, bs);
+            SetupPaintTexture(m, ctx, bs);
+            m.SetFloat(APIds.GrainScale, Mathf.Max(0.75f, bs.radius2D * set.width * 0.12f));
+            m.SetVector(APIds.GrainTexSize, new Vector4(set.width, set.height, 0, 0));
+            m.SetFloat(APIds.PaintAccum, paint ? 1f : 0f);
+            m.SetFloat(APIds.PaintGain, PaintGain(bs));
             m.SetFloat(APIds.Strength, 1f);
             m.SetFloat(APIds.ClipIslands, bs.clipToIslands2D ? 1f : 0f);
             m.SetTexture(APIds.IslandTex, set.island != null ? (Texture)set.island : APResources.White);
             m.SetVector(APIds.UVTransform, new Vector4(1, 1, 0, 0));
-            Graphics.SetRenderTarget(t.stamp);
+            Graphics.SetRenderTarget(paint ? t.paintStamp : t.stamp);
             GL.Clear(false, true, Color.black);
-            m.SetPass(PaintPass.Stamp2D);
+            m.SetPass(paint ? PaintPass.Stamp2DPaint : PaintPass.Stamp2D);
             Graphics.DrawMeshNow(mesh, Matrix4x4.identity, 0);
-            Graphics.Blit(t.stamp, t.stroke, APResources.Composite, CompPass.Accumulate);
+            if (paint) FinishPaintBatch(ctx, t, bs, dabs.Count);
+            else Graphics.Blit(t.stamp, t.stroke, APResources.Composite, CompPass.Accumulate);
+            m.SetFloat(APIds.PaintAccum, 0f);
             t.pending = true;
             t.touched = true;
             RenderTexture.active = prev;
+        }
+
+        /// <summary>A dab quad whose second UV holds each corner's position across the stroke, in brush radii.</summary>
+        static void AddDabQuad(List<Vector3> verts, List<Vector2> locals, List<Vector2> extras, List<int> tris, Vector2 uv,
+            float r, float angle, Vector2 across, int width, int height, bool mirror, float strength)
+        {
+            int start = verts.Count;
+            AddQuad(verts, locals, tris, uv, r, r, angle, width, height, mirror, strength);
+            var cpx = new Vector2(uv.x * width, uv.y * height);
+            float inv = 1f / Mathf.Max(r, 1e-4f);
+            for (int i = start; i < verts.Count; i++)
+            {
+                var offset = new Vector2(verts[i].x * width, verts[i].y * height) - cpx;
+                extras.Add(new Vector2(Vector2.Dot(offset, across) * inv, 0f));
+            }
         }
 
         static void AddQuad(List<Vector3> verts, List<Vector2> locals, List<int> tris, Vector2 uv, float rx, float ry,
@@ -857,12 +1012,12 @@ namespace AviCreatorEssentials
             foreach (var t in ctx.targets)
             {
                 if (!t.pending) continue;
-                comp.SetTexture(APIds.StrokeTex, t.stroke);
+                comp.SetTexture(APIds.StrokeTex, t.paint != null ? t.paint : t.stroke);
                 comp.SetVector(APIds.BrushColor, APUtil.V(ctx.color));
                 comp.SetFloat(APIds.Opacity, ctx.opacity);
                 comp.SetFloat(APIds.LockAlpha, !t.mask && t.layer.lockAlpha ? 1f : 0f);
                 comp.SetFloat(APIds.MaskValue, ctx.maskValue);
-                float mode = t.mask ? 2f : (ctx.tool == StrokeTool.Erase ? 1f : 0f);
+                float mode = t.paint != null ? (t.mask ? 4f : 3f) : t.mask ? 2f : (ctx.tool == StrokeTool.Erase ? 1f : 0f);
                 comp.SetFloat(APIds.ApplyMode, mode);
                 bool useSel = t.set.HasSelection;
                 if (useSel && (t.set.selectionDirty || t.set.selectionRT == null)) BuildSelection(t.set);
@@ -882,9 +1037,7 @@ namespace AviCreatorEssentials
             var entries = new List<IHistoryEntry>(ctx.prefix);
             foreach (var t in ctx.targets)
             {
-                if (t.stroke != null) RenderTexture.ReleaseTemporary(t.stroke);
-                if (t.stamp != null) RenderTexture.ReleaseTemporary(t.stamp);
-                t.stroke = t.stamp = null;
+                ReleaseStrokeBuffers(t);
                 if (t.touched)
                 {
                     var set = t.set;
@@ -900,13 +1053,28 @@ namespace AviCreatorEssentials
             return new CompoundEntry(ctx.name, entries);
         }
 
+        static void ReleaseStrokeBuffers(StrokeTarget t)
+        {
+            void Rel(ref RenderTexture rt)
+            {
+                if (rt != null) RenderTexture.ReleaseTemporary(rt);
+                rt = null;
+            }
+            Rel(ref t.stroke);
+            Rel(ref t.stamp);
+            Rel(ref t.paint);
+            Rel(ref t.paintStamp);
+            Rel(ref t.mixSample);
+            Rel(ref t.mixColor);
+            Rel(ref t.mixColorNext);
+        }
+
         public void CancelStroke(StrokeContext ctx)
         {
             foreach (var t in ctx.targets)
             {
                 if (t.snapshot != null) APUtil.Copy(t.snapshot, t.target);
-                if (t.stroke != null) RenderTexture.ReleaseTemporary(t.stroke);
-                if (t.stamp != null) RenderTexture.ReleaseTemporary(t.stamp);
+                ReleaseStrokeBuffers(t);
                 APUtil.Release(ref t.snapshot);
                 NotifyChanged(t.set);
             }
@@ -1048,6 +1216,138 @@ namespace AviCreatorEssentials
             RenderTexture.active = prev;
             t.pending = true;
             t.touched = true;
+        }
+
+        // ================================================================== 3D gradient
+
+        /// <summary>
+        /// Draws a gradient laid over the model in 3D (by world position, not by UV), replacing whatever the gradient
+        /// drew before in this stroke, so it can be redrawn live while the end point is dragged.
+        /// </summary>
+        public void Gradient(StrokeContext ctx, GradientParams g)
+        {
+            m_Meshes.EnsurePosed();
+            var prev = RenderTexture.active;
+            var m = APResources.Paint;
+            var dir = g.end - g.start;
+            float len2 = Mathf.Max(dir.sqrMagnitude, 1e-12f);
+            m.SetVector(APIds.GradStart, g.start);
+            m.SetVector(APIds.GradDir, dir / len2);
+            m.SetFloat(APIds.GradLength, Mathf.Sqrt(len2));
+            m.SetFloat(APIds.GradShape, (float)g.shape);
+            m.SetVector(APIds.UVTransform, new Vector4(1, 1, 0, 0));
+            int[] passes = PaintPass.UseConservative ? new[] { PaintPass.GradientConservative, PaintPass.Gradient } : new[] { PaintPass.Gradient };
+            foreach (var t in ctx.targets)
+            {
+                EnsurePaintBuffers(t, false);
+                var a = g.colorA;
+                var b = g.colorB;
+                if (t.mask)
+                {
+                    // Masks get gray: the brush's mask value (white on fill layers) and the second color's brightness.
+                    float va = ctx.maskValue;
+                    float vb = APUtil.Luminance(b);
+                    a = new Color(va, va, va, a.a);
+                    b = new Color(vb, vb, vb, b.a);
+                }
+                m.SetVector(APIds.GradColorA, APUtil.V(a));
+                m.SetVector(APIds.GradColorB, APUtil.V(b));
+                m.SetInt(APIds.UVChannel, t.set.uvChannel);
+                Graphics.SetRenderTarget(t.paint);
+                GL.Clear(false, true, new Color(0, 0, 0, 0));
+                foreach (int pass in passes)
+                {
+                    m.SetPass(pass);
+                    foreach (var u in t.set.users)
+                    {
+                        if (u.renderer < 0 || u.renderer >= m_Meshes.entries.Count) continue;
+                        var e = m_Meshes.entries[u.renderer];
+                        if (!e.Visible || u.submesh >= e.SubmeshCount) continue;
+                        Graphics.DrawMeshNow(e.paintMesh, e.matrix, u.submesh);
+                    }
+                }
+                t.pending = true;
+                t.touched = true;
+            }
+            RenderTexture.active = prev;
+        }
+
+        // ================================================================== stars
+
+        static void SetupStars(Material m, StarSettings st)
+        {
+            m.SetFloat(APIds.StarAmount, Mathf.Clamp01(st.amount));
+            m.SetFloat(APIds.StarSize, Mathf.Clamp(st.size, 0.005f, 0.4f));
+            m.SetFloat(APIds.StarSizeVar, Mathf.Clamp01(st.sizeVariation));
+            m.SetFloat(APIds.StarGlow, Mathf.Max(1f, st.glowSize));
+            m.SetFloat(APIds.StarGlowStrength, Mathf.Max(0f, st.glow));
+            m.SetFloat(APIds.StarSparkle, Mathf.Clamp01(st.sparkles));
+            m.SetFloat(APIds.StarFlare, Mathf.Max(1f, st.sparkleLength));
+            m.SetFloat(APIds.StarWhite, Mathf.Clamp01(st.whiteCores));
+            m.SetFloat(APIds.StarSeed, st.seed);
+            m.SetVector(APIds.StarColorA, APUtil.V(st.colorA));
+            m.SetVector(APIds.StarColorB, APUtil.V(st.colorB));
+            m.SetFloat(APIds.Nebula, Mathf.Clamp01(st.nebula));
+            m.SetFloat(APIds.NebulaScale, Mathf.Max(0.5f, st.nebulaSize / Mathf.Max(1e-4f, st.spacing)));
+        }
+
+        /// <summary>
+        /// Scatters stars over the rest-pose model in 3D and writes them into the texture's UV layout, so they are
+        /// spread evenly across seams and stay stuck to the model (like a Local Pos projection, but baked).
+        /// </summary>
+        public void RenderStars(TextureSet set, RenderTexture target, StarSettings st)
+        {
+            m_Meshes.EnsureRestMeshes();
+            var prev = RenderTexture.active;
+            var m = APResources.Paint;
+            SetupStars(m, st);
+            m.SetFloat(APIds.StarCell, Mathf.Max(1e-4f, st.spacing));
+            m.SetFloat(APIds.StarPeriod, 0f);
+            m.SetFloat(APIds.StarMatcap, 0f);
+            m.SetVector(APIds.UVTransform, new Vector4(1, 1, 0, 0));
+            m.SetInt(APIds.UVChannel, set.uvChannel);
+            Graphics.SetRenderTarget(target);
+            GL.Clear(false, true, new Color(0, 0, 0, 0));
+            int[] passes = PaintPass.UseConservative ? new[] { PaintPass.StarsConservative, PaintPass.Stars } : new[] { PaintPass.Stars };
+            foreach (int pass in passes)
+            {
+                foreach (var u in set.users)
+                {
+                    if (u.renderer < 0 || u.renderer >= m_Meshes.entries.Count) continue;
+                    var e = m_Meshes.entries[u.renderer];
+                    if (e.restMesh == null || u.submesh >= e.SubmeshCount) continue;
+                    m.SetPass(pass);
+                    Graphics.DrawMeshNow(e.restMesh, Matrix4x4.identity, u.submesh);
+                }
+            }
+            RenderTexture.active = prev;
+            NotifyChanged(set);
+        }
+
+        /// <summary>
+        /// A flat star image for shaders that move the stars themselves: a seamless tiling texture (parallax,
+        /// Local/World Pos slots) or a matcap with a glowing rim. Returns PNG bytes.
+        /// </summary>
+        public static byte[] RenderStarsImage(StarSettings st, int size, bool matcap)
+        {
+            var m = APResources.Paint;
+            var tile = new StarSettings();
+            JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(st), tile);
+            // A tile holds about as many stars across as 10 cm of the model would.
+            float cells = Mathf.Clamp(Mathf.Round(0.1f / Mathf.Max(1e-3f, st.spacing)), 2f, 64f);
+            if (!matcap) tile.nebula = 0f;   // the cloud noise does not repeat, so it would show a seam
+            var prev = RenderTexture.active;
+            var rt = APUtil.CreateRT(size, size, GraphicsFormat.R8G8B8A8_UNorm, "Stars");
+            SetupStars(m, tile);
+            m.SetFloat(APIds.StarCell, 1f / cells);
+            m.SetFloat(APIds.StarPeriod, matcap ? 0f : cells);
+            m.SetFloat(APIds.StarMatcap, matcap ? 1f : 0f);
+            m.SetFloat(APIds.NebulaScale, Mathf.Max(0.5f, st.nebulaSize / Mathf.Max(1e-4f, st.spacing)));
+            Graphics.Blit(APResources.White, rt, m, PaintPass.StarsFlat);
+            RenderTexture.active = prev;
+            var png = APUtil.EncodePNG(rt);
+            APUtil.Release(ref rt);
+            return png;
         }
 
         /// <summary>Flood-fill selection by color similarity on the composited texture (CPU).</summary>

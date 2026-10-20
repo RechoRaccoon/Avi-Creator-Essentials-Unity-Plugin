@@ -12,6 +12,7 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         _WireTex ("", 2D) = "black" {}
         _SeedTex ("", 2D) = "white" {}
         _SelTex ("", 2D) = "white" {}
+        _ResTex ("", 2D) = "white" {}
     }
 
     CGINCLUDE
@@ -173,6 +174,25 @@ Shader "Hidden/AviCreatorEssentials/Composite"
     float4 frag_apply(v2f_img i) : SV_Target
     {
         float4 b = AP_SAMPLE_LOD(_MainTex, i.uv, 0);
+        if (_ApplyMode > 2.5)
+        {
+            // 3: premultiplied paint (paint mode, gradients) over the layer; 4: the same onto a mask, as gray
+            float4 p = AP_SAMPLE_LOD(_StrokeTex, i.uv, 0);
+            float k = _Opacity;
+            if (_UseSel > 0.5) k *= AP_SAMPLE_LOD(_SelTex, i.uv, 0).r;
+            float pa = saturate(p.a) * k;
+            float3 pc = p.a > 1e-5 ? saturate(p.rgb / p.a) : float3(0, 0, 0);
+            if (_ApplyMode > 3.5)
+            {
+                float v = lerp(b.r, dot(pc, float3(0.299, 0.587, 0.114)), pa);
+                return float4(v, v, v, 1);
+            }
+            if (_LockAlpha > 0.5)
+                return float4(lerp(b.rgb, pc, pa), b.a);
+            float ao = pa + b.a * (1.0 - pa);
+            float3 co = (ao > 1e-5) ? (pc * pa + b.rgb * b.a * (1.0 - pa)) / ao : pc;
+            return float4(co, ao);
+        }
         float s = saturate(AP_SAMPLE_LOD(_StrokeTex, i.uv, 0).r) * _Opacity;
         if (_UseSel > 0.5) s *= AP_SAMPLE_LOD(_SelTex, i.uv, 0).r;
         if (_ApplyMode > 1.5)
@@ -447,6 +467,55 @@ Shader "Hidden/AviCreatorEssentials/Composite"
     {
         return AP_SAMPLE_LOD(_MainTex, i.uv, 0);
     }
+
+    // ---------------- paint mode ----------------
+    // The stamp holds summed coverage (r) and coverage * bristle id (g) of one batch of dabs. Summed coverage S
+    // becomes 1 - exp(-S), which is exactly what laying the dabs over each other one by one would give, so the
+    // result does not depend on how the stroke was split into batches.
+    AP_TEX(_ResTex);      // 1x1 color the brush currently carries (color mixing)
+    float _UseRes;
+    float _ColorVar;
+    float _MixLod;
+    float _MixPick;
+    float _MixReload;
+
+    float3 AP_VaryColor(float3 c, float x)
+    {
+        float3 hsv = AP_RGBtoHSV(c);
+        hsv.x = frac(hsv.x + x * 0.08 + 1.0);
+        hsv.y = saturate(hsv.y * (1.0 + x * 0.5));
+        hsv.z = saturate(hsv.z * (1.0 + x * 0.9) + x * 0.06);
+        return AP_HSVtoRGB(hsv);
+    }
+
+    float4 frag_paint_accum(v2f_img i) : SV_Target
+    {
+        float2 s = AP_SAMPLE_LOD(_MainTex, i.uv, 0).rg;
+        if (s.r <= 1e-5) return float4(0, 0, 0, 0);
+        float a = (1.0 - exp(-s.r)) * _BrushColor.a;
+        float3 c = _UseRes > 0.5 ? AP_SAMPLE_LOD(_ResTex, float2(0.5, 0.5), 0).rgb : _BrushColor.rgb;
+        if (_ColorVar > 0.001) c = AP_VaryColor(c, (saturate(s.g / s.r) - 0.5) * _ColorVar);
+        return float4(c * a, a);
+    }
+
+    // Colors under this batch of dabs, weighted by coverage (averaged by the mip chain afterwards).
+    float4 frag_mix_sample(v2f_img i) : SV_Target
+    {
+        float s = AP_SAMPLE_LOD(_MainTex, i.uv, 0).r;
+        float w = 1.0 - exp(-max(s, 0.0));
+        float3 c = AP_SAMPLE_LOD(_LayerTex, i.uv, 0).rgb;
+        return float4(c * w, w);
+    }
+
+    // The brush picks up some of the color it passed over and is reloaded with some of its own color.
+    float4 frag_mix_update(v2f_img i) : SV_Target
+    {
+        float3 c = AP_SAMPLE_LOD(_MainTex, float2(0.5, 0.5), 0).rgb;
+        float4 m = AP_SAMPLE_LOD(_LayerTex, float2(0.5, 0.5), _MixLod);
+        if (m.a > 1e-9) c = lerp(c, saturate(m.rgb / m.a), _MixPick);
+        c = lerp(c, _BrushColor.rgb, _MixReload);
+        return float4(c, 1);
+    }
     ENDCG
 
     SubShader
@@ -604,6 +673,39 @@ Shader "Hidden/AviCreatorEssentials/Composite"
             #pragma target 4.5
             #pragma vertex vert_img
             #pragma fragment frag_mirror
+            ENDCG
+        }
+
+        // 15 paint mode: lay a batch of dabs over the stroke (premultiplied "over")
+        Pass
+        {
+            Blend One OneMinusSrcAlpha
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_img
+            #pragma fragment frag_paint_accum
+            ENDCG
+        }
+
+        // 16 color mixing: weighted colors under the dabs
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_img
+            #pragma fragment frag_mix_sample
+            ENDCG
+        }
+
+        // 17 color mixing: update the color the brush carries
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_img
+            #pragma fragment frag_mix_update
             ENDCG
         }
     }

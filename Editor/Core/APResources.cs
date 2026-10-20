@@ -20,6 +20,14 @@ namespace AviCreatorEssentials
         public const int DecalConservative = 9;
         public const int Wrap = 10;
         public const int WrapConservative = 11;
+        public const int Stamp3DPaint = 12;
+        public const int Stamp3DPaintConservative = 13;
+        public const int Stamp2DPaint = 14;
+        public const int Gradient = 15;
+        public const int GradientConservative = 16;
+        public const int Stars = 17;
+        public const int StarsConservative = 18;
+        public const int StarsFlat = 19;
 
         public static bool UseConservative => SystemInfo.supportsConservativeRaster;
         public static int Stamp3DPass => UseConservative ? Stamp3DConservative : Stamp3D;
@@ -44,6 +52,9 @@ namespace AviCreatorEssentials
         public const int Remap = 12;
         public const int Adjust = 13;
         public const int Mirror = 14;
+        public const int PaintAccum = 15;
+        public const int MixSample = 16;
+        public const int MixUpdate = 17;
     }
 
     internal static class APIds
@@ -146,6 +157,46 @@ namespace AviCreatorEssentials
         public static readonly int DepthVP = Shader.PropertyToID("_DepthVP");
         public static readonly int DepthV = Shader.PropertyToID("_DepthV");
         public static readonly int WireColor = Shader.PropertyToID("_WireColor");
+
+        public static readonly int BrushAcross = Shader.PropertyToID("_BrushAcross");
+        public static readonly int Bristles = Shader.PropertyToID("_Bristles");
+        public static readonly int BristleScale = Shader.PropertyToID("_BristleScale");
+        public static readonly int BristleSeed = Shader.PropertyToID("_BristleSeed");
+        public static readonly int Grain = Shader.PropertyToID("_Grain");
+        public static readonly int GrainScale = Shader.PropertyToID("_GrainScale");
+        public static readonly int GrainTexSize = Shader.PropertyToID("_GrainTexSize");
+        public static readonly int PaintAccum = Shader.PropertyToID("_PaintAccum");
+        public static readonly int PaintGain = Shader.PropertyToID("_PaintGain");
+        public static readonly int ResTex = Shader.PropertyToID("_ResTex");
+        public static readonly int UseRes = Shader.PropertyToID("_UseRes");
+        public static readonly int ColorVar = Shader.PropertyToID("_ColorVar");
+        public static readonly int MixLod = Shader.PropertyToID("_MixLod");
+        public static readonly int MixPick = Shader.PropertyToID("_MixPick");
+        public static readonly int MixReload = Shader.PropertyToID("_MixReload");
+
+        public static readonly int GradStart = Shader.PropertyToID("_GradStart");
+        public static readonly int GradDir = Shader.PropertyToID("_GradDir");
+        public static readonly int GradLength = Shader.PropertyToID("_GradLength");
+        public static readonly int GradShape = Shader.PropertyToID("_GradShape");
+        public static readonly int GradColorA = Shader.PropertyToID("_GradColorA");
+        public static readonly int GradColorB = Shader.PropertyToID("_GradColorB");
+
+        public static readonly int StarCell = Shader.PropertyToID("_StarCell");
+        public static readonly int StarAmount = Shader.PropertyToID("_StarAmount");
+        public static readonly int StarSize = Shader.PropertyToID("_StarSize");
+        public static readonly int StarSizeVar = Shader.PropertyToID("_StarSizeVar");
+        public static readonly int StarGlow = Shader.PropertyToID("_StarGlow");
+        public static readonly int StarGlowStrength = Shader.PropertyToID("_StarGlowStrength");
+        public static readonly int StarSparkle = Shader.PropertyToID("_StarSparkle");
+        public static readonly int StarFlare = Shader.PropertyToID("_StarFlare");
+        public static readonly int StarWhite = Shader.PropertyToID("_StarWhite");
+        public static readonly int StarSeed = Shader.PropertyToID("_StarSeed");
+        public static readonly int StarColorA = Shader.PropertyToID("_StarColorA");
+        public static readonly int StarColorB = Shader.PropertyToID("_StarColorB");
+        public static readonly int Nebula = Shader.PropertyToID("_Nebula");
+        public static readonly int NebulaScale = Shader.PropertyToID("_NebulaScale");
+        public static readonly int StarPeriod = Shader.PropertyToID("_StarPeriod");
+        public static readonly int StarMatcap = Shader.PropertyToID("_StarMatcap");
 
         public static readonly int EmissionMap = Shader.PropertyToID("_EmissionMap");
         public static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
@@ -253,6 +304,40 @@ namespace AviCreatorEssentials
                 if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16_UNorm, FormatUsage.Render))
                     return GraphicsFormat.R16G16_UNorm;
                 return GraphicsFormat.R32G32_SFloat;
+            }
+        }
+
+        /// <summary>Paint mode stamp: summed coverage and coverage * bristle id, additively blended.</summary>
+        public static GraphicsFormat PaintStampFormat
+        {
+            get
+            {
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16_SFloat, FormatUsage.Blend))
+                    return GraphicsFormat.R16G16_SFloat;
+                return GraphicsFormat.R16G16B16A16_SFloat;
+            }
+        }
+
+        /// <summary>Paint mode stroke: premultiplied color laid down so far.</summary>
+        public static GraphicsFormat PaintStrokeFormat
+        {
+            get
+            {
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Blend))
+                    return GraphicsFormat.R16G16B16A16_SFloat;
+                return GraphicsFormat.R8G8B8A8_UNorm;
+            }
+        }
+
+        /// <summary>Color mixing: averages colors under the brush through a mip chain, so it needs float precision.</summary>
+        public static GraphicsFormat MixFormat
+        {
+            get
+            {
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, FormatUsage.Render) &&
+                    SystemInfo.IsFormatSupported(GraphicsFormat.R32G32B32A32_SFloat, FormatUsage.Linear))
+                    return GraphicsFormat.R32G32B32A32_SFloat;
+                return GraphicsFormat.R16G16B16A16_SFloat;
             }
         }
 

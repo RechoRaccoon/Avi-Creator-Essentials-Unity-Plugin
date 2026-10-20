@@ -18,6 +18,7 @@ namespace AviCreatorEssentials
         readonly VisualElement m_FillBox;
         readonly VisualElement m_SelectBox;
         readonly VisualElement m_TransformBox;
+        readonly VisualElement m_GradientBox;
         readonly VisualElement m_BrushBox;
 
         BrushSettings B => m_Ctx.brush;
@@ -99,6 +100,28 @@ namespace AviCreatorEssentials
             m_TransformBox.Add(tfRow);
             Add(m_TransformBox);
 
+            m_GradientBox = W.Column("ap-gradient-options");
+            m_GradientBox.Add(W.Text("Drag across the model from where the gradient starts to where it ends. It is laid out in 3D on " +
+                                     "the model itself, so it runs smoothly across UV seams and between body parts. It paints the " +
+                                     "selected layer (or its mask) and stays inside a UV selection.", "ap-hint"));
+            m_GradientBox.Add(Track(new W.Segmented(new[] { "Linear", "Radial", "Reflected" }, () => (int)m_Ctx.gradientShape,
+                i => { m_Ctx.gradientShape = (GradientShape)i; Changed(); }, new[]
+                {
+                    "Changes along the line you drag, through the whole model",
+                    "Spreads out in a sphere from where you start; the drag length is the radius",
+                    "Like linear, mirrored to both sides of where you start",
+                })));
+            m_GradientBox.Add(Track(new W.Segmented(new[] { "Color → transparent", "Color → second color" },
+                () => m_Ctx.gradientToTransparent ? 0 : 1, i => { m_Ctx.gradientToTransparent = i == 0; Changed(); }, new[]
+                {
+                    "The paint color fades out, showing what is underneath",
+                    "From the paint color to the second color (X swaps them)",
+                })));
+            m_GradientBox.Add(Track(new W.SliderRow("Opacity", 0f, 1f, () => B.opacity, v => { B.opacity = v; Changed(); }, 100f)));
+            m_GradientBox.Add(Track(new W.ToggleRow("Across every material", () => B.paintAllMaterials, v => { B.paintAllMaterials = v; Changed(); },
+                "One gradient runs over every body part that uses the same kind of texture, each on its selected layer")));
+            Add(m_GradientBox);
+
             m_BrushBox = W.Column();
             Add(m_BrushBox);
 
@@ -116,6 +139,36 @@ namespace AviCreatorEssentials
                 "How much each dab adds; low flow builds up gradually within a stroke")));
             m_BrushBox.Add(Track(new W.SliderRow("Spacing", 0.02f, 2f, () => B.spacing, v => { B.spacing = v; Changed(); }, 100f,
                 "Distance between dabs as a percentage of the brush size")));
+
+            var paint = new Foldout { text = "Paint", value = EditorPrefs.GetBool("AviCreatorEssentials.Fold.Paint", true) };
+            paint.AddToClassList("ap-foldout");
+            paint.RegisterValueChangedCallback(e => EditorPrefs.SetBool("AviCreatorEssentials.Fold.Paint", e.newValue));
+            var presets = W.Row("ap-row-gap", "ap-wrap");
+            presets.Add(W.TextButton("Fur strokes", () => ApplyPreset(PaintPreset.FurStrokes), "ap-small"));
+            presets.Add(W.TextButton("Fur tufts", () => ApplyPreset(PaintPreset.FurTufts), "ap-small"));
+            presets.Add(W.TextButton("Oil paint", () => ApplyPreset(PaintPreset.Oil), "ap-small"));
+            presets.Add(W.TextButton("Soft blend", () => ApplyPreset(PaintPreset.SoftBlend), "ap-small"));
+            presets.Add(W.TextButton("Plain", () => ApplyPreset(PaintPreset.Plain), "ap-small"));
+            presets.tooltip = "Starting points: each sets the tip and the paint settings below";
+            paint.Add(presets);
+            paint.Add(Track(new W.ToggleRow("Wet paint", () => B.paintMode, v => { B.paintMode = v; Changed(); },
+                "Strokes behave like real paint: overlapping dabs build up, bristles leave streaks of slightly different shades, " +
+                "and with color mixing the brush drags colors along. Off: each stroke lays down one flat color.")));
+            paint.Add(Track(new W.SliderRow("Bristles", 0f, 1f, () => B.bristles, v => { B.bristles = v; Changed(); }, 100f,
+                "Streaks of separate bristles running along the stroke, like a real brush")));
+            paint.Add(Track(new W.SliderRow("Bristle detail", 0f, 1f, () => B.bristleDensity, v => { B.bristleDensity = v; Changed(); }, 100f,
+                "Few thick bristles (low) to many fine ones (high)")));
+            paint.Add(Track(new W.SliderRow("Color mixing", 0f, 1f, () => B.colorMixing, v => { B.colorMixing = v; Changed(); }, 100f,
+                "Wet paint: the brush picks up the colors it passes over and drags them along, blending into them")));
+            paint.Add(Track(new W.SliderRow("Color variation", 0f, 1f, () => B.colorVariation, v => { B.colorVariation = v; Changed(); }, 100f,
+                "Wet paint: each bristle carries a slightly lighter or darker shade, for richer strokes")));
+            paint.Add(Track(new W.SliderRow("Canvas grain", 0f, 1f, () => B.grain, v => { B.grain = v; Changed(); }, 100f,
+                "Rough texture the paint catches on, fixed to the model so strokes on top of each other share it")));
+            paint.Add(Track(new W.SliderRow("Taper start", 0f, 10f, () => B.taperIn, v => { B.taperIn = v; Changed(); }, 1f,
+                "Strokes start thin and grow over this many brush widths. Good for pointy fur and hair.")));
+            paint.Add(Track(new W.SliderRow("Taper end", 0f, 10f, () => B.taperOut, v => { B.taperOut = v; Changed(); }, 1f,
+                "Strokes thin out to a point over their last this-many brush widths. That last stretch appears when you let go.")));
+            m_BrushBox.Add(paint);
 
             var stab = new Foldout { text = "Stabilizer", value = EditorPrefs.GetBool("AviCreatorEssentials.Fold.Stabilizer", true) };
             stab.AddToClassList("ap-foldout");
@@ -183,6 +236,48 @@ namespace AviCreatorEssentials
             RefreshMode();
         }
 
+        enum PaintPreset { FurStrokes, FurTufts, Oil, SoftBlend, Plain }
+
+        void ApplyPreset(PaintPreset preset)
+        {
+            var b = B;
+            b.tip = "Round";
+            b.paintMode = true;
+            b.angleJitter = 0f;
+            b.sizeJitter = 0f;
+            b.scatter = 0f;
+            b.grain = 0f;
+            switch (preset)
+            {
+                case PaintPreset.FurStrokes:
+                    b.hardness = 0.85f; b.flow = 0.9f; b.spacing = 0.05f;
+                    b.bristles = 0.35f; b.bristleDensity = 0.75f; b.colorMixing = 0.15f; b.colorVariation = 0.3f;
+                    b.taperIn = 1.5f; b.taperOut = 4f;
+                    break;
+                case PaintPreset.FurTufts:
+                    b.tip = "Fur Tuft"; b.flow = 1f; b.spacing = 0.9f;
+                    b.bristles = 0f; b.colorMixing = 0.1f; b.colorVariation = 0.25f;
+                    b.taperIn = 0f; b.taperOut = 0f; b.sizeJitter = 0.25f; b.angleJitter = 12f;
+                    break;
+                case PaintPreset.Oil:
+                    b.hardness = 0.7f; b.flow = 0.7f; b.spacing = 0.04f;
+                    b.bristles = 0.75f; b.bristleDensity = 0.55f; b.colorMixing = 0.45f; b.colorVariation = 0.35f; b.grain = 0.15f;
+                    b.taperIn = 0.5f; b.taperOut = 1.5f;
+                    break;
+                case PaintPreset.SoftBlend:
+                    b.hardness = 0.2f; b.flow = 0.35f; b.spacing = 0.05f;
+                    b.bristles = 0.25f; b.bristleDensity = 0.4f; b.colorMixing = 0.6f; b.colorVariation = 0.1f;
+                    b.taperIn = 0f; b.taperOut = 0f;
+                    break;
+                default:
+                    b.paintMode = false; b.hardness = 0.65f; b.flow = 1f; b.spacing = 0.1f;
+                    b.bristles = 0f; b.colorMixing = 0f; b.colorVariation = 0f;
+                    b.taperIn = 0f; b.taperOut = 0f;
+                    break;
+            }
+            Changed();
+        }
+
         T Track<T>(T e) where T : VisualElement
         {
             m_Refreshables.Add(e);
@@ -244,10 +339,12 @@ namespace AviCreatorEssentials
             bool fill = m_Ctx.Tool == PaintTool.Fill;
             bool select = m_Ctx.Tool == PaintTool.Select;
             bool transform = m_Ctx.Tool == PaintTool.Transform;
+            bool gradient = m_Ctx.Tool == PaintTool.Gradient;
             m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
             m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
             m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
-            m_BrushBox.style.display = fill || select || transform ? DisplayStyle.None : DisplayStyle.Flex;
+            m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
+            m_BrushBox.style.display = fill || select || transform || gradient ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         void RebuildTips()

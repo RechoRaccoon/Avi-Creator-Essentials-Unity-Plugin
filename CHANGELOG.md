@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0
+
+- Gradient tool (D): drag across the model for a gradient laid out in 3D, not on the texture, so it runs smoothly across UV seams. Linear, Radial and Reflected; the paint color fades out or blends into the second color. Paints the selected layer or mask, stays inside a UV selection, and can run across every material.
+- Wet paint (Brush › Paint): dabs build up like real paint instead of laying down one flat color. Bristle streaks along the stroke, color mixing that picks up and drags the colors underneath, a different shade per bristle, and canvas grain. Presets for fur strokes, fur tufts, oil paint and soft blending.
+- Taper start / Taper end: strokes thin to a point without a pen, for fur and hair.
+- New brush tips made of thin lines: Bristles, Dry Brush, Fur Strands and Fur Tuft. They turn with the stroke.
+- Stars: a new section that scatters glowing stars over the model in 3D (specks, halos, four-point sparkles, two colors, nebula clouds) onto a new layer, and onto the emission texture so they glow. Also saves a tiling star texture and a star matcap for parallax / matcap effects in your avatar shader.
+
 ## 0.9.2
 
 - Fill Mask Shape: the area outside the shape is now black by default instead of transparent, like a normal mask. Pick another color under "Outside the shape", or turn its alpha down to 0 to keep it transparent.

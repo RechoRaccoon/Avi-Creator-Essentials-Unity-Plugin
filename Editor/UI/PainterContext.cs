@@ -14,6 +14,7 @@ namespace AviCreatorEssentials
         Image,
         Select,
         Transform,
+        Gradient,
     }
 
     public enum FillMode
@@ -127,6 +128,9 @@ namespace AviCreatorEssentials
         public bool transformCopy;          // lift a copy and leave the original in place
         public float transformTolerance = 0.12f;
         public bool transformContiguous = true;
+        public GradientShape gradientShape = GradientShape.Linear;
+        public bool gradientToTransparent = true;   // primary color fading out; off: primary to secondary color
+        public readonly StarSettings stars = StarSettings.Load();
         public bool strokeActive;
 
         public event Action ToolChanged;
@@ -161,6 +165,9 @@ namespace AviCreatorEssentials
         }
 
         public BrushTip Tip => BrushLibrary.Find(brush.tip);
+
+        /// <summary>Whether dabs turn with the stroke: as set in Dynamics, and always for the bristle and fur tips.</summary>
+        public bool FollowStroke => brush.followStroke || Tip.followsStroke;
 
         public void SetPrimary(Color c, bool record = false)
         {

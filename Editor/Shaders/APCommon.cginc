@@ -98,4 +98,55 @@ float AP_RoundFalloff(float d, float hardness, float aa)
     return t * t * (3.0 - 2.0 * t);
 }
 
+// ---------------------------------------------------------------------------
+// Hashes and value noise (after Dave Hoskins' "hash without sine").
+// ---------------------------------------------------------------------------
+float AP_Hash11(float p)
+{
+    p = frac(p * 0.1031);
+    p *= p + 33.33;
+    p *= p + p;
+    return frac(p);
+}
+
+float AP_Hash12(float2 p)
+{
+    float3 p3 = frac(float3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float AP_Hash31(float3 p3)
+{
+    p3 = frac(p3 * 0.1031);
+    p3 += dot(p3, p3.zyx + 31.32);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float3 AP_Hash33(float3 p3)
+{
+    p3 = frac(p3 * float3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return frac((p3.xxy + p3.yxx) * p3.zyx);
+}
+
+// Smooth 3D value noise in 0..1.
+float AP_ValueNoise(float3 p)
+{
+    float3 i = floor(p);
+    float3 f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = AP_Hash31(i);
+    float b = AP_Hash31(i + float3(1, 0, 0));
+    float c = AP_Hash31(i + float3(0, 1, 0));
+    float d = AP_Hash31(i + float3(1, 1, 0));
+    float e = AP_Hash31(i + float3(0, 0, 1));
+    float g = AP_Hash31(i + float3(1, 0, 1));
+    float h = AP_Hash31(i + float3(0, 1, 1));
+    float k = AP_Hash31(i + float3(1, 1, 1));
+    float x0 = lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+    float x1 = lerp(lerp(e, g, f.x), lerp(h, k, f.x), f.y);
+    return lerp(x0, x1, f.z);
+}
+
 #endif

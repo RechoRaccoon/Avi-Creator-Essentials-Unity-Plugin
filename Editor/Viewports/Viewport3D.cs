@@ -23,6 +23,7 @@ namespace AviCreatorEssentials
             BoneMove,
             Select,
             Transform,
+            Gradient,
         }
 
         enum ImageDrag
@@ -63,6 +64,9 @@ namespace AviCreatorEssentials
         readonly StrokeSampler m_Sampler = new StrokeSampler();
         readonly System.Random m_Rng = new System.Random();
         readonly List<Dab3D> m_Dabs = new List<Dab3D>();
+        readonly StrokeTaper<Dab3D> m_Taper = new StrokeTaper<Dab3D>();
+        Vector3 m_GradStart;
+        Vector3 m_GradEnd;
         float m_LastDepth = 1f;
         float m_StartRadius;
         float m_StartHardness;
@@ -374,6 +378,9 @@ namespace AviCreatorEssentials
                 case Drag.Transform:
                     DragTransform();
                     break;
+                case Drag.Gradient:
+                    DragGradient();
+                    break;
                 case Drag.Select:
                     if (ctx.selectLasso && Vector2.Distance(m_SelPoints[m_SelPoints.Count - 1], m_Mouse) > 3f) m_SelPoints.Add(m_Mouse);
                     break;
@@ -417,6 +424,9 @@ namespace AviCreatorEssentials
                     break;
                 case Drag.Select:
                     if (!cancelled) FinishSelect();
+                    break;
+                case Drag.Gradient:
+                    EndGradient(cancelled);
                     break;
             }
             m_Drag = Drag.None;
@@ -502,6 +512,9 @@ namespace AviCreatorEssentials
                 case PaintTool.Transform:
                     BeginTransform();
                     break;
+                case PaintTool.Gradient:
+                    BeginGradient();
+                    break;
                 case PaintTool.Select:
                     m_Drag = Drag.Select;
                     m_SelOp = shift ? SelectOp.Add : ctrl ? SelectOp.Subtract : SelectOp.Replace;
@@ -541,8 +554,10 @@ namespace AviCreatorEssentials
             var tool = ctx.Tool == PaintTool.Eraser ? StrokeTool.Erase : StrokeTool.Paint;
             string name = tool == StrokeTool.Erase ? "Erase" : "Paint";
             m_Stroke = s.engine.BeginStroke(new[] { active }, tool, ctx.primary, ctx.brush.opacity, name, proj * view, occlusion);
+            m_Stroke.paintMode = ctx.brush.paintMode;
             if (tool == StrokeTool.Paint && !active.editingMask) ctx.colors.Use(ctx.primary);
             m_Sampler.Begin(m_Mouse, pressure);
+            m_Taper.Begin(ctx.brush);
             m_Drag = Drag.Paint;
             ctx.strokeActive = true;
             m_Dabs.Clear();
@@ -570,6 +585,7 @@ namespace AviCreatorEssentials
             var b = ctx.brush;
             var s = ctx.session;
             float sizeK = (b.pressureSize ? Mathf.Lerp(0.15f, 1f, pressure) : 1f) * (1f - b.sizeJitter * (float)m_Rng.NextDouble());
+            sizeK *= m_Taper.Next();
             float radius = b.radius * sizeK;
             if (b.scatter > 0f)
             {
@@ -592,8 +608,12 @@ namespace AviCreatorEssentials
             up0.Normalize();
             var right0 = Vector3.Cross(fwd, up0);
             float angle = b.angle + (b.angleJitter > 0f ? RandomRange(m_Rng, -b.angleJitter, b.angleJitter) : 0f);
-            if (b.followStroke) angle += Mathf.Atan2(-dir.y, dir.x) * Mathf.Rad2Deg;
+            if (ctx.FollowStroke) angle += Mathf.Atan2(-dir.y, dir.x) * Mathf.Rad2Deg;
             var q = Quaternion.AngleAxis(-angle, fwd);
+            // Screen-space stroke direction on the brush plane; bristles run along it.
+            var along = right0 * dir.x - up0 * dir.y;
+            var across = Vector3.Cross(fwd, along);
+            across = across.sqrMagnitude > 1e-10f ? across.normalized : up0;
             float strength = b.flow * (b.pressureOpacity ? pressure : 1f) * (1f - b.opacityJitter * (float)m_Rng.NextDouble());
 
             var dab = new Dab3D
@@ -603,6 +623,7 @@ namespace AviCreatorEssentials
                 right = q * right0,
                 up = q * up0,
                 forward = fwd,
+                across = across,
                 strength = strength,
                 camPos = cam.position,
                 occlusion = b.occlusion,
@@ -636,7 +657,7 @@ namespace AviCreatorEssentials
                     s.engine.AddTarget(m_Stroke, set);
                 }
             }
-            m_Dabs.Add(dab);
+            m_Taper.Add(dab, m_Dabs);
         }
 
         Dab3D Mirror(Dab3D d)
@@ -662,6 +683,7 @@ namespace AviCreatorEssentials
                 right = MD(d.right),
                 up = MD(d.up),
                 forward = MD(d.forward),
+                across = MD(d.across),
                 strength = d.strength,
                 camPos = MP(d.camPos),
                 occlusion = false,
@@ -671,7 +693,9 @@ namespace AviCreatorEssentials
 
         void FlushDabs()
         {
-            if (m_Stroke == null || m_Dabs.Count == 0) return;
+            if (m_Stroke == null) return;
+            m_Taper.Release(m_Dabs);
+            if (m_Dabs.Count == 0) return;
             ctx.session.engine.Dabs3D(m_Stroke, m_Dabs, ctx.Tip, ctx.brush);
             m_Dabs.Clear();
             ctx.session.engine.Apply(m_Stroke);
@@ -686,6 +710,8 @@ namespace AviCreatorEssentials
                 m_Sampler.Finish(StrokeStep, (pos, pr, dir) => EmitDab(pos, pr, dir));
                 FlushDabs();
             }
+            m_Taper.Finish(m_Dabs, (d, k) => { d.radius *= k; return d; });
+            FlushDabs();
             var entry = ctx.session.engine.EndStroke(m_Stroke);
             if (entry != null) ctx.session.Push(entry);
             m_Stroke = null;
@@ -696,11 +722,88 @@ namespace AviCreatorEssentials
 
         public void CancelStroke()
         {
+            m_Taper.Clear();
+            m_Dabs.Clear();
             if (m_Stroke == null) return;
             ctx.session.engine.CancelStroke(m_Stroke);
             m_Stroke = null;
             ctx.strokeActive = false;
             m_Drag = Drag.None;
+            ctx.Render();
+        }
+
+        // ------------------------------------------------------------------ 3D gradient
+
+        void BeginGradient()
+        {
+            var s = ctx.session;
+            if (!Raycast(m_Mouse, out var h))
+            {
+                ctx.ShowHint("Start the gradient on the model.");
+                return;
+            }
+            s.UpdateBounds();
+            var hitSet = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
+            if (hitSet != null && ctx.brush.autoSelectMaterial && hitSet != s.ActiveSet) s.ActiveSet = hitSet;
+            var active = s.ActiveSet;
+            if (active == null)
+            {
+                ctx.ShowHint("Pick a material to paint on first.");
+                return;
+            }
+            if (!active.initialized) s.InitializeSet(active);
+            // With "Paint every material", one gradient runs across every body part using the same kind of texture.
+            var targets = new List<TextureSet> { active };
+            if (ctx.brush.paintAllMaterials)
+                foreach (var other in s.sets)
+                    if (other != active && other.initialized && other.property == active.property) targets.Add(other);
+            m_Stroke = s.engine.BeginStroke(targets, StrokeTool.Paint, ctx.primary, ctx.brush.opacity, "Gradient", Matrix4x4.identity, false);
+            if (!active.editingMask) ctx.colors.Use(ctx.primary);
+            m_GradStart = m_GradEnd = h.point;
+            m_Drag = Drag.Gradient;
+            ctx.strokeActive = true;
+        }
+
+        void DragGradient()
+        {
+            if (m_Stroke == null) return;
+            // The end follows the model under the cursor; off the model it slides on the plane facing the camera.
+            if (Raycast(m_Mouse, out var h)) m_GradEnd = h.point;
+            else if (new Plane(-Cam.Forward, m_GradStart).Raycast(RayAt(m_Mouse), out float d)) m_GradEnd = RayAt(m_Mouse).GetPoint(d);
+            if ((m_GradEnd - m_GradStart).sqrMagnitude < 1e-10f) return;
+            var a = ctx.primary;
+            var b = ctx.gradientToTransparent ? new Color(a.r, a.g, a.b, 0f) : ctx.secondary;
+            ctx.session.engine.Gradient(m_Stroke, new GradientParams
+            {
+                start = m_GradStart,
+                end = m_GradEnd,
+                shape = ctx.gradientShape,
+                colorA = a,
+                colorB = b,
+            });
+            ctx.session.engine.Apply(m_Stroke);
+            ctx.Render();
+        }
+
+        void EndGradient(bool cancelled)
+        {
+            if (m_Stroke == null) return;
+            var s = ctx.session;
+            bool touched = false;
+            foreach (var t in m_Stroke.targets) touched |= t.touched;
+            if (cancelled || !touched)
+            {
+                s.engine.CancelStroke(m_Stroke);
+                if (!touched && !cancelled) ctx.ShowHint("Drag from where the gradient starts to where it ends.");
+            }
+            else
+            {
+                var entry = s.engine.EndStroke(m_Stroke);
+                if (entry != null) s.Push(entry);
+            }
+            m_Stroke = null;
+            ctx.strokeActive = false;
+            s.NotifyStructureChanged();
             ctx.Render();
         }
 
@@ -1316,6 +1419,20 @@ namespace AviCreatorEssentials
                 return;
             }
 
+            if (m_Drag == Drag.Gradient)
+            {
+                var a = pr.ToLocal(m_GradStart);
+                var b = pr.ToLocal(m_GradEnd);
+                Line(p, a, b, new Color(0, 0, 0, 0.6f), 3f);
+                Line(p, a, b, Color.white, 1.25f);
+                if (ctx.gradientShape == GradientShape.Radial) Circle(p, a, Vector2.Distance(a, b), new Color(1f, 1f, 1f, 0.5f), 1f);
+                Disc(p, a, 4f, new Color(0, 0, 0, 0.6f));
+                Disc(p, a, 3f, ctx.primary);
+                Disc(p, b, 4f, new Color(0, 0, 0, 0.6f));
+                Disc(p, b, 3f, ctx.gradientToTransparent ? new Color(1f, 1f, 1f, 0.35f) : ctx.secondary);
+                return;
+            }
+
             bool navigating = m_Drag == Drag.Orbit || m_Drag == Drag.Pan || m_Drag == Drag.Zoom;
             if (!m_Inside && m_Drag != Drag.Paint && m_Drag != Drag.BrushSize) return;
             if (navigating) return;
@@ -1355,7 +1472,8 @@ namespace AviCreatorEssentials
                     Circle(p, m_DragStart, inner, new Color(1f, 0.85f, 0.4f, 0.8f), 1f);
                 }
             }
-            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select || ctx.Tool == PaintTool.Transform)
+            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select || ctx.Tool == PaintTool.Transform ||
+                     ctx.Tool == PaintTool.Gradient)
             {
                 var c = m_Mouse;
                 var col = Color.white;
@@ -1449,6 +1567,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Image: hudRight.text = "Image  ·  drag to move, Shift scale, Ctrl rotate"; break;
                 case PaintTool.Transform: hudRight.text = "Transform  ·  click a color to pick it up, drag it to move, Enter applies"; break;
                 case PaintTool.Select: hudRight.text = "Select " + (ctx.selectIslands ? "UV islands" : "polygons") + "  ·  Shift add, Ctrl remove"; break;
+                case PaintTool.Gradient: hudRight.text = "Gradient  ·  " + ObjectNames.NicifyVariableName(ctx.gradientShape.ToString()) + "  ·  drag across the model"; break;
             }
         }
     }

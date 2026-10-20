@@ -104,6 +104,67 @@ namespace AviCreatorEssentials
         }
     }
 
+    /// <summary>
+    /// Pointed stroke ends without a pen. Dabs grow to full size over the first stretch of a stroke, and the last
+    /// stretch is held back until the stroke ends so it can thin out to a point. Lengths are in brush diameters,
+    /// counted in dab positions (one every `spacing` diameters).
+    /// </summary>
+    public class StrokeTaper<T>
+    {
+        struct Held
+        {
+            public T dab;
+            public int index;
+        }
+
+        readonly List<Held> m_Held = new List<Held>();
+        int m_Index = -1;
+        float m_In, m_Out;
+
+        public void Begin(BrushSettings b)
+        {
+            m_Held.Clear();
+            m_Index = -1;
+            float spacing = Mathf.Max(0.02f, b.spacing);
+            m_In = Mathf.Max(0f, b.taperIn) / spacing;
+            m_Out = Mathf.Max(0f, b.taperOut) / spacing;
+        }
+
+        /// <summary>Moves on to the next dab position; returns its size factor from the taper-in.</summary>
+        public float Next()
+        {
+            m_Index++;
+            return m_In < 1f ? 1f : Shape((m_Index + 1) / m_In);
+        }
+
+        public void Add(T dab, List<T> output)
+        {
+            if (m_Out < 1f) output.Add(dab);
+            else m_Held.Add(new Held { dab = dab, index = m_Index });
+        }
+
+        /// <summary>Hands over the held dabs that are now far enough behind the brush to keep their full size.</summary>
+        public void Release(List<T> output)
+        {
+            int keep = m_Index - Mathf.CeilToInt(m_Out);
+            int n = 0;
+            while (n < m_Held.Count && m_Held[n].index <= keep) output.Add(m_Held[n++].dab);
+            if (n > 0) m_Held.RemoveRange(0, n);
+        }
+
+        /// <summary>The stroke ended: the held dabs thin out towards its end.</summary>
+        public void Finish(List<T> output, Func<T, float, T> scale)
+        {
+            foreach (var h in m_Held)
+                output.Add(scale(h.dab, Shape((m_Index - h.index + 1) / Mathf.Max(1f, m_Out))));
+            m_Held.Clear();
+        }
+
+        public void Clear() => m_Held.Clear();
+
+        static float Shape(float t) => Mathf.Lerp(0.04f, 1f, Mathf.Pow(Mathf.Clamp01(t), 0.85f));
+    }
+
     /// <summary>Shared plumbing for the 3D and 2D views: a render texture shown in an Image, a vector overlay, HUD text.</summary>
     public abstract class ViewportBase : VisualElement
     {
