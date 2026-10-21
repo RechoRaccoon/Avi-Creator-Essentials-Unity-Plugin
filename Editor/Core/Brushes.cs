@@ -53,7 +53,7 @@ namespace AviCreatorEssentials
         public int symmetryAxis;               // 0 X, 1 Y, 2 Z (avatar space)
         public bool mirrorU2D;
         public bool clipToIslands2D;
-        public bool paintAllMaterials;         // a stroke paints every material it touches
+        public bool wholeModel = true;         // strokes, gradients and stars carry on into the same kind of texture on every material
         public bool autoSelectMaterial = true; // a stroke starting on another material switches to it
 
         // Paint mode and brush texture

@@ -344,6 +344,11 @@ namespace AviCreatorEssentials
             string sub = layer.kind == LayerKind.Fill ? "Fill" : layer.kind == LayerKind.Image ? (layer.IsFloating ? "Floating · Enter applies, Esc cancels" : layer.placement != null && layer.placement.projected ? "Image · projected" : "Image") :
                 layer.kind == LayerKind.Adjustment ? (layer.adjMode == AdjustMode.Recolor ? "Recolor" : layer.adjMode == AdjustMode.Match ? (layer.refValid ? "Match colors" : "Match colors · no reference yet") : "Hue / saturation") :
                 "Paint";
+            if (layer.kind == LayerKind.Adjustment)
+            {
+                int baseIndex = PaintEngine.ClipBase(set.layers, set.layers.IndexOf(layer));
+                sub = (baseIndex >= 0 ? "↓ " : "") + sub + (baseIndex >= 0 ? " · " + set.layers[baseIndex].name + " only" : " · everything below");
+            }
             if (layer.blend != LayerBlendMode.Normal) sub += " · " + s_BlendNames[(int)layer.blend];
             if (layer.opacity < 0.999f) sub += " · " + Mathf.RoundToInt(layer.opacity * 100f) + "%";
             if (layer.lockAlpha) sub += " · alpha locked";

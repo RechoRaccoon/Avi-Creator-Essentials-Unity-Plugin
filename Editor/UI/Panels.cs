@@ -118,8 +118,9 @@ namespace AviCreatorEssentials
                     "From the paint color to the second color (X swaps them)",
                 })));
             m_GradientBox.Add(Track(new W.SliderRow("Opacity", 0f, 1f, () => B.opacity, v => { B.opacity = v; Changed(); }, 100f)));
-            m_GradientBox.Add(Track(new W.ToggleRow("Across every material", () => B.paintAllMaterials, v => { B.paintAllMaterials = v; Changed(); },
-                "One gradient runs over every body part that uses the same kind of texture, each on its selected layer")));
+            m_GradientBox.Add(Track(new W.ToggleRow("Whole model", () => B.wholeModel, v => { B.wholeModel = v; Changed(); },
+                "One gradient runs over every material that uses the same kind of texture (each on its selected layer). " +
+                "Off: only the textures selected in Materials.")));
             Add(m_GradientBox);
 
             m_BrushBox = W.Column();
@@ -139,6 +140,9 @@ namespace AviCreatorEssentials
                 "How much each dab adds; low flow builds up gradually within a stroke")));
             m_BrushBox.Add(Track(new W.SliderRow("Spacing", 0.02f, 2f, () => B.spacing, v => { B.spacing = v; Changed(); }, 100f,
                 "Distance between dabs as a percentage of the brush size")));
+            m_BrushBox.Add(Track(new W.ToggleRow("Whole model", () => B.wholeModel, v => { B.wholeModel = v; Changed(); },
+                "Strokes carry on across every material that uses the same kind of texture (each on its selected layer), " +
+                "so you can paint over the entire model. Off: only the textures selected in Materials.")));
 
             var paint = new Foldout { text = "Paint", value = EditorPrefs.GetBool("AviCreatorEssentials.Fold.Paint", true) };
             paint.AddToClassList("ap-foldout");
@@ -216,8 +220,6 @@ namespace AviCreatorEssentials
                 "Through the screen: how deep the brush reaches, in brush radii")));
             proj.Add(Track(new W.DropdownRow("Mirror axis", new List<string> { "X (left ↔ right)", "Y (up ↔ down)", "Z (front ↔ back)" },
                 () => B.symmetryAxis, i => { B.symmetryAxis = i; Changed(); })));
-            proj.Add(Track(new W.ToggleRow("Paint every material", () => B.paintAllMaterials, v => { B.paintAllMaterials = v; Changed(); },
-                "Strokes continue across body parts that use different materials (each gets painted on its selected layer)")));
             proj.Add(Track(new W.ToggleRow("Switch to material under cursor", () => B.autoSelectMaterial, v => { B.autoSelectMaterial = v; Changed(); })));
             proj.Add(Track(new W.ToggleRow("2D: mirror left ↔ right", () => B.mirrorU2D, v => { B.mirrorU2D = v; Changed(); })));
             proj.Add(Track(new W.ToggleRow("2D: stay inside UV islands", () => B.clipToIslands2D, v => { B.clipToIslands2D = v; Changed(); })));
@@ -446,12 +448,21 @@ namespace AviCreatorEssentials
                 info.Add(W.Text(sub, "ap-layer-sub"));
                 row.Add(info);
                 var captured = set;
+                W.SetOn(row, set != s.ActiveSet && s.IsSelected(set), "ap-selected");
                 row.RegisterCallback<PointerDownEvent>(e =>
                 {
-                    if (e.button == 0) s.ActiveSet = captured;
+                    if (e.button != 0) return;
+                    if (e.actionKey) s.ToggleSelected(captured);
+                    else if (e.shiftKey) s.SelectRange(captured);
+                    else s.SelectOnly(captured);
                 });
                 m_List.Add(row);
             }
+
+            int count = s.SelectedCount;
+            m_List.Add(W.Text(count > 1
+                ? count + " textures selected: brushes, gradients and stars paint all of them. Click one to select it alone."
+                : "Ctrl-click (Shift-click for a range) to paint several textures at once, such as a material's color and emission.", "ap-hint"));
 
             var active = s.ActiveSet;
             if (active == null) return;
@@ -789,6 +800,13 @@ namespace AviCreatorEssentials
                 "Shift hue, saturation and lightness",
                 "Make this area's colors match another area (e.g. one eye to the other)",
             }));
+
+            Add(new W.ToggleRow("Only the layer below", () => layer.clipBelow, v =>
+            {
+                s.EditLayer(set, layer, "Adjust layer below only", l => l.clipBelow = v);
+                s.MeasureSource(set, layer);
+                m_Ctx.Render();
+            }, "On: changes just the layer directly underneath. Off: changes everything below, as one picture."));
 
             switch (layer.adjMode)
             {

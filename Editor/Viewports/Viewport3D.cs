@@ -65,6 +65,7 @@ namespace AviCreatorEssentials
         readonly System.Random m_Rng = new System.Random();
         readonly List<Dab3D> m_Dabs = new List<Dab3D>();
         readonly StrokeTaper<Dab3D> m_Taper = new StrokeTaper<Dab3D>();
+        readonly List<TextureSet> m_Candidates = new List<TextureSet>();   // textures a stroke may spread onto as it reaches them
         Vector3 m_GradStart;
         Vector3 m_GradEnd;
         float m_LastDepth = 1f;
@@ -531,11 +532,7 @@ namespace AviCreatorEssentials
             var s = ctx.session;
             s.UpdateBounds();
             bool hit = Raycast(m_Mouse, out var h);
-            if (hit)
-            {
-                var hitSet = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
-                if (hitSet != null && ctx.brush.autoSelectMaterial && hitSet != s.ActiveSet) s.ActiveSet = hitSet;
-            }
+            if (hit) SwitchToHitMaterial(h);
             var active = s.ActiveSet;
             if (active == null)
             {
@@ -543,6 +540,11 @@ namespace AviCreatorEssentials
                 return;
             }
             if (!active.initialized) s.InitializeSet(active);
+            var selected = s.SelectedSets;
+            foreach (var set in selected)
+                if (!set.initialized) s.InitializeSet(set);
+            m_Candidates.Clear();
+            m_Candidates.AddRange(s.PaintTargets(ctx.brush.wholeModel));
             s.UpdateBounds();
 
             var cam = Cam;
@@ -553,7 +555,7 @@ namespace AviCreatorEssentials
 
             var tool = ctx.Tool == PaintTool.Eraser ? StrokeTool.Erase : StrokeTool.Paint;
             string name = tool == StrokeTool.Erase ? "Erase" : "Paint";
-            m_Stroke = s.engine.BeginStroke(new[] { active }, tool, ctx.primary, ctx.brush.opacity, name, proj * view, occlusion);
+            m_Stroke = s.engine.BeginStroke(selected, tool, ctx.primary, ctx.brush.opacity, name, proj * view, occlusion);
             m_Stroke.paintMode = ctx.brush.paintMode;
             if (tool == StrokeTool.Paint && !active.editingMask) ctx.colors.Use(ctx.primary);
             m_Sampler.Begin(m_Mouse, pressure);
@@ -636,26 +638,23 @@ namespace AviCreatorEssentials
         void AddDab(Dab3D dab, MeshHit h, bool mirrored = false)
         {
             var s = ctx.session;
-            if (ctx.brush.paintAllMaterials)
+            // The stroke spreads onto the other textures it may paint as it reaches them.
+            foreach (var set in m_Candidates)
             {
-                foreach (var set in s.sets)
+                if (m_Stroke.Find(set) != null) continue;
+                if (!set.initialized) s.UpdateBounds();
+                var bnd = set.worldBounds;
+                bnd.Expand(dab.radius * 2f);
+                if (set.initialized && !bnd.Contains(dab.position)) continue;
+                if (!set.initialized)
                 {
-                    if (m_Stroke.Find(set) != null) continue;
-                    if (set.property != s.ActiveSet.property) continue;
-                    if (!set.initialized) s.UpdateBounds();
-                    var bnd = set.worldBounds;
-                    bnd.Expand(dab.radius * 2f);
-                    if (set.initialized && !bnd.Contains(dab.position)) continue;
-                    if (!set.initialized)
-                    {
-                        // Only initialise a set when the dab actually lands on it.
-                        var hs = mirrored ? null : s.SetForUser(h.entry, h.submesh, set.property);
-                        if (hs != set) continue;
-                        s.InitializeSet(set);
-                        s.UpdateBounds();
-                    }
-                    s.engine.AddTarget(m_Stroke, set);
+                    // Only initialise a set when the dab actually lands on it.
+                    var hs = mirrored ? null : s.SetForUser(h.entry, h.submesh, set.property);
+                    if (hs != set) continue;
+                    s.InitializeSet(set);
+                    s.UpdateBounds();
                 }
+                s.engine.AddTarget(m_Stroke, set);
             }
             m_Taper.Add(dab, m_Dabs);
         }
@@ -732,6 +731,20 @@ namespace AviCreatorEssentials
             ctx.Render();
         }
 
+        /// <summary>
+        /// A stroke starting on another material selects it, unless that material's texture is already being painted
+        /// (selected, or reached through "whole model"), so a multi-texture selection is kept.
+        /// </summary>
+        void SwitchToHitMaterial(MeshHit h)
+        {
+            var s = ctx.session;
+            if (!ctx.brush.autoSelectMaterial) return;
+            var hitSet = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
+            if (hitSet == null || hitSet == s.ActiveSet) return;
+            if (s.PaintTargets(ctx.brush.wholeModel).Contains(hitSet)) return;
+            s.SelectOnly(hitSet);
+        }
+
         // ------------------------------------------------------------------ 3D gradient
 
         void BeginGradient()
@@ -743,20 +756,18 @@ namespace AviCreatorEssentials
                 return;
             }
             s.UpdateBounds();
-            var hitSet = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
-            if (hitSet != null && ctx.brush.autoSelectMaterial && hitSet != s.ActiveSet) s.ActiveSet = hitSet;
+            SwitchToHitMaterial(h);
             var active = s.ActiveSet;
             if (active == null)
             {
                 ctx.ShowHint("Pick a material to paint on first.");
                 return;
             }
-            if (!active.initialized) s.InitializeSet(active);
-            // With "Paint every material", one gradient runs across every body part using the same kind of texture.
-            var targets = new List<TextureSet> { active };
-            if (ctx.brush.paintAllMaterials)
-                foreach (var other in s.sets)
-                    if (other != active && other.initialized && other.property == active.property) targets.Add(other);
+            // Every selected texture, and with "whole model" the same kind of texture on every material, so one
+            // gradient runs over the entire model.
+            var targets = s.PaintTargets(ctx.brush.wholeModel);
+            foreach (var set in targets)
+                if (!set.initialized) s.InitializeSet(set);
             m_Stroke = s.engine.BeginStroke(targets, StrokeTool.Paint, ctx.primary, ctx.brush.opacity, "Gradient", Matrix4x4.identity, false);
             if (!active.editingMask) ctx.colors.Use(ctx.primary);
             m_GradStart = m_GradEnd = h.point;

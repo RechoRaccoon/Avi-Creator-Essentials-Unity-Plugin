@@ -18,6 +18,7 @@ namespace AviCreatorEssentials
             public Color fillColor;
             public bool maskEnabled;
             public AdjustMode adjMode;
+            public bool clipBelow;
             public Color adjColor;
             public float hue, saturation, lightness;
 
@@ -31,6 +32,7 @@ namespace AviCreatorEssentials
                 fillColor = l.fillColor,
                 maskEnabled = l.maskEnabled,
                 adjMode = l.adjMode,
+                clipBelow = l.clipBelow,
                 adjColor = l.adjColor,
                 hue = l.hue,
                 saturation = l.saturation,
@@ -47,6 +49,7 @@ namespace AviCreatorEssentials
                 l.fillColor = fillColor;
                 l.maskEnabled = maskEnabled;
                 l.adjMode = adjMode;
+                l.clipBelow = clipBelow;
                 l.adjColor = adjColor;
                 l.hue = hue;
                 l.saturation = saturation;
@@ -286,7 +289,7 @@ namespace AviCreatorEssentials
         {
             int idx = set.layers.IndexOf(layer);
             if (idx < 0) return;
-            if (engine.MeasureRegion(set, idx, layer.mask != null ? (Texture)layer.mask : APResources.White, out var mean, out var std, out var hist))
+            if (engine.MeasureRegion(set, idx, layer.mask != null ? (Texture)layer.mask : APResources.White, out var mean, out var std, out var hist, true))
             {
                 layer.srcMean = mean;
                 layer.srcStd = std;
@@ -470,6 +473,7 @@ namespace AviCreatorEssentials
                 fillColor = layer.fillColor,
                 maskEnabled = layer.maskEnabled,
                 adjMode = layer.adjMode,
+                clipBelow = layer.clipBelow,
                 adjColor = layer.adjColor,
                 hue = layer.hue,
                 saturation = layer.saturation,

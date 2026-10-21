@@ -470,6 +470,7 @@
 .ap-material-row.ap-active { background-color: var(--selection); }
 .ap-material-row.ap-active Label { color: var(--selection-text); }
 .ap-material-row.ap-material-child { padding-left: 22px; }
+.ap-material-row.ap-selected { border-left-width: 3px; border-left-color: var(--selection); background-color: var(--row-hover); }
 .ap-material-options { margin-top: 6px; }
 
 .ap-mesh-row { min-height: 22px; padding: 0 2px; }

@@ -86,7 +86,10 @@ namespace AviCreatorEssentials
             Add(colors);
 
             Add(Row(new W.ToggleRow("Glow (also on emission)", () => S.addToEmission, v => { S.addToEmission = v; S.Save(); },
-                "Also put the stars on the material's emission texture, so they shine in the dark")));
+                "Also put the stars on each material's emission texture, so they shine in the dark")));
+            Add(Row(new W.ToggleRow("Whole model", () => m_Ctx.brush.wholeModel, v => { m_Ctx.brush.wholeModel = v; m_Ctx.NotifyBrushChanged(); },
+                "Stars go on every material that uses the same kind of texture, so they cover the entire model. " +
+                "Off: only the textures selected in Materials.")));
 
             var buttons = W.Row("ap-row-gap", "ap-wrap");
             buttons.Add(W.TextButton("Add star layer", AddStars, "ap-small", "ap-accent"));
@@ -142,23 +145,31 @@ namespace AviCreatorEssentials
         void AddStars()
         {
             var s = m_Ctx.session;
-            var set = s?.ActiveSet;
-            if (set == null)
+            if (s?.ActiveSet == null)
             {
                 m_Ctx.ShowHint("Pick a material to add stars to first.");
                 return;
             }
-            var targets = new List<TextureSet> { set };
-            var emission = S.addToEmission ? s.EmissionSibling(set) : null;
-            if (emission != null) targets.Add(emission);
+            // Every selected texture (and with "whole model" the same kind on every material), plus each one's emission.
+            var targets = s.PaintTargets(m_Ctx.brush.wholeModel);
+            int glowing = 0;
+            if (S.addToEmission)
+            {
+                foreach (var t in targets.ToArray())
+                {
+                    if (APSession.IsEmission(t)) { glowing++; continue; }
+                    var emission = s.EmissionSibling(t);
+                    if (emission == null) continue;
+                    if (!targets.Contains(emission)) targets.Add(emission);
+                    glowing++;
+                }
+            }
             m_Live.Clear();
             m_LiveEntry = s.AddStarLayers(targets, S, m_Live);
             m_LiveSession = s;
-            if (S.addToEmission && emission == null && set.property != APSession.EmissionProperty(set.cloneMaterial))
-                m_Ctx.ShowHint("Stars added. This material's shader has no emission slot, so they are only on the main texture.");
-            else
-                m_Ctx.ShowHint("Stars added on a new layer" + (emission != null ? " and on the emission texture, so they glow" : "") +
-                               ". Change the settings to adjust them; add a mask to keep them only where you want.");
+            m_Ctx.ShowHint("Stars added on " + (targets.Count == 1 ? "a new layer" : "new layers in " + targets.Count + " textures") +
+                           (glowing > 0 ? ", glowing on the emission" : S.addToEmission ? " (no emission slot to glow on)" : "") +
+                           ". Change the settings to adjust them; add a mask to keep them only where you want.");
             m_Ctx.Render();
         }
 

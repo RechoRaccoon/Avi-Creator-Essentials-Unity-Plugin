@@ -147,8 +147,9 @@ namespace AviCreatorEssentials
 
         public bool IsFloating => kind == LayerKind.Image && liftedFrom != null;
 
-        // adjustment layers (work on everything below them, inside their mask)
+        // adjustment layers (work on the layer below them, or with clipBelow off on everything below, inside their mask)
         public AdjustMode adjMode;
+        public bool clipBelow = true;            // only the layer directly below (and other clipped adjustments on it)
         public Color adjColor = Color.white;     // recolor target (gamma)
         public float hue;                        // -180..180 degrees
         public float saturation;                 // -1..1

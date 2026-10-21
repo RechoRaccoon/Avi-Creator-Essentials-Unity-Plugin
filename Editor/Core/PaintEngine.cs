@@ -333,6 +333,42 @@ namespace AviCreatorEssentials
             set.dirty = false;
         }
 
+        /// <summary>
+        /// The layer a clipped adjustment layer works on: the nearest layer below that is not itself a clipped
+        /// adjustment. -1 when there is none (it then adjusts everything below, like an unclipped one).
+        /// </summary>
+        public static int ClipBase(IList<PaintLayer> layers, int index)
+        {
+            if (index < 0 || index >= layers.Count) return -1;
+            var layer = layers[index];
+            if (layer.kind != LayerKind.Adjustment || !layer.clipBelow) return -1;
+            for (int i = index - 1; i >= 0; i--)
+            {
+                var l = layers[i];
+                if (l.kind != LayerKind.Adjustment) return i;
+                if (!l.clipBelow) return -1;
+            }
+            return -1;
+        }
+
+        void SetupAdjust(Material comp, PaintLayer layer)
+        {
+            comp.SetFloat(APIds.HasMask, layer.MaskActive ? 1f : 0f);
+            comp.SetTexture(APIds.MaskTex, layer.MaskActive ? (Texture)layer.mask : APResources.White);
+            comp.SetFloat(APIds.Opacity, layer.opacity);
+            comp.SetFloat(APIds.AdjMode, (float)layer.adjMode);
+            comp.SetVector(APIds.AdjColor, APUtil.V(layer.adjColor));
+            comp.SetVector(APIds.AdjHSL, new Vector4(layer.hue / 360f, layer.saturation, layer.lightness, 0f));
+            comp.SetVector(APIds.SrcMean, layer.srcMean);
+            comp.SetVector(APIds.SrcStd, layer.srcStd);
+            comp.SetVector(APIds.RefMean, layer.refMean);
+            comp.SetVector(APIds.RefStd, layer.refStd);
+            comp.SetFloat(APIds.RefValid, layer.refValid ? 1f : 0f);
+            var lut = layer.adjMode == AdjustMode.Match ? MatchLut(layer) : null;
+            comp.SetFloat(APIds.UseLut, lut != null ? 1f : 0f);
+            comp.SetTexture(APIds.LutTex, lut != null ? lut : (Texture)APResources.White);
+        }
+
         /// <summary>Composites the stack into compA/compB and returns the one holding the result.</summary>
         RenderTexture CompositeStack(TextureSet set, float padding)
         {
@@ -340,40 +376,63 @@ namespace AviCreatorEssentials
             var a = set.compA;
             var b = set.compB;
             APUtil.Clear(a, new Color(0, 0, 0, 0));
-            foreach (var layer in set.layers)
+            var layers = set.layers;
+            var clipped = new List<PaintLayer>();
+            for (int li = 0; li < layers.Count; li++)
             {
-                if (!layer.visible || layer.opacity <= 0f) continue;
+                var layer = layers[li];
                 if (layer.kind == LayerKind.Adjustment)
                 {
-                    comp.SetFloat(APIds.HasMask, layer.MaskActive ? 1f : 0f);
-                    comp.SetTexture(APIds.MaskTex, layer.MaskActive ? (Texture)layer.mask : APResources.White);
-                    comp.SetFloat(APIds.Opacity, layer.opacity);
-                    comp.SetFloat(APIds.AdjMode, (float)layer.adjMode);
-                    comp.SetVector(APIds.AdjColor, APUtil.V(layer.adjColor));
-                    comp.SetVector(APIds.AdjHSL, new Vector4(layer.hue / 360f, layer.saturation, layer.lightness, 0f));
-                    comp.SetVector(APIds.SrcMean, layer.srcMean);
-                    comp.SetVector(APIds.SrcStd, layer.srcStd);
-                    comp.SetVector(APIds.RefMean, layer.refMean);
-                    comp.SetVector(APIds.RefStd, layer.refStd);
-                    comp.SetFloat(APIds.RefValid, layer.refValid ? 1f : 0f);
-                    var lut = layer.adjMode == AdjustMode.Match ? MatchLut(layer) : null;
-                    comp.SetFloat(APIds.UseLut, lut != null ? 1f : 0f);
-                    comp.SetTexture(APIds.LutTex, lut != null ? lut : (Texture)APResources.White);
+                    // Clipped adjustments are applied together with their layer below (even when that one is hidden).
+                    if (ClipBase(layers, li) >= 0) continue;
+                    if (!layer.visible || layer.opacity <= 0f) continue;
+                    SetupAdjust(comp, layer);
                     Graphics.Blit(a, b, comp, CompPass.Adjust);
                     var ta = a; a = b; b = ta;
                     continue;
                 }
+                if (!layer.visible || layer.opacity <= 0f) continue;
                 bool isFill = layer.kind == LayerKind.Fill;
                 if (!isFill && layer.content == null) continue;
+
+                clipped.Clear();
+                for (int j = li + 1; j < layers.Count && layers[j].kind == LayerKind.Adjustment && layers[j].clipBelow; j++)
+                    if (layers[j].visible && layers[j].opacity > 0f) clipped.Add(layers[j]);
+
+                Texture source = isFill ? (Texture)APResources.White : layer.content;
+                RenderTexture tmpA = null, tmpB = null;
+                if (clipped.Count > 0)
+                {
+                    // Adjust a copy of just this layer, then blend the result as the layer itself.
+                    tmpA = RenderTexture.GetTemporary(a.descriptor);
+                    tmpB = RenderTexture.GetTemporary(a.descriptor);
+                    if (isFill) APUtil.Clear(tmpA, layer.fillColor);
+                    else
+                    {
+                        comp.SetFloat(APIds.CopyMode, 0f);
+                        comp.SetFloat(APIds.SrcToGamma, 0f);
+                        Graphics.Blit(layer.content, tmpA, comp, CompPass.Copy);
+                    }
+                    foreach (var adj in clipped)
+                    {
+                        SetupAdjust(comp, adj);
+                        Graphics.Blit(tmpA, tmpB, comp, CompPass.Adjust);
+                        var tt = tmpA; tmpA = tmpB; tmpB = tt;
+                    }
+                    source = tmpA;
+                    isFill = false;
+                }
                 comp.SetFloat(APIds.IsFill, isFill ? 1f : 0f);
                 comp.SetVector(APIds.FillColor, APUtil.V(layer.fillColor));
-                comp.SetTexture(APIds.LayerTex, isFill ? (Texture)APResources.White : layer.content);
+                comp.SetTexture(APIds.LayerTex, source);
                 comp.SetFloat(APIds.HasMask, layer.MaskActive ? 1f : 0f);
                 comp.SetTexture(APIds.MaskTex, layer.MaskActive ? (Texture)layer.mask : APResources.White);
                 comp.SetFloat(APIds.Opacity, layer.opacity);
                 comp.SetInt(APIds.BlendMode, (int)layer.blend);
                 Graphics.Blit(a, b, comp, CompPass.Layer);
                 var t = a; a = b; b = t;
+                if (tmpA != null) RenderTexture.ReleaseTemporary(tmpA);
+                if (tmpB != null) RenderTexture.ReleaseTemporary(tmpB);
             }
             if (padding > 0f && set.seed != null)
             {
@@ -413,13 +472,16 @@ namespace AviCreatorEssentials
         /// Average, spread and luma/chroma histograms (Y, Cb, Cr; 256 bins each, normalised) of the colors under
         /// the region, as composited by the layers below layerIndex.
         /// </summary>
-        public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std, out float[] hist)
+        public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std, out float[] hist,
+            bool whatItAdjusts = false)
         {
             mean = std = Vector4.zero;
             hist = null;
             if (region == null) return false;
+            // whatItAdjusts: for a clipped adjustment layer, only its layer below (with the clipped adjustments under it).
+            int from = whatItAdjusts ? Mathf.Max(0, ClipBase(set.layers, layerIndex)) : 0;
             var below = new List<PaintLayer>();
-            for (int i = 0; i < layerIndex && i < set.layers.Count; i++) below.Add(set.layers[i]);
+            for (int i = from; i < layerIndex && i < set.layers.Count; i++) below.Add(set.layers[i]);
             var colorRT = NewContentRT(set);
             CompositeSubset(set, below, colorRT);
             var maskRT = APUtil.CreateRT(set.width, set.height, GraphicsFormat.R8G8B8A8_UNorm, "region");
@@ -442,7 +504,7 @@ namespace AviCreatorEssentials
             for (int i = 0; i < cp.Length && i < mp.Length; i++)
             {
                 float k = mp[i].r / 255f;
-                if (k < 0.5f) continue;
+                if (k < 0.5f || cp[i].a < 128) continue;
                 double cr = cp[i].r / 255.0, cg = cp[i].g / 255.0, cb = cp[i].b / 255.0;
                 ToYCC(cr, cg, cb, out double y, out double u, out double v);
                 h[Bin(y)] += 1;

@@ -41,6 +41,7 @@ namespace AviCreatorEssentials
         readonly System.Random m_Rng = new System.Random();
         readonly List<Dab2D> m_Dabs = new List<Dab2D>();
         readonly StrokeTaper<Dab2D> m_Taper = new StrokeTaper<Dab2D>();
+        readonly List<Dab2D> m_ScaledDabs = new List<Dab2D>();
 
         // image drag
         Vector2 m_ImgStartCenter;
@@ -309,7 +310,16 @@ namespace AviCreatorEssentials
             if (!set.initialized) s.InitializeSet(set);
             if (set.islandDirty) s.engine.BuildIsland(set);
             var tool = ctx.Tool == PaintTool.Eraser ? StrokeTool.Erase : StrokeTool.Paint;
-            m_Stroke = s.engine.BeginStroke(new[] { set }, tool, ctx.primary, ctx.brush.opacity,
+            // Other selected textures of the same material share its UV layout, so they take the same strokes.
+            var targets = new List<TextureSet> { set };
+            foreach (var other in s.SelectedSets)
+            {
+                if (other == set || other.originalMaterial != set.originalMaterial || other.uvChannel != set.uvChannel) continue;
+                if (!other.initialized) s.InitializeSet(other);
+                if (other.islandDirty) s.engine.BuildIsland(other);
+                targets.Add(other);
+            }
+            m_Stroke = s.engine.BeginStroke(targets, tool, ctx.primary, ctx.brush.opacity,
                 tool == StrokeTool.Erase ? "Erase" : "Paint", Matrix4x4.identity, false);
             m_Stroke.paintMode = ctx.brush.paintMode;
             m_StrokeSet = set;
@@ -391,7 +401,24 @@ namespace AviCreatorEssentials
             if (m_Stroke == null) return;
             m_Taper.Release(m_Dabs);
             if (m_Dabs.Count == 0) return;
-            ctx.session.engine.Dabs2D(m_Stroke, m_StrokeSet, m_Dabs, ctx.Tip, ctx.brush);
+            foreach (var t in m_Stroke.targets)
+            {
+                if (t.set == m_StrokeSet)
+                {
+                    ctx.session.engine.Dabs2D(m_Stroke, t.set, m_Dabs, ctx.Tip, ctx.brush);
+                    continue;
+                }
+                // Same UV layout, maybe another resolution: keep the brush the same size on the texture.
+                float k = t.set.width / (float)Mathf.Max(1, m_StrokeSet.width);
+                m_ScaledDabs.Clear();
+                foreach (var d in m_Dabs)
+                {
+                    var c = d;
+                    c.radiusPx *= k;
+                    m_ScaledDabs.Add(c);
+                }
+                ctx.session.engine.Dabs2D(m_Stroke, t.set, m_ScaledDabs, ctx.Tip, ctx.brush);
+            }
             m_Dabs.Clear();
             ctx.session.engine.Apply(m_Stroke);
             ctx.Render();

@@ -55,6 +55,8 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 - **No seams:** paint is worked out from the 3D surface, so both sides of a UV seam match exactly.
 - **Only visible surfaces** stops paint from going through to hidden areas such as the inside of sleeves. Turn it off under Brush › Projection.
 - **Symmetry** (top bar) mirrors your strokes left to right.
+- **Whole model** (Brush section, on by default): brushes, gradients and stars carry on across every material that uses the same kind of texture, each on its own selected layer, so you can paint over the entire avatar. Turn it off to paint only the textures selected in Materials.
+- **Several textures at once:** Ctrl-click textures in the Materials section (Shift-click for a range), for example a material's base color and its emission. Brushes, gradients and stars then paint all of them; in the texture view, the selected textures of the same material are painted together.
 
 **Painting like paint.** Brush › **Paint** turns on **Wet paint**: overlapping dabs build up like real paint instead of laying down one flat color, and strokes can carry texture:
 
@@ -67,7 +69,7 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 
 New tips made of thin lines: **Bristles**, **Dry Brush**, **Fur Strands** and **Fur Tuft** (a clump of pointed hairs, for fluffy edges). They always turn with the stroke.
 
-**3D gradients.** Press **D** (Gradient tool) and drag across the model from where the gradient starts to where it ends. It is laid out in 3D on the model, not on the texture, so it flows smoothly across UV seams. Choose **Linear**, **Radial** (spreads out in a sphere from where you start) or **Reflected**, and fade the paint color out or blend it into the second color. It paints the selected layer or mask, stays inside a UV selection, and with **Across every material** one gradient runs over every body part.
+**3D gradients.** Press **D** (Gradient tool) and drag across the model from where the gradient starts to where it ends. It is laid out in 3D on the model, not on the texture, so it flows smoothly across UV seams. Choose **Linear**, **Radial** (spreads out in a sphere from where you start) or **Reflected**, and fade the paint color out or blend it into the second color. It paints the selected layer or mask of every texture it reaches (see *Whole model* below) and stays inside a UV selection.
 
 **Stars and space looks.** The **Stars** section scatters glowing stars over the model: tiny specks and bigger stars with soft halos, four-point sparkles, two star colors and optional nebula clouds. They are placed in 3D on the avatar's rest pose (like Local Pos), so they spread evenly across UV seams, and baked into a new layer, so they stay stuck to the model and work in any shader. With **Glow** on, they also go on the emission texture so they shine in the dark. The new layer updates live while you change the settings (until you do something else); add a mask to keep stars only where you want them.
 
@@ -79,7 +81,7 @@ Stars that shift as you look around (parallax, matcap, World Pos) are worked out
 
 **Selecting UV areas.** Press **S** (Select tool). Click a UV island, or drag a box or lasso, in the texture view or on the model. Shift adds and Ctrl removes. While something is selected, brushes, erasers and fills only paint inside it. Ctrl+D clears the selection, Ctrl+A selects everything and Ctrl+I inverts it.
 
-**Recoloring and matching colors.** Adjustment layers change the color of an area without painting over it, so shading, highlights and patterns stay. Select an area first (**S**, then click a UV island), then press the adjustment button in the Layers section:
+**Recoloring and matching colors.** Adjustment layers change the color of an area without painting over it, so shading, highlights and patterns stay. An adjustment layer changes only the layer directly below it (shown as "↓ … only" in the layer list); turn off **Only the layer below** in its panel to change everything below instead. Select an area first (**S**, then click a UV island), then press the adjustment button in the Layers section:
 
 - **Recolor** gives the area a new overall color. While the layer is selected, the color wheel edits it live, so you can just pick colors until it looks right.
 - **Hue / Saturation / Lightness** shifts the existing colors.

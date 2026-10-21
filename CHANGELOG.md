@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0
+
+- Whole model (Brush section, on by default): brushes, gradients and stars carry on across every material that uses the same kind of texture, each on its selected layer, so they cover the entire avatar. Replaces "Paint every material".
+- Paint several textures at once: Ctrl-click (or Shift-click) textures in the Materials section, such as a material's base color and emission. Brushes, gradients and stars paint all selected textures; the texture view paints the selected textures of the same material together.
+- Stars go on every selected texture (and the whole model), each with its emission when Glow is on.
+- Adjustment layers now change only the layer directly below them. "Only the layer below" in the Adjustment panel switches one back to changing everything below. Recolor and Match measure just that layer.
+
 ## 0.10.0
 
 - Gradient tool (D): drag across the model for a gradient laid out in 3D, not on the texture, so it runs smoothly across UV seams. Linear, Radial and Reflected; the paint color fades out or blends into the second color. Paints the selected layer or mask, stays inside a UV selection, and can run across every material.

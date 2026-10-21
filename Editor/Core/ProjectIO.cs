@@ -52,6 +52,7 @@ namespace AviCreatorEssentials
         public bool hasPlacement;
         public ImagePlacement placement;
         public int adjMode;
+        public bool clipBelow = true;
         public Color adjColor = Color.white;
         public float hue, saturation, lightness;
         public Vector4 srcMean, srcStd, refMean, refStd;
@@ -171,6 +172,7 @@ namespace AviCreatorEssentials
                             fillColor = layer.fillColor,
                             maskEnabled = layer.maskEnabled,
                             adjMode = (int)layer.adjMode,
+                            clipBelow = layer.clipBelow,
                             adjColor = layer.adjColor,
                             hue = layer.hue,
                             saturation = layer.saturation,
@@ -303,6 +305,7 @@ namespace AviCreatorEssentials
                             fillColor = ld.fillColor,
                             maskEnabled = ld.maskEnabled,
                             adjMode = (AdjustMode)ld.adjMode,
+                            clipBelow = ld.clipBelow,
                             adjColor = ld.adjColor,
                             hue = ld.hue,
                             saturation = ld.saturation,
