@@ -51,6 +51,16 @@ namespace AviCreatorEssentials
         public GradientShape shape;
         public Color colorA;   // gamma, straight alpha
         public Color colorB;
+        // Symmetry (the mirror toggle): the gradient is folded across the avatar's mirror plane, so the side the
+        // drag did not touch gets the mirror image of the side it did. mirrorMatrix maps a world point to its
+        // mirrored counterpart (through avatar space, like the brush's mirrored dab); worldToLocal is the same
+        // avatar space, used to tell which side of the plane a point is on. mirrorSide is +1/-1: the side the
+        // drag started on, in that space.
+        public bool mirror;
+        public int mirrorAxis;          // 0 X, 1 Y, 2 Z (avatar space)
+        public float mirrorSide;
+        public Matrix4x4 mirrorMatrix;  // world -> mirrored world
+        public Matrix4x4 worldToLocal;  // world -> avatar space
     }
 
     public class StrokeTarget
@@ -1297,6 +1307,11 @@ namespace AviCreatorEssentials
             m.SetVector(APIds.GradDir, dir / len2);
             m.SetFloat(APIds.GradLength, Mathf.Sqrt(len2));
             m.SetFloat(APIds.GradShape, (float)g.shape);
+            m.SetFloat(APIds.GradMirror, g.mirror ? 1f : 0f);
+            m.SetFloat(APIds.GradMirrorAxis, Mathf.Clamp(g.mirrorAxis, 0, 2));
+            m.SetFloat(APIds.GradMirrorSide, g.mirrorSide >= 0f ? 1f : -1f);
+            m.SetMatrix(APIds.GradMirrorMatrix, g.mirrorMatrix);
+            m.SetMatrix(APIds.GradWorldToLocal, g.worldToLocal);
             m.SetVector(APIds.UVTransform, new Vector4(1, 1, 0, 0));
             int[] passes = PaintPass.UseConservative ? new[] { PaintPass.GradientConservative, PaintPass.Gradient } : new[] { PaintPass.Gradient };
             foreach (var t in ctx.targets)

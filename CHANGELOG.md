@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1
+
+- Fixed the gradient tool ignoring the mirror (symmetry) toggle: with symmetry on, a gradient dragged on one side of the model is now mirrored on the other side too (across the chosen mirror axis), and the drag preview shows the mirrored guide. The side you drag on is unchanged.
+
 ## 0.11.0
 
 - Whole model (Brush section, on by default): brushes, gradients and stars carry on across every material that uses the same kind of texture, each on its selected layer, so they cover the entire avatar. Replaces "Paint every material".

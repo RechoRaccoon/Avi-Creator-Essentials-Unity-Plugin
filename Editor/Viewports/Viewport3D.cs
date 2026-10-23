@@ -784,16 +784,46 @@ namespace AviCreatorEssentials
             if ((m_GradEnd - m_GradStart).sqrMagnitude < 1e-10f) return;
             var a = ctx.primary;
             var b = ctx.gradientToTransparent ? new Color(a.r, a.g, a.b, 0f) : ctx.secondary;
-            ctx.session.engine.Gradient(m_Stroke, new GradientParams
+            var grad = new GradientParams
             {
                 start = m_GradStart,
                 end = m_GradEnd,
                 shape = ctx.gradientShape,
                 colorA = a,
                 colorB = b,
-            });
+            };
+            // Symmetry: the gradient is folded across the avatar's mirror plane, the same plane (avatar space,
+            // axis component negated) the brush's mirrored dab uses, so the other side gets its mirror image.
+            var s = ctx.session;
+            if (ctx.brush.symmetry && s.clone != null)
+            {
+                var root = s.clone.transform;
+                int axis = Mathf.Clamp(ctx.brush.symmetryAxis, 0, 2);
+                var flip = new Vector3(axis == 0 ? -1f : 1f, axis == 1 ? -1f : 1f, axis == 2 ? -1f : 1f);
+                grad.mirror = true;
+                grad.mirrorAxis = axis;
+                grad.worldToLocal = root.worldToLocalMatrix;
+                grad.mirrorMatrix = root.localToWorldMatrix * Matrix4x4.Scale(flip) * root.worldToLocalMatrix;
+                // The side the drag started on keeps the gradient as drawn; a start on the plane itself falls
+                // back to the end's side.
+                float ls = root.InverseTransformPoint(m_GradStart)[axis];
+                float le = root.InverseTransformPoint(m_GradEnd)[axis];
+                float side = Mathf.Abs(ls) > 1e-6f ? ls : le;
+                grad.mirrorSide = side >= 0f ? 1f : -1f;
+            }
+            ctx.session.engine.Gradient(m_Stroke, grad);
             ctx.session.engine.Apply(m_Stroke);
             ctx.Render();
+        }
+
+        /// <summary>A world point mirrored across the avatar's symmetry plane (avatar space, axis negated).</summary>
+        Vector3 MirrorPoint(Vector3 p)
+        {
+            var root = ctx.session.clone.transform;
+            int axis = Mathf.Clamp(ctx.brush.symmetryAxis, 0, 2);
+            var l = root.InverseTransformPoint(p);
+            l[axis] = -l[axis];
+            return root.TransformPoint(l);
         }
 
         void EndGradient(bool cancelled)
@@ -1441,6 +1471,17 @@ namespace AviCreatorEssentials
                 Disc(p, a, 3f, ctx.primary);
                 Disc(p, b, 4f, new Color(0, 0, 0, 0.6f));
                 Disc(p, b, 3f, ctx.gradientToTransparent ? new Color(1f, 1f, 1f, 0.35f) : ctx.secondary);
+                if (ctx.brush.symmetry && s.clone != null)
+                {
+                    // The mirrored guide, fainter like the brush's mirrored ring.
+                    var ma = pr.ToLocal(MirrorPoint(m_GradStart));
+                    var mb = pr.ToLocal(MirrorPoint(m_GradEnd));
+                    Line(p, ma, mb, new Color(1f, 1f, 1f, 0.45f), 1.25f);
+                    if (ctx.gradientShape == GradientShape.Radial) Circle(p, ma, Vector2.Distance(ma, mb), new Color(1f, 1f, 1f, 0.25f), 1f);
+                    Disc(p, ma, 3f, new Color(ctx.primary.r, ctx.primary.g, ctx.primary.b, 0.45f));
+                    var endCol = ctx.gradientToTransparent ? new Color(1f, 1f, 1f, 0.35f) : ctx.secondary;
+                    Disc(p, mb, 3f, new Color(endCol.r, endCol.g, endCol.b, 0.45f));
+                }
                 return;
             }
 

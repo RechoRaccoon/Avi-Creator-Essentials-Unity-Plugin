@@ -180,6 +180,11 @@ namespace AviCreatorEssentials
         public static readonly int GradShape = Shader.PropertyToID("_GradShape");
         public static readonly int GradColorA = Shader.PropertyToID("_GradColorA");
         public static readonly int GradColorB = Shader.PropertyToID("_GradColorB");
+        public static readonly int GradMirror = Shader.PropertyToID("_GradMirror");
+        public static readonly int GradMirrorAxis = Shader.PropertyToID("_GradMirrorAxis");
+        public static readonly int GradMirrorSide = Shader.PropertyToID("_GradMirrorSide");
+        public static readonly int GradMirrorMatrix = Shader.PropertyToID("_GradMirrorMatrix");
+        public static readonly int GradWorldToLocal = Shader.PropertyToID("_GradWorldToLocal");
 
         public static readonly int StarCell = Shader.PropertyToID("_StarCell");
         public static readonly int StarAmount = Shader.PropertyToID("_StarAmount");

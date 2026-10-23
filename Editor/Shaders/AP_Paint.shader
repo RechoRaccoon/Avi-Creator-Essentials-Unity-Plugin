@@ -195,10 +195,25 @@ Shader "Hidden/AviCreatorEssentials/Paint"
     float _GradShape;       // 0 linear, 1 radial, 2 reflected
     float4 _GradColorA;     // straight alpha, gamma
     float4 _GradColorB;
+    float _GradMirror;          // 1: fold the gradient across the avatar's mirror plane (symmetry)
+    float _GradMirrorAxis;      // 0 X, 1 Y, 2 Z, in avatar space
+    float _GradMirrorSide;      // +1/-1: the side of the plane the drag started on (avatar space)
+    float4x4 _GradMirrorMatrix; // world -> mirrored world (through avatar space)
+    float4x4 _GradWorldToLocal; // world -> avatar space
 
     float4 frag_gradient(ap_v2f_uv i) : SV_Target
     {
-        float3 d = i.wpos - _GradStart;
+        float3 p = i.wpos;
+        if (_GradMirror > 0.5)
+        {
+            // Fold the far side onto the drag's side, so it gets the mirror image of the gradient. On the
+            // plane itself the folded point is the point, so the two sides meet without a seam.
+            float3 lp = mul(_GradWorldToLocal, float4(p, 1.0)).xyz;
+            float coord = _GradMirrorAxis < 0.5 ? lp.x : (_GradMirrorAxis < 1.5 ? lp.y : lp.z);
+            if (coord * _GradMirrorSide < 0.0)
+                p = mul(_GradMirrorMatrix, float4(p, 1.0)).xyz;
+        }
+        float3 d = p - _GradStart;
         float t;
         if (_GradShape < 0.5) t = dot(d, _GradDir);
         else if (_GradShape < 1.5) t = length(d) / max(_GradLength, 1e-6);
