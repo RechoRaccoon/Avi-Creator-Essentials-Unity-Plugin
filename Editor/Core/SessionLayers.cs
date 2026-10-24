@@ -460,11 +460,12 @@ namespace AviCreatorEssentials
             Changed(set);
         }
 
-        public PaintLayer DuplicateLayer(TextureSet set, PaintLayer layer)
+        /// <summary>An independent copy of a layer: its own content and mask textures, placement and settings.</summary>
+        public PaintLayer CloneLayer(PaintLayer layer)
         {
             var copy = new PaintLayer
             {
-                name = layer.name + " copy",
+                name = layer.name,
                 kind = layer.kind,
                 visible = layer.visible,
                 opacity = layer.opacity,
@@ -494,8 +495,98 @@ namespace AviCreatorEssentials
                 copy.placement.image = layer.placement.image != null ? Object.Instantiate(layer.placement.image) : null;
                 if (copy.placement.image != null) copy.placement.image.hideFlags = HideFlags.HideAndDontSave;
             }
+            return copy;
+        }
+
+        public PaintLayer DuplicateLayer(TextureSet set, PaintLayer layer)
+        {
+            var copy = CloneLayer(layer);
+            copy.name = layer.name + " copy";
             InsertLayer(set, copy, set.layers.IndexOf(layer) + 1, "Duplicate layer");
             return copy;
+        }
+
+        /// <summary>
+        /// Copies a layer onto the same material's emission texture, so what it draws glows, as a new layer on top
+        /// of the emission stack. Returns null when the material has no emission texture (or the layer is already
+        /// on one). Undoable, like every other layer operation.
+        /// </summary>
+        public PaintLayer CopyLayerToEmission(TextureSet set, PaintLayer layer)
+        {
+            if (set == null || layer == null || !set.layers.Contains(layer)) return null;
+            var emSet = EmissionSibling(set);
+            if (emSet == null) return null;
+            if (!emSet.initialized) InitializeSet(emSet);
+            var copy = CloneLayer(layer);
+            bool nameTaken = false;
+            foreach (var l in emSet.layers)
+                if (l.name == copy.name) { nameTaken = true; break; }
+            if (nameTaken) copy.name = UniqueName(emSet, layer.name);
+            InsertLayer(emSet, copy, emSet.layers.Count, "Add layer to emission");
+            return copy;
+        }
+
+        /// <summary>
+        /// Copies the selected area's finished colors onto the same material's emission texture, as a new layer
+        /// on top of the emission stack, so the selected parts glow. Returns null when nothing is selected or
+        /// the material has no emission texture (or the selection is already on one). Undoable, like every
+        /// other layer operation. The base selection is kept.
+        /// </summary>
+        public PaintLayer CopySelectionToEmission(TextureSet set)
+        {
+            if (set == null || !set.HasSelection || !set.initialized) return null;
+            var emSet = EmissionSibling(set);
+            if (emSet == null) return null;
+            if (!emSet.initialized) InitializeSet(emSet);
+            if (set.selectionDirty || set.selectionRT == null) engine.BuildSelection(set);
+            if (set.selectionRT == null) return null;
+            var composite = engine.CompositeForExport(set, 0);
+            var layer = new PaintLayer { name = UniqueName(emSet, "Selection"), kind = LayerKind.Paint };
+            layer.content = engine.NewContentRT(emSet);
+            // The layer stack's own Layer pass, with the finished texture as the source and the selection as
+            // the mask: the selected pixels and nothing else. Both are sampled in normalised UV space, so this
+            // works even when the two textures differ in resolution (assuming the usual shared UV layout).
+            var comp = APResources.Composite;
+            comp.SetFloat(APIds.IsFill, 0f);
+            comp.SetTexture(APIds.LayerTex, composite);
+            comp.SetFloat(APIds.HasMask, 1f);
+            comp.SetTexture(APIds.MaskTex, set.selectionRT);
+            comp.SetFloat(APIds.Opacity, 1f);
+            comp.SetInt(APIds.BlendMode, (int)LayerBlendMode.Normal);
+            var clear = engine.NewContentRT(emSet);
+            var prev = RenderTexture.active;
+            Graphics.Blit(clear, layer.content, comp, CompPass.Layer);
+            RenderTexture.active = prev;
+            APUtil.Release(ref composite);
+            APUtil.Release(ref clear);
+            InsertLayer(emSet, layer, emSet.layers.Count, "Add selection to emission");
+            return layer;
+        }
+
+        /// <summary>
+        /// Renders one layer on its own into a fresh texture: its pixels with its mask applied, at full opacity
+        /// and Normal blend (blend and opacity only mean something against the layers below, so they are not
+        /// baked in), even when the layer is hidden. Adjustment layers have no pixels of their own, so this
+        /// returns null for them. The caller must release the returned texture.
+        /// </summary>
+        public RenderTexture RenderLayerAlone(TextureSet set, PaintLayer layer)
+        {
+            if (set == null || layer == null || !set.initialized || !set.layers.Contains(layer)) return null;
+            if (layer.kind == LayerKind.Adjustment) return null;
+            var alone = new PaintLayer
+            {
+                kind = layer.kind,
+                visible = true,
+                opacity = 1f,
+                blend = LayerBlendMode.Normal,
+                fillColor = layer.fillColor,
+                content = layer.content,
+                mask = layer.mask,
+                maskEnabled = layer.maskEnabled,
+            };
+            var rt = engine.NewContentRT(set);
+            engine.CompositeSubset(set, new List<PaintLayer> { alone }, rt);
+            return rt;
         }
 
         public void MoveLayer(TextureSet set, PaintLayer layer, int newIndex)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.2
+
+- Right-click a layer and choose "Save layer as image…" to save just that layer's pixels, with its mask applied, as a PNG in the project.
+- Right-click a layer and choose "Add to emission" to copy it onto the same material's emission texture as a new layer, so what it draws glows. (Not offered when the material has no emission slot.)
+- Select tool: the new "To emission" button (in the Select tool's options, or next to the selection count in the Layers section) copies the selected area's colors onto the emission texture as a new layer, so just the selected parts glow — for example, select the eyes and make only the eyes glow.
+
 ## 0.11.1
 
 - Fixed the gradient tool ignoring the mirror (symmetry) toggle: with symmetry on, a gradient dragged on one side of the model is now mirrored on the other side too (across the chosen mirror axis), and the drag preview shows the mirrored guide. The side you drag on is unchanged.

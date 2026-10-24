@@ -55,6 +55,7 @@ namespace AviCreatorEssentials
             selButtons.Add(W.TextButton("Select all", () => m_Ctx.session?.SelectAll(m_Ctx.session.ActiveSet), "ap-small"));
             selButtons.Add(W.TextButton("Invert", () => m_Ctx.session?.InvertSelection(m_Ctx.session.ActiveSet), "ap-small"));
             selButtons.Add(W.TextButton("Clear", () => m_Ctx.session?.ClearSelection(m_Ctx.session.ActiveSet), "ap-small"));
+            selButtons.Add(W.TextButton("To emission", SelectionToEmission, "ap-small"));
             m_SelectBox.Add(selButtons);
             m_SelectBox.Add(Track(new W.ToggleRow("Dim unselected parts on the model", () => m_Ctx.view.highlightSelection, v =>
             {
@@ -334,6 +335,38 @@ namespace AviCreatorEssentials
             }
             foreach (var tile in m_Tips.Children())
                 W.SetOn(tile, tile.userData as string == B.tip, "ap-on");
+        }
+
+        /// <summary>
+        /// Copies the current selection's colors onto the same material's emission texture, as a new layer, so
+        /// the selected parts glow. Shared with the Layer panel's selection row (same session method).
+        /// </summary>
+        void SelectionToEmission()
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set == null || !set.HasSelection)
+            {
+                m_Ctx.ShowHint("Select something first (Select tool, S).");
+                return;
+            }
+            if (APSession.IsEmission(set))
+            {
+                m_Ctx.ShowHint("That selection is already on the emission texture — it already glows.");
+                return;
+            }
+            var emSet = s.EmissionSibling(set);
+            var layer = s.CopySelectionToEmission(set);
+            if (layer == null || emSet == null)
+            {
+                m_Ctx.ShowHint("This material has no emission texture slot, so there is nowhere for it to glow.");
+                return;
+            }
+            s.ActiveSet = emSet;
+            m_Ctx.Render();
+            m_Ctx.ShowHint("Added \"" + layer.name + "\" to the emission layers for " +
+                           (set.originalMaterial != null ? set.originalMaterial.name : "this material") +
+                           ". Turn on the emission view (sun button in the toolbar) to see it glow.");
         }
 
         void RefreshMode()

@@ -229,6 +229,9 @@ namespace AviCreatorEssentials
                 var mirror = W.TextButton("Mirror…", () => MirrorMenu(set), "ap-small");
                 mirror.tooltip = "Copy the selected area to the other side, flipped (e.g. one eye onto the other), as a new layer";
                 row.Add(mirror);
+                var glow = W.TextButton("To emission", () => SelectionToEmission(set), "ap-small");
+                glow.tooltip = "Copy the selected area's colors onto this material's emission texture, as a new layer, so it glows";
+                row.Add(glow);
                 row.Add(W.TextButton("Clear", () => s.ClearSelection(set), "ap-small"));
                 m_Channel.Add(row);
             }
@@ -510,8 +513,84 @@ namespace AviCreatorEssentials
             if (layer.kind == LayerKind.Image) menu.AppendAction("Rasterize image", _ => s.RasterizeImage(set, layer));
             menu.AppendAction("New layer in every material", _ => s.AddPaintLayerToAll("Layer " + DateTime.Now.ToString("HHmmss")));
             menu.AppendSeparator();
+            menu.AppendAction("Save layer as image…", _ => SaveLayerAsImage(set, layer),
+                layer.kind == LayerKind.Adjustment ? DropdownMenuAction.Status.Disabled : DropdownMenuAction.Status.Normal);
+            menu.AppendAction("Add to emission", _ => AddLayerToEmission(set, layer),
+                s.EmissionSibling(set) != null ? DropdownMenuAction.Status.Normal : DropdownMenuAction.Status.Disabled);
+            menu.AppendSeparator();
             menu.AppendAction("Delete layer", _ => s.DeleteLayer(set, layer),
                 set.layers.Count > 1 ? DropdownMenuAction.Status.Normal : DropdownMenuAction.Status.Disabled);
+        }
+
+        void SaveLayerAsImage(TextureSet set, PaintLayer layer)
+        {
+            var rt = S.RenderLayerAlone(set, layer);
+            if (rt == null)
+            {
+                m_Ctx.ShowHint("That layer has no pixels of its own to save: adjustment layers only change the layers below them.");
+                return;
+            }
+            string safeName = layer.name;
+            foreach (char c in Path.GetInvalidFileNameChars()) safeName = safeName.Replace(c, '_');
+            if (safeName.Length == 0) safeName = "Layer";
+            string path = EditorUtility.SaveFilePanelInProject("Save layer as image", safeName, "png",
+                "Save this layer's pixels, with its mask applied, as a PNG image.");
+            if (string.IsNullOrEmpty(path))
+            {
+                APUtil.Release(ref rt);
+                return;
+            }
+            var png = APUtil.EncodePNG(rt);
+            APUtil.Release(ref rt);
+            File.WriteAllBytes(APUtil.AssetPathToFull(path), png);
+            AssetDatabase.ImportAsset(path);
+            EditorGUIUtility.PingObject(AssetDatabase.LoadAssetAtPath<Texture2D>(path));
+            m_Ctx.ShowHint("Saved " + path + ".");
+        }
+
+        void AddLayerToEmission(TextureSet set, PaintLayer layer)
+        {
+            var emSet = S.EmissionSibling(set);
+            var copy = S.CopyLayerToEmission(set, layer);
+            if (copy == null || emSet == null)
+            {
+                m_Ctx.ShowHint(APSession.IsEmission(set)
+                    ? "That layer is already on the emission texture."
+                    : "This material has no emission texture slot, so there is nowhere for it to glow.");
+                return;
+            }
+            S.ActiveSet = emSet;
+            m_Ctx.Render();
+            m_Ctx.ShowHint("Added \"" + copy.name + "\" to the emission layers for " +
+                           (set.originalMaterial != null ? set.originalMaterial.name : "this material") +
+                           ". Turn on the emission view (sun button in the toolbar) to see it glow.");
+        }
+
+        void SelectionToEmission(TextureSet set)
+        {
+            var s = S;
+            if (set == null || !set.HasSelection)
+            {
+                m_Ctx.ShowHint("Select something first (Select tool, S).");
+                return;
+            }
+            if (APSession.IsEmission(set))
+            {
+                m_Ctx.ShowHint("That selection is already on the emission texture — it already glows.");
+                return;
+            }
+            var emSet = s.EmissionSibling(set);
+            var layer = s.CopySelectionToEmission(set);
+            if (layer == null || emSet == null)
+            {
+                m_Ctx.ShowHint("This material has no emission texture slot, so there is nowhere for it to glow.");
+                return;
+            }
+            s.ActiveSet = emSet;
+            m_Ctx.Render();
+            m_Ctx.ShowHint("Added \"" + layer.name + "\" to the emission layers for " +
+                           (set.originalMaterial != null ? set.originalMaterial.name : "this material") +
+                           ". Turn on the emission view (sun button in the toolbar) to see it glow.");
         }
 
         void MoreMenu()

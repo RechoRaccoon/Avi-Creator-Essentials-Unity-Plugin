@@ -75,11 +75,11 @@ New tips made of thin lines: **Bristles**, **Dry Brush**, **Fur Strands** and **
 
 Stars that shift as you look around (parallax, matcap, World Pos) are worked out live by the avatar's shader, so they can't be painted into a texture. For those, **Save tiling texture…** makes a seamless star texture for a parallax or Local / World Pos slot, and **Save matcap…** makes a star matcap with a glowing rim to add on top (Add or Screen blend).
 
-**Layers.** Paint layers, fill layers (solid color revealed where you paint) and image layers, with blend modes, opacity and masks. Right-click a layer for every option, and drag layers to reorder them.
+**Layers.** Paint layers, fill layers (solid color revealed where you paint) and image layers, with blend modes, opacity and masks. Right-click a layer for every option, and drag layers to reorder them. Right-click a layer to save just that layer as a PNG image, or copy it onto the material's emission texture so it glows.
 
 **Emission.** Every material with an emission slot has a **Base color / Emission** switch above its layers. The sun button in the toolbar shows only what glows.
 
-**Selecting UV areas.** Press **S** (Select tool). Click a UV island, or drag a box or lasso, in the texture view or on the model. Shift adds and Ctrl removes. While something is selected, brushes, erasers and fills only paint inside it. Ctrl+D clears the selection, Ctrl+A selects everything and Ctrl+I inverts it.
+**Selecting UV areas.** Press **S** (Select tool). Click a UV island, or drag a box or lasso, in the texture view or on the model. Shift adds and Ctrl removes. While something is selected, brushes, erasers and fills only paint inside it. Ctrl+D clears the selection, Ctrl+A selects everything and Ctrl+I inverts it. The **To emission** button (in the Select tool's options, or next to the selection count in the Layers section) copies the selected area's colors onto the emission texture as a new layer, so just the selected parts glow.
 
 **Recoloring and matching colors.** Adjustment layers change the color of an area without painting over it, so shading, highlights and patterns stay. An adjustment layer changes only the layer directly below it (shown as "↓ … only" in the layer list); turn off **Only the layer below** in its panel to change everything below instead. Select an area first (**S**, then click a UV island), then press the adjustment button in the Layers section:
 
