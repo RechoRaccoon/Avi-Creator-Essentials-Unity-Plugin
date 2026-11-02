@@ -273,7 +273,7 @@ namespace AviCreatorEssentials
                     b.taperIn = 0f; b.taperOut = 0f;
                     break;
                 default:
-                    b.paintMode = false; b.hardness = 0.65f; b.flow = 1f; b.spacing = 0.1f;
+                    b.paintMode = false; b.hardness = 1f; b.flow = 1f; b.spacing = 0.1f;
                     b.bristles = 0f; b.colorMixing = 0f; b.colorVariation = 0f;
                     b.taperIn = 0f; b.taperOut = 0f;
                     break;

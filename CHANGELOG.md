@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.3
+
+- Round brush is now solid by default (Hardness 1), instead of fading at the edge.
+- Fixed right-panel sliders overflowing past the panel's right edge; the panel also can't be dragged wider than the window anymore.
+
 ## 0.11.2
 
 - Right-click a layer and choose "Save layer as image…" to save just that layer's pixels, with its mask applied, as a PNG in the project.

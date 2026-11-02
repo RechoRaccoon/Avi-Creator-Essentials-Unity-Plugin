@@ -28,7 +28,7 @@ namespace AviCreatorEssentials
         public string tip = "Round";
         public float radius = 0.015f;          // world units (meters) in the 3D view
         public float radius2D = 0.01f;         // fraction of the texture width in the 2D view
-        public float hardness = 0.65f;
+        public float hardness = 1f;
         public float opacity = 1f;
         public float flow = 1f;
         public float spacing = 0.1f;           // fraction of the diameter
@@ -121,7 +121,7 @@ namespace AviCreatorEssentials
             s_Tips.Add(MakeProcedural("Round", (x, y) =>
             {
                 float d = Mathf.Sqrt(x * x + y * y);
-                return Mathf.Clamp01((1f - d) * 3f);
+                return d < 1f ? 1f : 0f;
             }, true));
             s_Tips.Add(MakeProcedural("Square", (x, y) =>
             {

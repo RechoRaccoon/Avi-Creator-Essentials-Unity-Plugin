@@ -906,7 +906,10 @@ namespace AviCreatorEssentials
             edge.RegisterCallback<PointerMoveEvent>(e =>
             {
                 if (!dragging) return;
-                m_View.rightPanelWidth = Mathf.Clamp(startW - (e.position.x - startX), 280f, 560f);
+                float maxW = 560f;
+                float rootW = m_Root != null ? m_Root.resolvedStyle.width : 0f;
+                if (rootW > 0f) maxW = Mathf.Min(560f, Mathf.Max(280f, rootW - 240f));
+                m_View.rightPanelWidth = Mathf.Clamp(startW - (e.position.x - startX), 280f, maxW);
                 m_RightPanel.style.width = m_View.rightPanelWidth;
             });
             edge.RegisterCallback<PointerUpEvent>(e =>
@@ -914,6 +917,18 @@ namespace AviCreatorEssentials
                 dragging = false;
                 if (edge.HasPointerCapture(e.pointerId)) edge.ReleasePointer(e.pointerId);
                 m_View.Save();
+            });
+            // A width saved on a wider screen must not push the panel off a narrower one.
+            m_RightPanel.RegisterCallback<GeometryChangedEvent>(_ =>
+            {
+                float rootW = m_Root != null ? m_Root.resolvedStyle.width : 0f;
+                if (rootW <= 0f) return;
+                float maxW = Mathf.Min(560f, Mathf.Max(280f, rootW - 240f));
+                if (m_View.rightPanelWidth > maxW)
+                {
+                    m_View.rightPanelWidth = maxW;
+                    m_RightPanel.style.width = maxW;
+                }
             });
         }
 
