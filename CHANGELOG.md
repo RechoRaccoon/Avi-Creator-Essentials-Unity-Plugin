@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.4
+
+- Fixed the painter opening with no brushes, settings or layers on a fresh window: 0.11.3's panel-width clamp registered on the right panel before it was created, throwing a NullReferenceException that stopped the whole workspace build (empty tool rail, no right panel, no status bar). The panel is now created before its resize handling is set up.
+- Fixed the update button offering "Update to 0.11.3" when already on 0.11.3: the version it compared against was hardcoded to 0.8.0. It now reads the installed package version.
+
 ## 0.11.3
 
 - Round brush is now solid by default (Hardness 1), instead of fading at the edge.

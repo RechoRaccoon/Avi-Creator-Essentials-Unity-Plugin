@@ -532,12 +532,18 @@ namespace AviCreatorEssentials
             var panelEdge = new VisualElement();
             panelEdge.AddToClassList("ap-panel-edge");
             body.Add(panelEdge);
-            SetupPanelResize(panelEdge);
 
+            // NOTE: the right panel must exist before SetupPanelResize runs, because
+            // SetupPanelResize registers a GeometryChanged callback on it. In 0.11.3
+            // it ran first, when m_RightPanel was still null on a fresh window, so
+            // it threw a NullReferenceException here and aborted BuildWorkspace:
+            // the tool rail stayed empty, no right panel was ever created, and the
+            // status bar, tool buttons and panel rebuilds never ran.
             m_RightPanel = new ScrollView(ScrollViewMode.Vertical);
             m_RightPanel.AddToClassList("ap-right-panel");
             m_RightPanel.style.width = m_View.rightPanelWidth;
             body.Add(m_RightPanel);
+            SetupPanelResize(panelEdge);
             BuildRightPanel();
 
             var status = W.Row("ap-status-bar");
@@ -919,6 +925,7 @@ namespace AviCreatorEssentials
                 m_View.Save();
             });
             // A width saved on a wider screen must not push the panel off a narrower one.
+            if (m_RightPanel == null) return;
             m_RightPanel.RegisterCallback<GeometryChangedEvent>(_ =>
             {
                 float rootW = m_Root != null ? m_Root.resolvedStyle.width : 0f;

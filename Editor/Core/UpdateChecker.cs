@@ -13,7 +13,20 @@ namespace AviCreatorEssentials
     /// </summary>
     public static class UpdateChecker
     {
-        public const string Version = "0.8.0";
+        // The installed version, read from the package itself so the update button
+        // never compares against a stale hardcoded number (it used to say 0.8.0
+        // forever, so it offered an "update" even on the latest version).
+        // Fallback for hand-copied Assets installs, where PackageInfo is null:
+        // this release's version, bumped alongside package.json on every release.
+        public static string Version
+        {
+            get
+            {
+                var info = PackageInfo.FindForAssembly(typeof(UpdateChecker).Assembly);
+                if (info != null && !string.IsNullOrEmpty(info.version)) return info.version;
+                return "0.11.4";
+            }
+        }
         public const string Repo = "RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin";
         public const string GitUrl = "https://github.com/" + Repo + ".git";
         public const string ListingUrl = "https://rechoraccoon.github.io/Avi-Creator-Essentials-Unity-Plugin/index.json";
