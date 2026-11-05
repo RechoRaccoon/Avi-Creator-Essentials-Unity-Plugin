@@ -233,6 +233,12 @@ namespace AviCreatorEssentials
         // The set's own layers are kept (and come back if the link is removed)
         // but are ignored while the link is live.
         public TextureSet mirrorSource;
+        // Flip the mirrored image horizontally. On by default: it is what makes
+        // the copy land on the other eye the right way round. Some meshes
+        // already mirror the texture through their UVs, so a texture flip
+        // cancels out on the model and the eye looks unflipped; turn this
+        // off for those and the mirror copies straight across.
+        public bool mirrorFlip = true;
         public bool IsMirrored => mirrorSource != null;
 
         public RenderTexture display;              // what the clone material samples

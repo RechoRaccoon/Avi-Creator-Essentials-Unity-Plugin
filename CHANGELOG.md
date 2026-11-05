@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+- Fixed the live mirror showing the wrong layers: a mirrored material's Layers panel listed its own ignored layer stack (in the reported case, 3 layers with different names, no Recolor 1) instead of the source's. It now lists the source material's exact layer stack, read-only, so the list matches what the material displays. Layer actions and properties are disabled while linked; edit the source material to change both.
+- Live mirror has a "Flip horizontally" toggle (Materials section, under "Live mirror from", on by default): the mirrored image is flipped in the texture, but some eye meshes already mirror the texture through their UVs, so the flip cancelled out on the model and the eye looked unflipped. Turn the toggle off for those and the mirror copies straight across. The bake follows the same setting, and the choice is saved with the project (older saves keep flipping, as before).
+
 ## 0.12.0
 
 - Live mirror between two materials: in the Materials section, set "Live mirror from" on one material (e.g. the right eye) to another (e.g. the left eye) and its display becomes the source's full composite flipped horizontally — every paint layer, mask, and hue/saturation/lightness adjustment included — and stays in sync as you edit the source. Painting on the mirrored material is blocked with a hint to paint the source instead, so no stroke can vanish into an ignored layer stack. The link is saved with the project, survives reloads, and bakes the mirrored result. The mirrored material's own layers are kept but ignored while linked, so unlinking restores them. Cycle links are refused.

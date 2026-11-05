@@ -557,9 +557,15 @@ namespace AviCreatorEssentials
                     if (src == null) s.ClearMirror(active);
                     else if (!s.SetMirror(active, src)) Rebuild();
                     m_Ctx.Render();
-                }, "Mirror another material here, flipped horizontally, live. Edit the source to change both; this material's own layers are ignored while linked."));
+                }, "Mirror another material here, live. Edit the source to change both; this material's own layers are ignored while linked."));
             if (active.IsMirrored)
-                m_Options.Add(W.Text("This material mirrors " + active.mirrorSource.displayName + ", flipped horizontally. Edit that material to change both.", "ap-hint"));
+            {
+                m_Options.Add(new W.ToggleRow("Flip horizontally", () => active.mirrorFlip,
+                    v => { active.mirrorFlip = v; active.dirty = true; s.NotifyStructureChanged(); m_Ctx.Render(); },
+                    "Flip the mirrored image left ↔ right. Turn it off if the other eye already looks mirrored on the model without it."));
+                m_Options.Add(W.Text("This material mirrors " + active.mirrorSource.displayName +
+                    (active.mirrorFlip ? ", flipped horizontally." : ", not flipped.") + " Edit that material to change both.", "ap-hint"));
+            }
 
             var uvLabels = new List<string>();
             var uvIdx = new List<int>();

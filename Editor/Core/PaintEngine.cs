@@ -349,7 +349,21 @@ namespace AviCreatorEssentials
                     return;
                 }
                 var compFlip = APResources.Composite;
-                Graphics.Blit(src.lastComposite, set.compA, compFlip, CompPass.FlipX);
+                if (set.mirrorFlip)
+                {
+                    Graphics.Blit(src.lastComposite, set.compA, compFlip, CompPass.FlipX);
+                }
+                else
+                {
+                    // No flip: the other side's UVs already mirror the image on
+                    // the model, so a texture flip would cancel out and the eye
+                    // would look unflipped. Copy the source composite exactly.
+                    // Copy depends on CopyMode/SrcToGamma, so set them here
+                    // (this material is shared, other blits leave them set).
+                    compFlip.SetFloat(APIds.CopyMode, 0f);
+                    compFlip.SetFloat(APIds.SrcToGamma, 0f);
+                    Graphics.Blit(src.lastComposite, set.compA, compFlip, CompPass.Copy);
+                }
                 result = set.compA;
             }
             else
@@ -686,7 +700,17 @@ namespace AviCreatorEssentials
                 // target's ignored layer stack.
                 Composite(set.mirrorSource, true);
                 if (set.mirrorSource.lastComposite != null)
-                    Graphics.Blit(set.mirrorSource.lastComposite, outRT, APResources.Composite, CompPass.FlipX);
+                {
+                    if (set.mirrorFlip)
+                        Graphics.Blit(set.mirrorSource.lastComposite, outRT, APResources.Composite, CompPass.FlipX);
+                    else
+                    {
+                        var comp = APResources.Composite;
+                        comp.SetFloat(APIds.CopyMode, 0f);
+                        comp.SetFloat(APIds.SrcToGamma, 0f);
+                        Graphics.Blit(set.mirrorSource.lastComposite, outRT, comp, CompPass.Copy);
+                    }
+                }
                 RenderTexture.active = prev;
                 set.dirty = true;
                 return outRT;

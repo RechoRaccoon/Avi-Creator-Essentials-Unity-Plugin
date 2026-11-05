@@ -83,6 +83,7 @@ namespace AviCreatorEssentials
         readonly VisualElement m_Props;
         readonly VisualElement m_List;
         readonly VisualElement m_DropLine;
+        readonly VisualElement m_Actions;
         DropdownField m_Blend;
         Slider m_Opacity;
         Label m_OpacityValue;
@@ -120,19 +121,19 @@ namespace AviCreatorEssentials
             m_DropLine = new VisualElement { pickingMode = PickingMode.Ignore };
             m_DropLine.AddToClassList("ap-drop-line");
 
-            var actions = W.Row("ap-layer-actions");
-            actions.Add(W.IconButton(IconKind.Plus, "New paint layer", () => S.AddPaintLayer(Set)));
-            actions.Add(W.IconButton(IconKind.FillLayer, "New fill layer (solid color). Painting on it reveals it through a mask.", () =>
+            m_Actions = W.Row("ap-layer-actions");
+            m_Actions.Add(W.IconButton(IconKind.Plus, "New paint layer", () => S.AddPaintLayer(Set)));
+            m_Actions.Add(W.IconButton(IconKind.FillLayer, "New fill layer (solid color). Painting on it reveals it through a mask.", () =>
                 S.AddFillLayer(Set, m_Ctx.primary, true)));
-            actions.Add(W.IconButton(IconKind.Theme, "New adjustment layer: recolor, hue/saturation, or match colors. Uses the current UV selection as its area.", AdjustmentMenu));
-            actions.Add(W.IconButton(IconKind.Image, "Import an image: place it on the texture, project it onto the model, or wrap a tiling texture (like a normal map) around the whole model", ImageMenu));
-            actions.Add(W.IconButton(IconKind.Mask, "Add a mask to the selected layer", AddMaskMenu));
-            actions.Add(W.IconButton(IconKind.Duplicate, "Duplicate layer", () => { if (Set?.ActiveLayer != null) S.DuplicateLayer(Set, Set.ActiveLayer); }));
-            actions.Add(W.IconButton(IconKind.Merge, "Merge down", () => { if (Set?.ActiveLayer != null) S.MergeDown(Set, Set.ActiveLayer); }));
-            actions.Add(W.Spacer());
-            actions.Add(W.IconButton(IconKind.More, "More layer actions", MoreMenu));
-            actions.Add(W.IconButton(IconKind.Trash, "Delete layer", () => { if (Set?.ActiveLayer != null) S.DeleteLayer(Set, Set.ActiveLayer); }));
-            Add(actions);
+            m_Actions.Add(W.IconButton(IconKind.Theme, "New adjustment layer: recolor, hue/saturation, or match colors. Uses the current UV selection as its area.", AdjustmentMenu));
+            m_Actions.Add(W.IconButton(IconKind.Image, "Import an image: place it on the texture, project it onto the model, or wrap a tiling texture (like a normal map) around the whole model", ImageMenu));
+            m_Actions.Add(W.IconButton(IconKind.Mask, "Add a mask to the selected layer", AddMaskMenu));
+            m_Actions.Add(W.IconButton(IconKind.Duplicate, "Duplicate layer", () => { if (Set?.ActiveLayer != null) S.DuplicateLayer(Set, Set.ActiveLayer); }));
+            m_Actions.Add(W.IconButton(IconKind.Merge, "Merge down", () => { if (Set?.ActiveLayer != null) S.MergeDown(Set, Set.ActiveLayer); }));
+            m_Actions.Add(W.Spacer());
+            m_Actions.Add(W.IconButton(IconKind.More, "More layer actions", MoreMenu));
+            m_Actions.Add(W.IconButton(IconKind.Trash, "Delete layer", () => { if (Set?.ActiveLayer != null) S.DeleteLayer(Set, Set.ActiveLayer); }));
+            Add(m_Actions);
 
             RegisterCallback<PointerMoveEvent>(OnDragMove);
             RegisterCallback<PointerUpEvent>(OnDragUp);
@@ -208,7 +209,9 @@ namespace AviCreatorEssentials
             var s = S;
             if (set == null || s == null) return;
             if (set.IsMirrored)
-                m_Channel.Add(W.Text("Live mirror of " + set.mirrorSource.displayName + ", flipped horizontally. Edit that material to change both; this material's own layers are ignored while linked.", "ap-hint"));
+                m_Channel.Add(W.Text("Live mirror of " + set.mirrorSource.displayName +
+                    (set.mirrorFlip ? ", flipped horizontally" : ", not flipped") +
+                    ". The layers below are " + set.mirrorSource.displayName + "'s; edit that material to change both. This material's own layers are ignored while linked.", "ap-hint"));
             var baseSet = s.Sibling(set, false);
             var emSet = s.Sibling(set, true);
             if (baseSet != null && emSet != null)
@@ -249,22 +252,36 @@ namespace AviCreatorEssentials
                 m_List.Add(W.Text("Pick a material in the Materials section to see its layers.", "ap-empty"));
                 SetEnabled(true);
                 m_Props.SetEnabled(false);
+                m_Actions.SetEnabled(true);
                 return;
             }
             if (!set.initialized)
             {
                 m_List.Add(W.Text("This material hasn't been painted yet. Paint on it, or add a layer to start.", "ap-empty"));
                 m_Props.SetEnabled(false);
+                m_Actions.SetEnabled(true);
                 return;
             }
-            m_Props.SetEnabled(true);
-            for (int i = set.layers.Count - 1; i >= 0; i--)
-                m_List.Add(MakeRow(set, set.layers[i], i));
+            // A mirrored material displays its source's composite, so its
+            // Layers panel lists the source's exact layer stack, read-only:
+            // the material's own layers are ignored while linked, and listing
+            // them here is what made the mirror look wrong (missing and
+            // differently-named layers). Layer actions and properties are
+            // disabled too; edit the source material to change both.
+            var listSet = set.IsMirrored && set.mirrorSource != null ? set.mirrorSource : set;
+            bool readOnly = listSet != set;
+            m_Props.SetEnabled(!readOnly);
+            m_Actions.SetEnabled(!readOnly);
+            for (int i = listSet.layers.Count - 1; i >= 0; i--)
+                m_List.Add(MakeRow(listSet, listSet.layers[i], i, readOnly));
             RefreshProps();
         }
 
         public void RefreshProps()
         {
+            // A mirrored set's properties are disabled (its own layers are
+            // ignored); the panel shows the source's layers instead.
+            if (Set?.IsMirrored == true) return;
             var l = Set?.ActiveLayer;
             if (l == null) return;
             m_Blend.SetValueWithoutNotify(s_BlendNames[(int)l.blend]);
@@ -276,16 +293,26 @@ namespace AviCreatorEssentials
             W.SetSwatchColor(m_FillSwatch, l.fillColor);
         }
 
-        VisualElement MakeRow(TextureSet set, PaintLayer layer, int index)
+        VisualElement MakeRow(TextureSet set, PaintLayer layer, int index, bool readOnly = false)
         {
             bool active = index == set.activeLayer;
             var row = W.Row("ap-layer-row");
             W.SetOn(row, active, "ap-active");
             W.SetOn(row, !layer.visible, "ap-hidden");
 
-            var eye = W.IconButton(layer.visible ? IconKind.Eye : IconKind.EyeOff, layer.visible ? "Hide layer" : "Show layer",
-                () => S.EditLayer(set, layer, "Layer visibility", x => x.visible = !x.visible), "ap-eye");
-            row.Add(eye);
+            if (readOnly)
+            {
+                // No toggle: the eye only shows whether the source layer is on.
+                var eyeIcon = new Icon(layer.visible ? IconKind.Eye : IconKind.EyeOff, 14) { pickingMode = PickingMode.Ignore };
+                eyeIcon.AddToClassList("ap-eye");
+                row.Add(eyeIcon);
+            }
+            else
+            {
+                var eye = W.IconButton(layer.visible ? IconKind.Eye : IconKind.EyeOff, layer.visible ? "Hide layer" : "Show layer",
+                    () => S.EditLayer(set, layer, "Layer visibility", x => x.visible = !x.visible), "ap-eye");
+                row.Add(eye);
+            }
 
             var thumb = new VisualElement();
             thumb.AddToClassList("ap-thumb");
@@ -318,11 +345,12 @@ namespace AviCreatorEssentials
             {
                 thumb.Add(new Image { image = m_Thumbs.Get(layer.content, false), scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore });
             }
-            thumb.RegisterCallback<PointerDownEvent>(e =>
-            {
-                if (e.button != 0) return;
-                S.SetActiveLayer(set, layer, false);
-            });
+            if (!readOnly)
+                thumb.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button != 0) return;
+                    S.SetActiveLayer(set, layer, false);
+                });
             row.Add(thumb);
 
             if (layer.HasMask)
@@ -333,13 +361,14 @@ namespace AviCreatorEssentials
                 W.SetOn(mthumb, active && set.editingMask, "ap-thumb-active");
                 W.SetOn(mthumb, !layer.maskEnabled, "ap-mask-off");
                 mthumb.Add(new Image { image = m_Thumbs.Get(layer.mask, true), scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore });
-                mthumb.RegisterCallback<PointerDownEvent>(e =>
-                {
-                    if (e.button != 0) return;
-                    if (e.shiftKey) S.EditLayer(set, layer, "Mask on/off", x => x.maskEnabled = !x.maskEnabled);
-                    else S.SetActiveLayer(set, layer, true);
-                    e.StopPropagation();
-                });
+                if (!readOnly)
+                    mthumb.RegisterCallback<PointerDownEvent>(e =>
+                    {
+                        if (e.button != 0) return;
+                        if (e.shiftKey) S.EditLayer(set, layer, "Mask on/off", x => x.maskEnabled = !x.maskEnabled);
+                        else S.SetActiveLayer(set, layer, true);
+                        e.StopPropagation();
+                    });
                 row.Add(mthumb);
             }
 
@@ -361,29 +390,32 @@ namespace AviCreatorEssentials
             info.Add(W.Text(sub, "ap-layer-sub"));
             row.Add(info);
 
-            name.RegisterCallback<MouseDownEvent>(e =>
-            {
-                if (e.clickCount == 2) BeginRename(set, layer, info, name);
-            });
+            if (!readOnly)
+                name.RegisterCallback<MouseDownEvent>(e =>
+                {
+                    if (e.clickCount == 2) BeginRename(set, layer, info, name);
+                });
 
-            row.RegisterCallback<PointerDownEvent>(e =>
-            {
-                if (e.button != 0) return;
-                if (set.activeLayer != index || set.editingMask) S.SetActiveLayer(set, layer, false);
-                // Opening a fill or recolor layer loads its color into the brush (after it is active,
-                // so the wheel's edit-the-layer link doesn't write the color onto the previous layer).
-                if (layer.HasEditableColor && set.ActiveLayer == layer && !set.editingMask && layer.EditableColor != m_Ctx.primary)
-                    m_Ctx.SetPrimary(layer.EditableColor, true);
-                m_DragLayer = layer;
-                m_DragStart = e.position;
-                m_Dragging = false;
-            });
+            if (!readOnly)
+                row.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button != 0) return;
+                    if (set.activeLayer != index || set.editingMask) S.SetActiveLayer(set, layer, false);
+                    // Opening a fill or recolor layer loads its color into the brush (after it is active,
+                    // so the wheel's edit-the-layer link doesn't write the color onto the previous layer).
+                    if (layer.HasEditableColor && set.ActiveLayer == layer && !set.editingMask && layer.EditableColor != m_Ctx.primary)
+                        m_Ctx.SetPrimary(layer.EditableColor, true);
+                    m_DragLayer = layer;
+                    m_DragStart = e.position;
+                    m_Dragging = false;
+                });
 
-            row.AddManipulator(new ContextualMenuManipulator(evt =>
-            {
-                S.SetActiveLayer(set, layer, set.editingMask && set.ActiveLayer == layer);
-                FillMenu(evt.menu, set, layer);
-            }));
+            if (!readOnly)
+                row.AddManipulator(new ContextualMenuManipulator(evt =>
+                {
+                    S.SetActiveLayer(set, layer, set.editingMask && set.ActiveLayer == layer);
+                    FillMenu(evt.menu, set, layer);
+                }));
             row.userData = index;
             return row;
         }

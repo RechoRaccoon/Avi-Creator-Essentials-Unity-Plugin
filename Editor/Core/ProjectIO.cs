@@ -33,6 +33,10 @@ namespace AviCreatorEssentials
         public int uvChannel;
         public int activeLayer;
         public string mirrorSource; // SetLabel of the source set, or null/empty: live mirror link
+        // Live mirror: flip the mirrored image horizontally. Defaults to true
+        // (JsonUtility keeps this initializer value when an older save has no
+        // such field, so existing links keep flipping after the update).
+        public bool mirrorFlip = true;
         public List<LayerData> layers = new List<LayerData>();
     }
 
@@ -146,6 +150,7 @@ namespace AviCreatorEssentials
                         uvChannel = set.uvChannel,
                         activeLayer = set.activeLayer,
                         mirrorSource = set.mirrorSource != null ? SetLabel(set.mirrorSource) : null,
+                        mirrorFlip = set.mirrorFlip,
                     };
                     if (set.originalMaterial != null &&
                         AssetDatabase.TryGetGUIDAndLocalFileIdentifier(set.originalMaterial, out string guid, out long localId))
@@ -362,6 +367,8 @@ namespace AviCreatorEssentials
                     }
                     if (!s.SetMirror(target, source))
                         warnings.Add("Live mirror link for '" + sd.materialName + "' was dropped: it would close a cycle.");
+                    else
+                        target.mirrorFlip = sd.mirrorFlip;
                 }
                 if (data.pose != null && data.pose.Count > 0)
                     s.pose.Restore(s.pose.SnapshotFrom(data.pose));
