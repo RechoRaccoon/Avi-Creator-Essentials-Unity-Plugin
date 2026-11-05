@@ -616,9 +616,22 @@ namespace AviCreatorEssentials
         public void UpdateComposites()
         {
             engine.displayPadding = view.displayPadding;
+            // A live-mirrored set must re-flip whenever its source changes.
+            // Snapshot this before any source is composited (which clears its
+            // dirty flag), then composite sources first so a mirror never lags
+            // a frame behind its source.
+            foreach (var s in sets)
+                if (s.IsMirrored && s.mirrorSource != null && s.mirrorSource.dirty) s.dirty = true;
             foreach (var s in sets)
             {
-                if (!s.initialized) continue;
+                if (!s.initialized || s.IsMirrored) continue;
+                var before = s.display;
+                engine.Composite(s);
+                if (s.display != before) AssignDisplay(s);
+            }
+            foreach (var s in sets)
+            {
+                if (!s.initialized || !s.IsMirrored) continue;
                 var before = s.display;
                 engine.Composite(s);
                 if (s.display != before) AssignDisplay(s);

@@ -307,6 +307,12 @@ namespace AviCreatorEssentials
         {
             var s = ctx.session;
             var set = Set;
+            if (set == null) return;
+            if (set.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + set.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
             if (!set.initialized) s.InitializeSet(set);
             if (set.islandDirty) s.engine.BuildIsland(set);
             var tool = ctx.Tool == PaintTool.Eraser ? StrokeTool.Erase : StrokeTool.Paint;
@@ -501,6 +507,12 @@ namespace AviCreatorEssentials
         {
             var s = ctx.session;
             var set = Set;
+            if (set == null) return;
+            if (set.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + set.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
             if (!set.initialized) s.InitializeSet(set);
             var stroke = s.engine.BeginStroke(new[] { set }, erase ? StrokeTool.Erase : StrokeTool.Paint, ctx.primary, 1f,
                 "Fill", Matrix4x4.identity, false);

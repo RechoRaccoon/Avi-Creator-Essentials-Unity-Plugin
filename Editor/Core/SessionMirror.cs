@@ -12,6 +12,34 @@ namespace AviCreatorEssentials
     /// </summary>
     public partial class APSession
     {
+        /// <summary>
+        /// Live mirror link between two separate materials (e.g. two eye textures):
+        /// target's display becomes source's composite flipped horizontally, and
+        /// stays in sync as source is edited. Returns false (and changes nothing)
+        /// for a null set, a self-link, or a link that would close a cycle.
+        /// The target's own layers are kept but ignored while linked.
+        /// </summary>
+        public bool SetMirror(TextureSet target, TextureSet source)
+        {
+            if (target == null || source == null || target == source) return false;
+            for (var s = source; s != null; s = s.mirrorSource)
+                if (s == target) return false;
+            target.mirrorSource = source;
+            target.dirty = true;
+            dirty = true;
+            NotifyStructureChanged();
+            return true;
+        }
+
+        public void ClearMirror(TextureSet target)
+        {
+            if (target == null || target.mirrorSource == null) return;
+            target.mirrorSource = null;
+            target.dirty = true;
+            dirty = true;
+            NotifyStructureChanged();
+        }
+
         struct Tri
         {
             public Vector3 a, b, c;

@@ -91,6 +91,9 @@ namespace AviCreatorEssentials
         /// <summary>Changes layer properties. Rapid edits with the same key merge into one undo step.</summary>
         public void EditLayer(TextureSet set, PaintLayer layer, string what, Action<PaintLayer> change)
         {
+            // A live-mirrored set's own layers are ignored: editing them would
+            // change nothing visible. Edit the source material instead.
+            if (set != null && set.IsMirrored) return;
             var before = LayerState.Of(layer);
             change(layer);
             var after = LayerState.Of(layer);

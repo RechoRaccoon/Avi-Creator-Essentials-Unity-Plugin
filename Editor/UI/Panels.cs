@@ -478,6 +478,7 @@ namespace AviCreatorEssentials
                 string sub = set.initialized
                     ? set.width + "×" + set.height + " · " + set.layers.Count + (set.layers.Count == 1 ? " layer" : " layers")
                     : (set.originalTexture != null ? set.originalTexture.width + "×" + set.originalTexture.height + " · not painted yet" : "Empty slot · not painted yet");
+                if (set.IsMirrored) sub += " · Mirrors " + set.mirrorSource.displayName;
                 info.Add(W.Text(sub, "ap-layer-sub"));
                 row.Add(info);
                 var captured = set;
@@ -530,6 +531,35 @@ namespace AviCreatorEssentials
                 s.ResizeSet(active, size, size);
                 Rebuild();
             }, "Texture size of the painted result"));
+
+            // Live mirror: this material's display becomes another material's
+            // composite flipped horizontally, and stays in sync as that material
+            // is edited. Its own layers are kept but ignored while linked, so
+            // unlinking restores them. Materials that would close a cycle are
+            // not offered as sources.
+            var mirrorLabels = new List<string> { "None" };
+            var mirrorSources = new List<TextureSet> { null };
+            foreach (var cand in s.sets)
+            {
+                if (cand == active) continue;
+                bool cycle = false;
+                for (var chain = cand; chain != null; chain = chain.mirrorSource)
+                    if (chain == active) { cycle = true; break; }
+                if (cycle) continue;
+                mirrorLabels.Add(cand.displayName);
+                mirrorSources.Add(cand);
+            }
+            m_Options.Add(new W.DropdownRow("Live mirror from", mirrorLabels,
+                () => Mathf.Max(0, mirrorSources.IndexOf(active.mirrorSource)), i =>
+                {
+                    if (i < 0 || i >= mirrorSources.Count) return;
+                    var src = mirrorSources[i];
+                    if (src == null) s.ClearMirror(active);
+                    else if (!s.SetMirror(active, src)) Rebuild();
+                    m_Ctx.Render();
+                }, "Mirror another material here, flipped horizontally, live. Edit the source to change both; this material's own layers are ignored while linked."));
+            if (active.IsMirrored)
+                m_Options.Add(W.Text("This material mirrors " + active.mirrorSource.displayName + ", flipped horizontally. Edit that material to change both.", "ap-hint"));
 
             var uvLabels = new List<string>();
             var uvIdx = new List<int>();

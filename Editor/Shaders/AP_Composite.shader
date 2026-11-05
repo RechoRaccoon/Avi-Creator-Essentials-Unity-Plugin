@@ -516,6 +516,13 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         c = lerp(c, _BrushColor.rgb, _MixReload);
         return float4(c, 1);
     }
+
+    // Full horizontal flip, alpha preserved: a live-mirrored material's
+    // composite is its source's composite sampled at (1 - u, v).
+    float4 frag_flipx(v2f_img i) : SV_Target
+    {
+        return AP_SAMPLE_LOD(_MainTex, float2(1.0 - i.uv.x, i.uv.y), 0);
+    }
     ENDCG
 
     SubShader
@@ -706,6 +713,17 @@ Shader "Hidden/AviCreatorEssentials/Composite"
             #pragma target 4.5
             #pragma vertex vert_img
             #pragma fragment frag_mix_update
+            ENDCG
+        }
+
+        // 18 live mirror: flip a composite horizontally, alpha preserved
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert_img
+            #pragma fragment frag_flipx
             ENDCG
         }
     }

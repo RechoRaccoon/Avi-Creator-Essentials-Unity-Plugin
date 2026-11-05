@@ -207,6 +207,8 @@ namespace AviCreatorEssentials
             var set = Set;
             var s = S;
             if (set == null || s == null) return;
+            if (set.IsMirrored)
+                m_Channel.Add(W.Text("Live mirror of " + set.mirrorSource.displayName + ", flipped horizontally. Edit that material to change both; this material's own layers are ignored while linked.", "ap-hint"));
             var baseSet = s.Sibling(set, false);
             var emSet = s.Sibling(set, true);
             if (baseSet != null && emSet != null)

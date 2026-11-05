@@ -102,11 +102,14 @@ namespace AviCreatorEssentials
         public List<TextureSet> PaintTargets(bool wholeModel)
         {
             var result = SelectedSets;
-            if (!wholeModel) return result;
+            if (!wholeModel) { result.RemoveAll(s => s.IsMirrored); return result; }
             var kinds = new HashSet<string>();
             foreach (var s in result) kinds.Add(PaintKind(s));
             foreach (var s in sets)
                 if (!result.Contains(s) && kinds.Contains(PaintKind(s))) result.Add(s);
+            // Live-mirrored materials are never paint targets: their display
+            // comes from their source, so paint on them would be invisible.
+            result.RemoveAll(s => s.IsMirrored);
             return result;
         }
     }

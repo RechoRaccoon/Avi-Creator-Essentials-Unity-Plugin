@@ -32,6 +32,7 @@ namespace AviCreatorEssentials
         public int height;
         public int uvChannel;
         public int activeLayer;
+        public string mirrorSource; // SetLabel of the source set, or null/empty: live mirror link
         public List<LayerData> layers = new List<LayerData>();
     }
 
@@ -144,6 +145,7 @@ namespace AviCreatorEssentials
                         height = set.height,
                         uvChannel = set.uvChannel,
                         activeLayer = set.activeLayer,
+                        mirrorSource = set.mirrorSource != null ? SetLabel(set.mirrorSource) : null,
                     };
                     if (set.originalMaterial != null &&
                         AssetDatabase.TryGetGUIDAndLocalFileIdentifier(set.originalMaterial, out string guid, out long localId))
@@ -342,6 +344,24 @@ namespace AviCreatorEssentials
                         if (l.kind == LayerKind.Image) s.engine.RenderImageLayer(set, l);
                     set.dirty = true;
                     s.ForceAssign(set);
+                }
+                // Live mirror links, resolved after every set exists (a source
+                // set may be saved after its target). Links to a missing set are
+                // dropped with a warning, never left dangling.
+                foreach (var sd in data.sets)
+                {
+                    if (string.IsNullOrEmpty(sd.mirrorSource)) continue;
+                    var target = FindSet(s, sd);
+                    TextureSet source = null;
+                    foreach (var cand in s.sets)
+                        if (SetLabel(cand) == sd.mirrorSource) { source = cand; break; }
+                    if (target == null || source == null)
+                    {
+                        if (target != null) warnings.Add("Live mirror link for '" + sd.materialName + "' was dropped: its source material was not found.");
+                        continue;
+                    }
+                    if (!s.SetMirror(target, source))
+                        warnings.Add("Live mirror link for '" + sd.materialName + "' was dropped: it would close a cycle.");
                 }
                 if (data.pose != null && data.pose.Count > 0)
                     s.pose.Restore(s.pose.SnapshotFrom(data.pose));

@@ -55,6 +55,7 @@ namespace AviCreatorEssentials
         public const int PaintAccum = 15;
         public const int MixSample = 16;
         public const int MixUpdate = 17;
+        public const int FlipX = 18;
     }
 
     internal static class APIds

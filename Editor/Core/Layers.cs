@@ -228,6 +228,13 @@ namespace AviCreatorEssentials
         public int activeLayer;
         public bool editingMask;
 
+        // Live mirror link: when set, this set's display is the source set's
+        // composite flipped horizontally, updated every time the source changes.
+        // The set's own layers are kept (and come back if the link is removed)
+        // but are ignored while the link is live.
+        public TextureSet mirrorSource;
+        public bool IsMirrored => mirrorSource != null;
+
         public RenderTexture display;              // what the clone material samples
         public RenderTexture compA;
         public RenderTexture compB;
@@ -311,6 +318,7 @@ namespace AviCreatorEssentials
             foreach (var l in layers) l.Release();
             layers.Clear();
             ReleaseBuffers();
+            mirrorSource = null;
             initialized = false;
         }
     }

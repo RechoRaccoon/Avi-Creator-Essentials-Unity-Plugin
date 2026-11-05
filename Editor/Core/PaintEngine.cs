@@ -324,12 +324,44 @@ namespace AviCreatorEssentials
             EnsureBuffers(set);
             if (set.islandDirty) BuildIsland(set);
             var prev = RenderTexture.active;
-            var result = CompositeStack(set, displayPadding);
+            RenderTexture result;
+            if (set.mirrorSource != null)
+            {
+                // Live mirror: the target's own layer stack is ignored. Composite
+                // the source first (its own mirror link, if any, resolves the same
+                // way), then flip its composite horizontally into this set's
+                // buffer, so every layer, mask and hue/saturation adjustment on
+                // the source shows up mirrored here, with no per-layer copying.
+                var src = set.mirrorSource;
+                if (src == set || src.mirrorSource == set || !src.initialized || src.lastComposite == null && !src.dirty && !force)
+                {
+                    // Broken or cyclic link, or an uncomposited source: leave the
+                    // target's previous display alone rather than blanking it.
+                    RenderTexture.active = prev;
+                    set.dirty = false;
+                    return;
+                }
+                Composite(src, force);
+                if (src.lastComposite == null)
+                {
+                    RenderTexture.active = prev;
+                    set.dirty = false;
+                    return;
+                }
+                var compFlip = APResources.Composite;
+                Graphics.Blit(src.lastComposite, set.compA, compFlip, CompPass.FlipX);
+                result = set.compA;
+            }
+            else
+            {
+                result = CompositeStack(set, displayPadding);
+            }
             set.lastComposite = result;
 
             var comp = APResources.Composite;
             var active = set.ActiveLayer;
-            bool showMask = set.viewMode == 1 && active != null && active.HasMask;
+            // A mirrored set has no live mask of its own: its layers are ignored.
+            bool showMask = !set.IsMirrored && set.viewMode == 1 && active != null && active.HasMask;
             comp.SetFloat(APIds.ViewMode, showMask ? 1f : 0f);
             comp.SetTexture(APIds.MaskTex, showMask ? (Texture)active.mask : APResources.White);
             comp.SetFloat(APIds.ToLinear, GraphicsFormatUtility.IsSRGBFormat(set.display.graphicsFormat) ? 1f : 0f);
@@ -647,8 +679,19 @@ namespace AviCreatorEssentials
             EnsureBuffers(set);
             if (set.islandDirty) BuildIsland(set);
             var prev = RenderTexture.active;
-            var result = CompositeStack(set, padding < 0 ? 1e7f : padding);
             var outRT = APUtil.CreateRT(set.width, set.height, ContentFormat, "Export");
+            if (set.IsMirrored && set.mirrorSource != null && set.mirrorSource.initialized)
+            {
+                // Baking a mirrored material must bake the mirror, not the
+                // target's ignored layer stack.
+                Composite(set.mirrorSource, true);
+                if (set.mirrorSource.lastComposite != null)
+                    Graphics.Blit(set.mirrorSource.lastComposite, outRT, APResources.Composite, CompPass.FlipX);
+                RenderTexture.active = prev;
+                set.dirty = true;
+                return outRT;
+            }
+            var result = CompositeStack(set, padding < 0 ? 1e7f : padding);
             APUtil.Copy(result, outRT);
             RenderTexture.active = prev;
             set.dirty = true;

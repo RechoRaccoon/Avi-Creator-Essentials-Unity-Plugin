@@ -539,6 +539,11 @@ namespace AviCreatorEssentials
                 ctx.ShowHint("Pick a material to paint on first.");
                 return;
             }
+            if (active.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + active.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
             if (!active.initialized) s.InitializeSet(active);
             var selected = s.SelectedSets;
             foreach (var set in selected)
@@ -763,6 +768,11 @@ namespace AviCreatorEssentials
                 ctx.ShowHint("Pick a material to paint on first.");
                 return;
             }
+            if (active.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + active.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
             // Every selected texture, and with "whole model" the same kind of texture on every material, so one
             // gradient runs over the entire model.
             var targets = s.PaintTargets(ctx.brush.wholeModel);
@@ -874,6 +884,11 @@ namespace AviCreatorEssentials
             if (!Raycast(local, out var h)) return;
             var set = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
             if (set == null) return;
+            if (set.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + set.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
             if (set != s.ActiveSet) s.ActiveSet = set;
             if (!set.initialized) s.InitializeSet(set);
             var e = s.meshes.entries[h.entry];

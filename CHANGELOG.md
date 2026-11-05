@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0
+
+- Live mirror between two materials: in the Materials section, set "Live mirror from" on one material (e.g. the right eye) to another (e.g. the left eye) and its display becomes the source's full composite flipped horizontally — every paint layer, mask, and hue/saturation/lightness adjustment included — and stays in sync as you edit the source. Painting on the mirrored material is blocked with a hint to paint the source instead, so no stroke can vanish into an ignored layer stack. The link is saved with the project, survives reloads, and bakes the mirrored result. The mirrored material's own layers are kept but ignored while linked, so unlinking restores them. Cycle links are refused.
+- Note: this is a horizontal flip only, not a color invert — inverting colors would make the second eye's colors wrong.
+
 ## 0.11.4
 
 - Fixed the painter opening with no brushes, settings or layers on a fresh window: 0.11.3's panel-width clamp registered on the right panel before it was created, throwing a NullReferenceException that stopped the whole workspace build (empty tool rail, no right panel, no status bar). The panel is now created before its resize handling is set up.
