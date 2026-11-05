@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.0
+
+- Blendshapes in Posing mode: the Bone Posing panel has a new "Blendshapes" section with one slider (0–100) per blendshape on the avatar, grouped by mesh. Drag a slider and the mouth (or anything else) opens live on the avatar in the Scene view while you texture — and the painter's 3D view follows too, since the weights are mirrored onto its preview clone. One drag is one Ctrl+Z step, prefab overrides are recorded like bone edits, and "Reset blendshapes" puts the weights back to how they were when the avatar was first picked. Note: an Animator or animation preview can fight the sliders (it drives the same weights), and blendshapes on meshes the avatar doesn't have in the scene can't be driven this way.
+- Text layers: the Layers image button has a new "Text layer (words on the model)…" option. Type words, pick a size, colour and bold, and they become an image layer — drag it on the model in 3D or in the 2D texture view, scale and rotate it with the Image tool, and use the same placement options (On texture / Projected / Wrapped) and Rasterize as any image layer. The "Edit text…" button in the image panel re-opens the words for a text layer. Text saves with the project like any image layer. Note: most emoji show as blank boxes — Unity's built-in font has no colour emoji; plain symbols the font does have (♥ ★ ☺) work.
+
 ## 0.12.1
 
 - Fixed the live mirror showing the wrong layers: a mirrored material's Layers panel listed its own ignored layer stack (in the reported case, 3 layers with different names, no Recolor 1) instead of the source's. It now lists the source material's exact layer stack, read-only, so the list matches what the material displays. Layer actions and properties are disabled while linked; edit the source material to change both.

@@ -743,6 +743,7 @@ namespace AviCreatorEssentials
             if (Set == null) return;
             var menu = new GenericDropdownMenu();
             menu.AddItem("Image layer (place on texture or model)…", false, ImportImage);
+            menu.AddItem("Text layer (words on the model)…", false, AddTextLayer);
             menu.AddItem("Wrap tiling texture around the model…", false, ImportWrapTexture);
             var anchor = this.Q(className: "ap-layer-actions");
             menu.DropDown(anchor != null ? anchor.worldBound : worldBound, this, true);
@@ -884,7 +885,7 @@ namespace AviCreatorEssentials
         }
 
         /// <summary>Adds an image centred in texture space, or projected at a hit point when one is given.</summary>
-        public void AddImage(TextureSet set, Texture2D tex, MeshHit? hit, ViewCamera? cam = null)
+        public void AddImage(TextureSet set, Texture2D tex, MeshHit? hit, ViewCamera? cam = null, System.Action<ImagePlacement> init = null)
         {
             var p = new ImagePlacement();
             float aspectTex = set.height / (float)Mathf.Max(1, set.width);
@@ -902,8 +903,33 @@ namespace AviCreatorEssentials
                 p.worldWidth = Mathf.Clamp(h.distance * 0.25f, 0.02f, 0.5f);
                 p.depth = p.worldWidth * 0.5f;
             }
+            init?.Invoke(p);
             S.AddImageLayer(set, tex, p);
             m_Ctx.Tool = PaintTool.Image;
+        }
+
+        /// <summary>Types words, renders them into a picture, and adds it as an image layer — so the text
+        /// places, scales and rotates with the Image tool, in 3D and in the 2D texture view, like any image.</summary>
+        public void AddTextLayer()
+        {
+            var set = Set;
+            if (set == null) return;
+            var result = TextLayerWindow.Pick();
+            if (result == null) return;
+            var tex = TextImage.Render(result.text, result.fontSize, result.color, result.bold);
+            if (tex == null)
+            {
+                EditorUtility.DisplayDialog("Avi Creator Essentials", "That text couldn't be rendered — try different words.", "OK");
+                return;
+            }
+            var r = result;
+            AddImage(set, tex, null, null, p =>
+            {
+                p.text = r.text;
+                p.textSize = r.fontSize;
+                p.textColor = r.color;
+                p.textBold = r.bold;
+            });
         }
 
         public void RefreshThumbnails()

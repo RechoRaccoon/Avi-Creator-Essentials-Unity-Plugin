@@ -731,6 +731,23 @@ namespace AviCreatorEssentials
             Add(new W.ToggleRow("Flip horizontally", () => p.flipX, v => { s.EditPlacement(set, layer, "flip", pl => pl.flipX = v); m_Ctx.Render(); }));
 
             var row = W.Row("ap-row-gap");
+            if (p.text != null)
+            {
+                row.Add(W.TextButton("Edit text…", () =>
+                {
+                    var result = TextLayerWindow.Pick(p.text, p.textSize, p.textColor, p.textBold);
+                    if (result == null) return;
+                    var tex = TextImage.Render(result.text, result.fontSize, result.color, result.bold);
+                    if (tex == null)
+                    {
+                        EditorUtility.DisplayDialog("Avi Creator Essentials", "That text couldn't be rendered — try different words.", "OK");
+                        return;
+                    }
+                    s.ReplaceImage(set, layer, tex, result.text, result.fontSize, result.color, result.bold);
+                    m_Ctx.Render();
+                    Rebuild();
+                }, "ap-small"));
+            }
             if (!p.projected)
             {
                 row.Add(W.TextButton("Stretch to texture", () =>

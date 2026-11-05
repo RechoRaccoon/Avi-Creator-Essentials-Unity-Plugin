@@ -30,6 +30,10 @@ namespace AviCreatorEssentials
     /// </summary>
     public partial class APSession : IDisposable
     {
+        /// <summary>The live painter session, if one is open. Other editor tools (e.g. Posing mode) use it to keep
+        /// the painter's preview clone in step with the scene avatar.</summary>
+        public static APSession Current { get; private set; }
+
         public GameObject sourceAvatar;
         public string avatarName;
         public string projectFolder;
@@ -104,6 +108,7 @@ namespace AviCreatorEssentials
                 s.Dispose();
                 throw;
             }
+            Current = s;
             return s;
         }
 
@@ -909,6 +914,7 @@ namespace AviCreatorEssentials
 
         public void Dispose()
         {
+            if (Current == this) Current = null;
             RestoreMaterials();
             history?.Dispose();
             history = null;

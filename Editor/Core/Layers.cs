@@ -88,6 +88,13 @@ namespace AviCreatorEssentials
         [NonSerialized] public Texture2D image;
         public string imageFile;        // file name inside the project folder when saved
 
+        // text layers: the words this image was rendered from, so the text can be edited again later
+        // (saved with the project like the rest of the placement; the rendered pixels save as imageFile)
+        public string text;
+        public int textSize = 64;
+        public Color textColor = Color.white;
+        public bool textBold;
+
         public float Aspect => image != null && image.width > 0 ? image.height / (float)image.width : 1f;
 
         // warp grid (UV placement): offsets of a 3 x 3 grid of control points, in the image's own -1..1 box

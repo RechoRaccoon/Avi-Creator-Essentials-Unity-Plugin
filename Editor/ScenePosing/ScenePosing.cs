@@ -374,6 +374,97 @@ namespace AviCreatorEssentials
     }
 
     /// <summary>
+    /// Blendshapes (morphs) of the posing avatar, driven live from the Posing panel. Weights are set on the
+    /// avatar's own SkinnedMeshRenderers in the scene, so the mouth (or anything else) opens in the Scene view
+    /// while you texture — and they are mirrored onto the painter's preview clone when a session is open, so
+    /// the 3D paint view follows too. "Rest" is the weights as they were when the avatar was first picked here.
+    /// </summary>
+    public static class BlendShapeState
+    {
+        static Transform s_Avatar;
+        static readonly List<SkinnedMeshRenderer> s_Meshes = new List<SkinnedMeshRenderer>();
+        static readonly Dictionary<SkinnedMeshRenderer, float[]> s_Rest = new Dictionary<SkinnedMeshRenderer, float[]>();
+
+        /// <summary>Every SkinnedMeshRenderer under the avatar that actually has blendshapes.</summary>
+        public static IReadOnlyList<SkinnedMeshRenderer> MeshesFor(Transform avatar)
+        {
+            if (avatar != s_Avatar)
+            {
+                s_Avatar = avatar;
+                s_Meshes.Clear();
+                s_Rest.Clear();
+                if (avatar != null)
+                {
+                    foreach (var smr in avatar.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                    {
+                        if (smr.sharedMesh == null || smr.sharedMesh.blendShapeCount <= 0) continue;
+                        s_Meshes.Add(smr);
+                        var w = new float[smr.sharedMesh.blendShapeCount];
+                        for (int i = 0; i < w.Length; i++) w[i] = smr.GetBlendShapeWeight(i);
+                        s_Rest[smr] = w;
+                    }
+                }
+            }
+            s_Meshes.RemoveAll(m => m == null);
+            return s_Meshes;
+        }
+
+        public static float RestWeight(SkinnedMeshRenderer smr, int index)
+        {
+            if (smr != null && s_Rest.TryGetValue(smr, out var w) && index >= 0 && index < w.Length) return w[index];
+            return 0f;
+        }
+
+        /// <summary>Sets one blendshape weight on the scene avatar (and the painter clone, when there is one).</summary>
+        public static void SetWeight(SkinnedMeshRenderer smr, int index, float weight)
+        {
+            if (smr == null || smr.sharedMesh == null || index < 0 || index >= smr.sharedMesh.blendShapeCount) return;
+            smr.SetBlendShapeWeight(index, weight);
+            MirrorToPainterClone(smr, index, weight);
+            SceneView.RepaintAll();
+        }
+
+        /// <summary>Back to the weights the avatar had when it was first picked in Posing mode. Undoable.</summary>
+        public static void ResetAll(Transform avatar)
+        {
+            var meshes = MeshesFor(avatar);
+            if (meshes.Count == 0) return;
+            var targets = new UnityEngine.Object[meshes.Count];
+            for (int i = 0; i < meshes.Count; i++) targets[i] = meshes[i];
+            Undo.RecordObjects(targets, "Reset blendshapes");
+            foreach (var smr in meshes)
+            {
+                if (smr.sharedMesh == null) continue;
+                for (int i = 0; i < smr.sharedMesh.blendShapeCount; i++)
+                {
+                    float w = RestWeight(smr, i);
+                    smr.SetBlendShapeWeight(i, w);
+                    MirrorToPainterClone(smr, i, w);
+                }
+                PrefabUtility.RecordPrefabInstancePropertyModifications(smr);
+            }
+            SceneView.RepaintAll();
+            ScenePoseState.NotifyChanged();
+        }
+
+        /// <summary>The painter works on a clone made when its session opened, so copy the weight there too
+        /// (matched by hierarchy path and blendshape name) and tell its mesh cache the pose changed.</summary>
+        static void MirrorToPainterClone(SkinnedMeshRenderer smr, int index, float weight)
+        {
+            var s = APSession.Current;
+            if (s == null || s.clone == null || s.sourceAvatar == null) return;
+            var path = APUtil.GetPath(smr.transform, s.sourceAvatar.transform);
+            var t = APUtil.FindPath(s.clone.transform, path);
+            if (t == null) return;
+            var cloneSmr = t.GetComponent<SkinnedMeshRenderer>();
+            if (cloneSmr == null || cloneSmr.sharedMesh == null || index >= cloneSmr.sharedMesh.blendShapeCount) return;
+            if (cloneSmr.sharedMesh.GetBlendShapeName(index) != smr.sharedMesh.GetBlendShapeName(index)) return;
+            cloneSmr.SetBlendShapeWeight(index, weight);
+            s.meshes?.MarkPoseDirty();
+        }
+    }
+
+    /// <summary>
     /// Scene view tool: draws the armature over the avatar, click bones to select them, rotate/move with Unity's handles.
     /// </summary>
     [EditorTool("Bone Posing (Avi Creator Essentials)")]
@@ -710,6 +801,60 @@ namespace AviCreatorEssentials
             whole.Add(Btn("Mirror pose", () => ScenePoseState.ApplySnapshot(ScenePoseState.Pose.MirroredSnapshot(), "Mirror pose"),
                 "Swap left and right"));
             m_Root.Add(whole);
+
+            // blendshapes: one slider per morph, 0-100, live on the scene avatar (and the painter clone)
+            var blendHeader = new Label("Blendshapes");
+            blendHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+            blendHeader.style.marginTop = 6;
+            m_Root.Add(blendHeader);
+            var meshes = BlendShapeState.MeshesFor(avatar);
+            if (meshes.Count == 0)
+            {
+                m_Root.Add(Hint("No blendshapes on this avatar."));
+            }
+            else
+            {
+                bool manyMeshes = meshes.Count > 1;
+                foreach (var smr in meshes)
+                {
+                    var mesh = smr;
+                    if (manyMeshes)
+                    {
+                        var meshLabel = new Label(mesh.name);
+                        meshLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                        meshLabel.style.marginTop = 4;
+                        m_Root.Add(meshLabel);
+                    }
+                    for (int i = 0; i < mesh.sharedMesh.blendShapeCount; i++)
+                    {
+                        int index = i;
+                        string name = ObjectNames.NicifyVariableName(mesh.sharedMesh.GetBlendShapeName(index));
+                        var slider = new Slider(name, 0f, 100f) { value = mesh.GetBlendShapeWeight(index) };
+                        slider.tooltip = mesh.name + " › " + mesh.sharedMesh.GetBlendShapeName(index) +
+                            " — drag to pose it live. Works while texturing: the Scene view avatar (and the painter's 3D view) follow.";
+                        bool pointerDown = false;
+                        slider.RegisterCallback<PointerDownEvent>(_ =>
+                        {
+                            pointerDown = true;
+                            // One undo step per drag, recorded when the drag starts.
+                            Undo.RecordObject(mesh, "Set blendshape " + name);
+                        });
+                        slider.RegisterCallback<PointerUpEvent>(_ => pointerDown = false);
+                        slider.RegisterValueChangedCallback(e =>
+                        {
+                            // Keyboard nudges (no pointer down) record their own undo step.
+                            if (!pointerDown) Undo.RecordObject(mesh, "Set blendshape " + name);
+                            BlendShapeState.SetWeight(mesh, index, e.newValue);
+                            PrefabUtility.RecordPrefabInstancePropertyModifications(mesh);
+                        });
+                        m_Root.Add(slider);
+                    }
+                }
+                var blendRow = Row();
+                blendRow.Add(Btn("Reset blendshapes", () => BlendShapeState.ResetAll(avatar),
+                    "Back to the weights the avatar had when it was first picked here"));
+                m_Root.Add(blendRow);
+            }
 
             var humanoid = new Toggle("Humanoid bones only") { value = ScenePoseState.HumanoidOnly };
             humanoid.RegisterValueChangedCallback(e => { ScenePoseState.HumanoidOnly = e.newValue; SceneView.RepaintAll(); });

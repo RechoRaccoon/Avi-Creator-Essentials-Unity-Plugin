@@ -346,6 +346,33 @@ namespace AviCreatorEssentials
             return layer;
         }
 
+        /// <summary>Swaps an image layer's picture (e.g. re-rendered text after editing it), keeping its placement. Undoable.</summary>
+        public void ReplaceImage(TextureSet set, PaintLayer layer, Texture2D image, string text, int textSize, Color textColor, bool textBold)
+        {
+            if (layer?.placement == null) return;
+            var oldImage = layer.placement.image;
+            var oldText = layer.placement.text;
+            var oldSize = layer.placement.textSize;
+            var oldColor = layer.placement.textColor;
+            var oldBold = layer.placement.textBold;
+            var oldName = layer.name;
+            void Apply(Texture2D img, string t, int s, Color c, bool b, string n)
+            {
+                layer.placement.image = img;
+                layer.placement.text = t;
+                layer.placement.textSize = s;
+                layer.placement.textColor = c;
+                layer.placement.textBold = b;
+                layer.name = n;
+                engine.RenderImageLayer(set, layer);
+                Changed(set);
+            }
+            Apply(image, text, textSize, textColor, textBold, image != null ? image.name : oldName);
+            Push(new ActionEntry("Edit text",
+                () => Apply(oldImage, oldText, oldSize, oldColor, oldBold, oldName),
+                () => Apply(image, text, textSize, textColor, textBold, image != null ? image.name : oldName)));
+        }
+
         /// <summary>
         /// The textures a wrapped image should go into: each material's normal map slot (created if the material has
         /// none yet) for normal maps, otherwise its main texture.
