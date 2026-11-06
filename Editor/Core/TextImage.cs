@@ -94,7 +94,10 @@ namespace AviCreatorEssentials
             }
             if (w > MaxSize || h > MaxSize) return null;
 
-            font.RequestCharactersInTexture(text, size, style);
+            // No second RequestCharactersInTexture here on purpose: Layout already requested
+            // these exact characters at this size/style before capturing the glyph UVs, and
+            // requesting again between capture and draw could regenerate the font texture and
+            // invalidate the UVs Layout just captured (see Font.RequestCharactersInTexture docs).
             var rt = APUtil.CreateRT(w, h, UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm, "text");
             APUtil.Clear(rt, Color.clear);
             var atlas = font.material != null ? font.material.mainTexture : null;
@@ -251,12 +254,18 @@ namespace AviCreatorEssentials
                         float u1 = Mathf.Max(info.uvBottomLeft.x, info.uvBottomRight.x);
                         float v0 = Mathf.Min(info.uvBottomLeft.y, info.uvTopLeft.y);
                         float v1 = Mathf.Max(info.uvBottomLeft.y, info.uvTopLeft.y);
-                        // Flipped glyphs are stored upside down in the atlas; flip the v mapping back.
-                        // (CharacterInfo.flipped is obsolete; a glyph is flipped when its bottom UV
-                        // sits above its top UV.)
+                        // Flipped glyphs are stored rotated 180 degrees in the atlas: Unity flips
+                        // BOTH the U and V coordinates "to make more efficient use of texture space",
+                        // so the source rect must run backwards on both axes, not just V. The old code
+                        // only ran V backwards, which mirrors every flipped glyph horizontally.
+                        // With Arial's private, freshly-packed atlas almost no glyph was flipped, so
+                        // it looked right; LegacyRuntime shares its atlas with the whole editor UI, so
+                        // many glyphs come back flipped and the preview showed wrong / mirrored
+                        // letters ("random letters"). DrawTexture already honours a negative-height
+                        // source rect for the V flip, so a negative width is the same mechanism.
                         bool flipped = info.uvBottomLeft.y > info.uvTopLeft.y;
                         var src = flipped
-                            ? new Rect(u0, v1, u1 - u0, v0 - v1)
+                            ? new Rect(u1, v1, u0 - u1, v0 - v1)
                             : new Rect(u0, v0, u1 - u0, v1 - v0);
                         lg.Add(new Glyph
                         {

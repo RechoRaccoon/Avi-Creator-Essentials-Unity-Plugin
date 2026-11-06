@@ -36,7 +36,7 @@ namespace AviCreatorEssentials
             w.m_FontSize = Mathf.Clamp(fontSize, 8, 512);
             w.m_Color = color == default ? Color.white : color;
             w.m_Bold = bold;
-            var size = new Vector2(420, 340);
+            var size = new Vector2(420, 380);
             w.minSize = size;
             var main = EditorGUIUtility.GetMainWindowPosition();
             w.position = new Rect(main.center - size * 0.5f, size);
@@ -64,6 +64,25 @@ namespace AviCreatorEssentials
                 {
                     string clip = GUIUtility.systemCopyBuffer;
                     if (!string.IsNullOrEmpty(clip)) { m_Text += clip; m_PreviewKey = null; }
+                }
+            }
+            // The text box itself can never show a colour emoji: IMGUI draws it with the
+            // editor font, which has no colour emoji, so a pasted emoji sits in the string
+            // invisibly. Show the emoji that are actually in the text as their Twemoji
+            // pictures right under the box, so the paste landing is visible and the words
+            // can be checked before adding the layer. (The live preview below shows them
+            // in place too, once downloaded.)
+            var emojiRuns = EmojiArt.FindRuns(m_Text);
+            if (emojiRuns.Count > 0)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("Emoji in your text:", GUILayout.Width(118));
+                    foreach (var run in emojiRuns)
+                    {
+                        var art = EmojiArt.Get(run.codepoints);
+                        if (art != null) GUILayout.Label(art, GUILayout.Width(24), GUILayout.Height(24));
+                    }
                 }
             }
             m_FontSize = EditorGUILayout.IntSlider("Size", m_FontSize, 16, 256);

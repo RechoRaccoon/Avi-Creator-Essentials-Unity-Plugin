@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.5
+
+- Fixed text layers previewing the wrong letters: the preview showed mirrored / jumbled letters instead of what was typed. The glyph UV code only flipped the V axis for atlas-flipped glyphs, but Unity flips flipped glyphs in BOTH U and V (they are stored rotated 180 degrees in the atlas), so every flipped glyph came out mirrored horizontally. With Arial's private, freshly-packed atlas almost no glyph was flipped, so it looked right; LegacyRuntime shares its atlas with the whole editor UI, so many glyphs come back flipped and the preview turned to nonsense. Flipped glyphs now sample backwards on both axes. The redundant second font-texture request between capturing the glyph UVs and drawing them is also gone, since a texture regeneration there would have invalidated the captured UVs.
+- The text box still can't draw a colour emoji itself (IMGUI uses the editor font, which has no colour emoji), so the window now shows the emoji that are actually in your text as their Twemoji pictures right under the box — a pasted emoji is visible there and in the live preview, even though the box shows a blank gap for it.
+
 ## 0.14.4
 
 - Fixed text layers never previewing (and the console spamming "Arial.ttf is no longer a valid built in font" every second): TextImage asked Unity for the built-in Arial font first, but in this Unity version that lookup throws an ArgumentException instead of returning null, so rendering died before any word was drawn — even plain "Pancake" showed "Nothing to preview yet". It now tries LegacyRuntime.ttf first, and every font lookup is guarded so the search can never throw and always falls through to the next font. The text window also has a Paste button that appends whatever is on the clipboard (emoji included) even if the text field itself drops a pasted emoji.
