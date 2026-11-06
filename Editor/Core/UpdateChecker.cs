@@ -24,7 +24,7 @@ namespace AviCreatorEssentials
             {
                 var info = PackageInfo.FindForAssembly(typeof(UpdateChecker).Assembly);
                 if (info != null && !string.IsNullOrEmpty(info.version)) return info.version;
-                return "0.13.0";
+                return "0.13.1";
             }
         }
         public const string Repo = "RechoRaccoon/Avi-Creator-Essentials-Unity-Plugin";

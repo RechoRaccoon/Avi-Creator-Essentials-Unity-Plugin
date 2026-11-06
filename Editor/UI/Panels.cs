@@ -964,6 +964,21 @@ namespace AviCreatorEssentials
         Vector3Field m_Euler;
         string m_NewName = "";
 
+        // Blendshapes in this panel (the painter window's Pose tab — not the Scene view's Bone Posing
+        // overlay, which has its own copy). One slider per morph on the painter's preview clone; the
+        // Scene view avatar follows, so the mouth opens while you texture.
+        readonly VisualElement m_BlendBox;
+        readonly List<BlendSlider> m_BlendSliders = new List<BlendSlider>();
+        readonly Dictionary<SkinnedMeshRenderer, float[]> m_BlendRest = new Dictionary<SkinnedMeshRenderer, float[]>();
+
+        class BlendSlider
+        {
+            public SkinnedMeshRenderer smr;
+            public int index;
+            public Slider slider;
+            public Label valueLabel;
+        }
+
         public PosePanel(PainterContext ctx, Func<Texture2D> captureThumbnail)
         {
             m_Ctx = ctx;
@@ -980,6 +995,14 @@ namespace AviCreatorEssentials
             tools.Add(W.IconTextButton(IconKind.Reset, "Reset pose", () => Apply("Reset pose", m_Ctx.session.pose.RestSnapshot(), true)));
             tools.Add(W.IconTextButton(IconKind.Mirror, "Mirror pose", () => Apply("Mirror pose", m_Ctx.session.pose.MirroredSnapshot(), true)));
             Add(tools);
+
+            // Blendshapes, right under the pose buttons where they can be seen — this is the section
+            // Recho uses while texturing (the Scene view overlay has its own copy, but the painter
+            // window's Pose tab is where the work happens).
+            Add(W.Text("Blendshapes", "ap-subtle-heading"));
+            m_BlendBox = W.Column();
+            Add(m_BlendBox);
+            RebuildBlendshapes();
 
             Add(new W.ToggleRow("Local gizmo axes", () => m_Ctx.view.gizmoLocal, v => { m_Ctx.view.gizmoLocal = v; m_Ctx.view.Save(); m_Ctx.Render(); }));
             Add(new W.ToggleRow("Humanoid bones only", () => m_Ctx.view.humanoidOnly, v => { m_Ctx.view.humanoidOnly = v; m_Ctx.view.Save(); m_Ctx.Render(); },
@@ -1075,6 +1098,144 @@ namespace AviCreatorEssentials
             m_LinkRow.Add(W.Text(linker.Summary(), "ap-hint"));
         }
 
+        void RebuildBlendshapes()
+        {
+            if (m_BlendBox == null) return;
+            m_BlendBox.Clear();
+            m_BlendSliders.Clear();
+            m_BlendRest.Clear();
+            var s = m_Ctx.session;
+            if (s == null || s.clone == null)
+            {
+                m_BlendBox.Add(W.Text("No avatar open.", "ap-hint"));
+                return;
+            }
+            var meshes = new List<SkinnedMeshRenderer>();
+            foreach (var smr in s.clone.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                if (smr.sharedMesh != null && smr.sharedMesh.blendShapeCount > 0) meshes.Add(smr);
+            if (meshes.Count == 0)
+            {
+                m_BlendBox.Add(W.Text("No blendshapes on this avatar.", "ap-hint"));
+                return;
+            }
+            m_BlendBox.Add(W.Text("Drag to open mouths, blink, smile… while texturing. The Scene view avatar follows.", "ap-hint"));
+            bool many = meshes.Count > 1;
+            foreach (var smr in meshes)
+            {
+                var mesh = smr;
+                var rest = new float[mesh.sharedMesh.blendShapeCount];
+                for (int i = 0; i < rest.Length; i++) rest[i] = mesh.GetBlendShapeWeight(i);
+                m_BlendRest[mesh] = rest;
+                if (many) m_BlendBox.Add(W.Text(mesh.name, "ap-bone-name"));
+                for (int i = 0; i < mesh.sharedMesh.blendShapeCount; i++)
+                {
+                    int index = i;
+                    string rawName = mesh.sharedMesh.GetBlendShapeName(index);
+                    string name = ObjectNames.NicifyVariableName(rawName);
+                    var row = W.Row("ap-row-gap");
+                    row.Add(W.Text(name, "ap-slider-label"));
+                    var slider = new Slider(0f, 100f) { value = mesh.GetBlendShapeWeight(index) };
+                    slider.AddToClassList("ap-slider");
+                    slider.style.flexGrow = 1;
+                    slider.tooltip = mesh.name + " › " + rawName + " — drag to pose it live.";
+                    var val = W.Text(Mathf.RoundToInt(mesh.GetBlendShapeWeight(index)).ToString(), "ap-hint-inline");
+                    row.Add(slider);
+                    row.Add(val);
+                    // One undo step per drag, on the painter's own undo stack (like bone edits here).
+                    float[] before = null;
+                    slider.RegisterCallback<PointerDownEvent>(_ => { before = SnapshotWeights(mesh); });
+                    slider.RegisterCallback<PointerUpEvent>(_ =>
+                    {
+                        if (before == null) return;
+                        var after = SnapshotWeights(mesh);
+                        var b0 = before;
+                        var a0 = after;
+                        var m0 = mesh;
+                        before = null;
+                        bool changed = false;
+                        for (int k = 0; k < b0.Length && k < a0.Length; k++) if (!Mathf.Approximately(b0[k], a0[k])) { changed = true; break; }
+                        if (changed)
+                            m_Ctx.session.Push(new ActionEntry("Set blendshape " + name,
+                                () => { ApplyWeights(m0, b0); RefreshBlendshapes(); },
+                                () => { ApplyWeights(m0, a0); RefreshBlendshapes(); }));
+                    });
+                    slider.RegisterValueChangedCallback(e =>
+                    {
+                        SetBlendWeight(mesh, index, e.newValue);
+                        val.text = Mathf.RoundToInt(e.newValue).ToString();
+                    });
+                    m_BlendBox.Add(row);
+                    m_BlendSliders.Add(new BlendSlider { smr = mesh, index = index, slider = slider, valueLabel = val });
+                }
+            }
+            m_BlendBox.Add(W.TextButton("Reset blendshapes", () =>
+            {
+                var before = new Dictionary<SkinnedMeshRenderer, float[]>();
+                foreach (var kv in m_BlendRest) before[kv.Key] = SnapshotWeights(kv.Key);
+                foreach (var kv in m_BlendRest) ApplyWeights(kv.Key, kv.Value);
+                var after = new Dictionary<SkinnedMeshRenderer, float[]>();
+                foreach (var kv in m_BlendRest) after[kv.Key] = SnapshotWeights(kv.Key);
+                var b0 = before;
+                var a0 = after;
+                m_Ctx.session.Push(new ActionEntry("Reset blendshapes",
+                    () => { foreach (var kv in b0) ApplyWeights(kv.Key, kv.Value); RefreshBlendshapes(); },
+                    () => { foreach (var kv in a0) ApplyWeights(kv.Key, kv.Value); RefreshBlendshapes(); }));
+                RefreshBlendshapes();
+                m_Ctx.Render();
+            }, "ap-small"));
+        }
+
+        static float[] SnapshotWeights(SkinnedMeshRenderer smr)
+        {
+            if (smr == null || smr.sharedMesh == null) return new float[0];
+            var w = new float[smr.sharedMesh.blendShapeCount];
+            for (int i = 0; i < w.Length; i++) w[i] = smr.GetBlendShapeWeight(i);
+            return w;
+        }
+
+        void ApplyWeights(SkinnedMeshRenderer smr, float[] weights)
+        {
+            if (smr == null || smr.sharedMesh == null) return;
+            for (int i = 0; i < weights.Length && i < smr.sharedMesh.blendShapeCount; i++)
+                SetBlendWeight(smr, i, weights[i]);
+        }
+
+        /// <summary>Sets one weight on the painter's clone and on the matching mesh of the real
+        /// scene avatar (matched by hierarchy path and blendshape name), so both follow.</summary>
+        void SetBlendWeight(SkinnedMeshRenderer cloneSmr, int index, float weight)
+        {
+            if (cloneSmr == null || cloneSmr.sharedMesh == null || index < 0 || index >= cloneSmr.sharedMesh.blendShapeCount) return;
+            cloneSmr.SetBlendShapeWeight(index, weight);
+            var scene = SceneCounterpart(cloneSmr);
+            if (scene != null && scene.sharedMesh != null)
+            {
+                int si = scene.sharedMesh.GetBlendShapeIndex(cloneSmr.sharedMesh.GetBlendShapeName(index));
+                if (si >= 0) scene.SetBlendShapeWeight(si, weight);
+            }
+            SceneView.RepaintAll();
+            m_Ctx.Render();
+        }
+
+        SkinnedMeshRenderer SceneCounterpart(SkinnedMeshRenderer cloneSmr)
+        {
+            var s = m_Ctx.session;
+            if (s == null || s.clone == null || s.sourceAvatar == null || cloneSmr == null) return null;
+            var path = APUtil.GetPath(cloneSmr.transform, s.clone.transform);
+            var t = APUtil.FindPath(s.sourceAvatar.transform, path);
+            return t != null ? t.GetComponent<SkinnedMeshRenderer>() : null;
+        }
+
+        void RefreshBlendshapes()
+        {
+            foreach (var b in m_BlendSliders)
+            {
+                if (b.smr == null || b.slider == null) continue;
+                float w = b.smr.GetBlendShapeWeight(b.index);
+                b.slider.SetValueWithoutNotify(w);
+                if (b.valueLabel != null) b.valueLabel.text = Mathf.RoundToInt(w).ToString();
+            }
+        }
+
         public void RefreshBone()
         {
             RefreshLink();
@@ -1117,6 +1278,7 @@ namespace AviCreatorEssentials
         {
             var b = m_Ctx.session?.pose.selected;
             if (b != null && m_Euler != null) m_Euler.SetValueWithoutNotify(b.t.localEulerAngles);
+            RefreshBlendshapes();
         }
 
         void ResetBone(Bone b, bool rot, bool pos)

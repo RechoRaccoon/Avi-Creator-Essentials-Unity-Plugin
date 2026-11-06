@@ -8,8 +8,9 @@ namespace AviCreatorEssentials
     /// places, scales, rotates and rasterizes exactly like an image layer — in the 3D viewport and the 2D
     /// texture view, with the Image tool. Uses only UnityEngine font APIs (no TextMeshPro dependency).
     /// Glyphs come from the font's atlas; the tint is applied in gamma space, like other image layers.
-    /// Emoji: Unity's built-in font has no colour emoji, so most emoji render as blank/missing glyphs.
-    /// Plain symbols that the font does have (♥ ★ ☺ → etc.) render fine.
+    /// Emoji are drawn as colour pictures from EmojiArt (Twemoji PNGs, downloaded once and cached),
+    /// composited on top untinted — Unity's built-in font has no colour emoji, so the font alone would
+    /// leave them as blank boxes. Plain symbols the font does have (♥ ★ ☺ → etc.) render from the font.
     /// </summary>
     public static class TextImage
     {
@@ -34,6 +35,14 @@ namespace AviCreatorEssentials
         {
             public Rect dest;   // bottom-up texture pixels
             public Rect src;    // font atlas UVs
+            public bool isEmoji;
+            public string codepoints; // Twemoji file key, when isEmoji
+        }
+
+        struct EmojiGlyph
+        {
+            public Rect dest;   // bottom-up texture pixels
+            public string codepoints;
         }
 
         /// <summary>Layer name for a text layer, e.g. Text "hello".</summary>
@@ -56,11 +65,12 @@ namespace AviCreatorEssentials
 
             // Lay out, shrinking the font until the text fits in one texture.
             List<Glyph> glyphs = null;
+            List<EmojiGlyph> emojis = null;
             int w = 0, h = 0;
             int size = fontSize;
             for (int attempt = 0; attempt < 4; attempt++)
             {
-                glyphs = Layout(font, text, size, style, out w, out h);
+                glyphs = Layout(font, text, size, style, out w, out h, out emojis);
                 if (glyphs == null) return null;
                 if (w <= MaxSize && h <= MaxSize) break;
                 size = Mathf.Max(8, size / 2);
@@ -96,6 +106,41 @@ namespace AviCreatorEssentials
                 if (p.a == 0) continue;
                 pixels[i] = new Color32((byte)(p.r * r / 255), (byte)(p.g * g / 255), (byte)(p.b * b / 255), p.a);
             }
+
+            // Emoji pictures go on top, untinted — they are already coloured — alpha-blended over the glyphs.
+            foreach (var e in emojis)
+            {
+                var art = EmojiArt.Get(e.codepoints);
+                if (art == null) continue; // not downloaded yet; the text window re-renders once it lands
+                var src = art.GetPixels32();
+                int sw = art.width, sh = art.height;
+                int dx = Mathf.RoundToInt(e.dest.x), dy = Mathf.RoundToInt(e.dest.y);
+                int dw = Mathf.RoundToInt(e.dest.width), dh = Mathf.RoundToInt(e.dest.height);
+                if (dw <= 0 || dh <= 0) continue;
+                for (int y = 0; y < dh; y++)
+                {
+                    int py = dy + y;
+                    if (py < 0 || py >= h) continue;
+                    for (int x = 0; x < dw; x++)
+                    {
+                        int px = dx + x;
+                        if (px < 0 || px >= w) continue;
+                        float u = (x + 0.5f) / dw * sw - 0.5f;
+                        float v = (y + 0.5f) / dh * sh - 0.5f;
+                        var sp = SampleBilinear(src, sw, sh, u, v);
+                        if (sp.a == 0) continue;
+                        int idx = py * w + px;
+                        var dp = pixels[idx];
+                        float a = sp.a / 255f;
+                        pixels[idx] = new Color32(
+                            (byte)(sp.r * a + dp.r * (1f - a)),
+                            (byte)(sp.g * a + dp.g * (1f - a)),
+                            (byte)(sp.b * a + dp.b * (1f - a)),
+                            (byte)Mathf.Max(dp.a, sp.a));
+                    }
+                }
+            }
+
             tex.SetPixels32(pixels);
             tex.Apply(false);
             tex.name = LayerName(text);
@@ -103,11 +148,28 @@ namespace AviCreatorEssentials
             return tex;
         }
 
-        /// <summary>Works out where every glyph goes. Returns null when the text has no visible characters.</summary>
-        static List<Glyph> Layout(Font font, string text, int fontSize, FontStyle style, out int width, out int height)
+        static Color32 SampleBilinear(Color32[] src, int w, int h, float u, float v)
+        {
+            u = Mathf.Clamp(u, 0f, w - 1f);
+            v = Mathf.Clamp(v, 0f, h - 1f);
+            int x0 = Mathf.FloorToInt(u), y0 = Mathf.FloorToInt(v);
+            int x1 = Mathf.Min(x0 + 1, w - 1), y1 = Mathf.Min(y0 + 1, h - 1);
+            float fx = u - x0, fy = v - y0;
+            return LerpColor(LerpColor(src[y0 * w + x0], src[y0 * w + x1], fx),
+                             LerpColor(src[y1 * w + x0], src[y1 * w + x1], fx), fy);
+        }
+
+        static Color32 LerpColor(Color32 a, Color32 b, float t) => new Color32(
+            (byte)(a.r + (b.r - a.r) * t), (byte)(a.g + (b.g - a.g) * t),
+            (byte)(a.b + (b.b - a.b) * t), (byte)(a.a + (b.a - a.a) * t));
+
+        /// <summary>Works out where every glyph goes. Returns null when the text has no visible characters.
+        /// Emoji graphemes come back in <paramref name="emojis"/> as picture slots, not font glyphs.</summary>
+        static List<Glyph> Layout(Font font, string text, int fontSize, FontStyle style, out int width, out int height, out List<EmojiGlyph> emojis)
         {
             width = 0;
             height = 0;
+            emojis = new List<EmojiGlyph>();
             font.RequestCharactersInTexture(text, fontSize, style);
             var lines = text.Split('\n');
             CharacterInfo space;
@@ -127,8 +189,29 @@ namespace AviCreatorEssentials
                 var lg = new List<Glyph>();
                 float cursorX = Pad;
                 float ascent = 0f, descent = 0f;
-                foreach (char c in line)
+                for (int ci = 0; ci < line.Length;)
                 {
+                    // Emoji first: they are drawn as pictures, not font glyphs.
+                    if (EmojiArt.TryReadRun(line, ci, out int runLen, out string key))
+                    {
+                        float side = fontSize;
+                        float top = fontSize * 0.8f; // picture sits on the baseline like a capital
+                        ascent = Mathf.Max(ascent, top);
+                        descent = Mathf.Max(descent, side - top);
+                        lg.Add(new Glyph
+                        {
+                            // dest y is filled in on the second pass, once the line tops are known.
+                            dest = new Rect(cursorX, top, side, side),
+                            src = new Rect(),
+                            isEmoji = true,
+                            codepoints = key,
+                        });
+                        cursorX += side;
+                        ci += runLen;
+                        continue;
+                    }
+                    char c = line[ci];
+                    ci++;
                     if (c == '\r') continue;
                     if (c == '\t')
                     {
@@ -139,7 +222,7 @@ namespace AviCreatorEssentials
                     font.GetCharacterInfo(c, out info, fontSize, style);
                     if (info.advance <= 0 && info.glyphWidth <= 0)
                     {
-                        // Missing glyph (an emoji, usually): leave a space-width gap and draw nothing.
+                        // Missing glyph: leave a space-width gap and draw nothing.
                         cursorX += spaceAdvance;
                         continue;
                     }
@@ -152,7 +235,10 @@ namespace AviCreatorEssentials
                         float v0 = Mathf.Min(info.uvBottomLeft.y, info.uvTopLeft.y);
                         float v1 = Mathf.Max(info.uvBottomLeft.y, info.uvTopLeft.y);
                         // Flipped glyphs are stored upside down in the atlas; flip the v mapping back.
-                        var src = info.flipped
+                        // (CharacterInfo.flipped is obsolete; a glyph is flipped when its bottom UV
+                        // sits above its top UV.)
+                        bool flipped = info.uvBottomLeft.y > info.uvTopLeft.y;
+                        var src = flipped
                             ? new Rect(u0, v1, u1 - u0, v0 - v1)
                             : new Rect(u0, v0, u1 - u0, v1 - v0);
                         lg.Add(new Glyph
@@ -191,11 +277,14 @@ namespace AviCreatorEssentials
                 {
                     float glyphTop = baselineFromTop - g.dest.y;
                     float destY = height - (glyphTop + g.dest.height);
-                    glyphs.Add(new Glyph { dest = new Rect(g.dest.x, destY, g.dest.width, g.dest.height), src = g.src });
+                    if (g.isEmoji)
+                        emojis.Add(new EmojiGlyph { dest = new Rect(g.dest.x, destY, g.dest.width, g.dest.height), codepoints = g.codepoints });
+                    else
+                        glyphs.Add(new Glyph { dest = new Rect(g.dest.x, destY, g.dest.width, g.dest.height), src = g.src });
                 }
                 yTop += lineHeight;
             }
-            return glyphs.Count > 0 ? glyphs : null;
+            return glyphs.Count > 0 || emojis.Count > 0 ? glyphs : null;
         }
     }
 }

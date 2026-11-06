@@ -66,6 +66,41 @@ namespace AviCreatorEssentials
                 m_PreviewKey = key;
                 if (m_Preview != null) Object.DestroyImmediate(m_Preview);
                 m_Preview = TextImage.Render(m_Text, m_FontSize, m_Color, m_Bold);
+                // Emoji pictures are downloaded once and cached; re-render the preview when they land.
+                // Only start that wait while emoji are actually still downloading — otherwise the
+                // callback would clear the key and re-render on every repaint, forever.
+                if (EmojiArt.NotReadyCount(m_Text) > 0)
+                {
+                    var self = this;
+                    EmojiArt.Prepare(m_Text, () =>
+                    {
+                        if (self == null) return;
+                        self.m_PreviewKey = null;
+                        self.Repaint();
+                    });
+                }
+            }
+            if (EmojiArt.NotReadyCount(m_Text) > 0)
+            {
+                EditorGUILayout.LabelField("Downloading emoji… the preview updates when they're ready.",
+                    EditorStyles.wordWrappedMiniLabel);
+            }
+            if (EmojiArt.HasFailures(m_Text))
+            {
+                EditorGUILayout.LabelField("Some emoji couldn't be downloaded (no internet?). They'll stay blank in the preview and the layer.",
+                    EditorStyles.wordWrappedMiniLabel);
+                if (GUILayout.Button("Retry emoji download", GUILayout.Width(160)))
+                {
+                    EmojiArt.RetryFailed();
+                    var self = this;
+                    EmojiArt.Prepare(m_Text, () =>
+                    {
+                        if (self == null) return;
+                        self.m_PreviewKey = null;
+                        self.Repaint();
+                    });
+                    m_PreviewKey = null;
+                }
             }
             if (m_Preview != null)
             {
@@ -82,15 +117,18 @@ namespace AviCreatorEssentials
             }
 
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Emoji: most emoji show as blank boxes — Unity's built-in font has no " +
-                "colour emoji. Plain symbols the font does have (♥ ★ ☺) work.",
+            EditorGUILayout.LabelField("Emoji render as colour pictures (" + EmojiArt.Attribution +
+                " downloaded once from the Twemoji CDN and cached in the project's Library folder). " +
+                "Plain symbols the font does have (♥ ★ ☺) render from the font.",
                 EditorStyles.wordWrappedMiniLabel);
             GUILayout.FlexibleSpace();
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.FlexibleSpace();
                 if (GUILayout.Button("Cancel", GUILayout.Width(80))) Close();
-                using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(m_Text)))
+                // Don't let the layer be added while its emoji are still downloading — the pictures
+                // would be missing from the layer. They are cached after the first download.
+                using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(m_Text) || EmojiArt.NotReadyCount(m_Text) > 0))
                 {
                     if (GUILayout.Button("Add text layer", GUILayout.Width(120)))
                     {

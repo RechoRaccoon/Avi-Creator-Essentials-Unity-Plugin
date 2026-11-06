@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.1
+
+- Fixed the Blendshapes section not showing: 0.13.0 only put it in the Scene view's Bone Posing overlay, but the painter window's Pose tab has its own panel — and that's the one used while texturing. The Pose tab now has its own "Blendshapes" section right under the Reset/Mirror pose buttons, with one slider (0–100) per blendshape on the avatar. It drives the painter's preview clone and the real Scene view avatar follows, one drag is one Ctrl+Z step on the painter's undo stack, and "Reset blendshapes" restores the weights from when the session opened.
+- Emoji in text layers now render as real colour pictures instead of blank boxes: emoji are drawn from Twemoji PNGs (Twemoji by Twitter, CC-BY 4.0), downloaded once per emoji from the Twemoji CDN and cached in the project's Library folder, so they show correctly in the text window's live preview and in the final layer on the model. Plain symbols the font does have (♥ ★ ☺) still render from the font. Offline, an emoji that has never been downloaded yet stays blank (as before) and the window offers a retry; the Add button waits while emoji are still downloading so a layer can't be added with its emoji missing.
+- Fixed the compiler warning in TextImage.cs: `CharacterInfo.flipped` is obsolete, so flipped glyphs are now detected from the glyph's UVs instead.
+
 ## 0.13.0
 
 - Blendshapes in Posing mode: the Bone Posing panel has a new "Blendshapes" section with one slider (0–100) per blendshape on the avatar, grouped by mesh. Drag a slider and the mouth (or anything else) opens live on the avatar in the Scene view while you texture — and the painter's 3D view follows too, since the weights are mirrored onto its preview clone. One drag is one Ctrl+Z step, prefab overrides are recorded like bone edits, and "Reset blendshapes" puts the weights back to how they were when the avatar was first picked. Note: an Animator or animation preview can fight the sliders (it drives the same weights), and blendshapes on meshes the avatar doesn't have in the scene can't be driven this way.
