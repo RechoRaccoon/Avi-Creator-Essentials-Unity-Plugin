@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.2
+
+- Fixed the 0.13.1 compile error that broke the whole plugin: `TextImage.cs(91)` called `Graphics.DrawTexture` with a source `Rect` as the third argument, but the only 3-argument overload takes a `Material` there (`error CS1503: cannot convert from 'UnityEngine.Rect' to 'UnityEngine.Material'`), so the entire editor assembly failed to compile. It now uses the overload that takes the source rect plus border sizes (`0, 0, 0, 0`), so text layers render again. This also explains the missing Blendshapes section: the Pose tab's Blendshapes section was already in the code, but nothing in the plugin could run while the assembly failed to compile. The section is always shown, right under the Reset/Mirror pose buttons — with a "No blendshapes on this avatar." message when the avatar has none, so missing and none are easy to tell apart.
+
 ## 0.13.1
 
 - Fixed the Blendshapes section not showing: 0.13.0 only put it in the Scene view's Bone Posing overlay, but the painter window's Pose tab has its own panel — and that's the one used while texturing. The Pose tab now has its own "Blendshapes" section right under the Reset/Mirror pose buttons, with one slider (0–100) per blendshape on the avatar. It drives the painter's preview clone and the real Scene view avatar follows, one drag is one Ctrl+Z step on the painter's undo stack, and "Reset blendshapes" restores the weights from when the session opened.
