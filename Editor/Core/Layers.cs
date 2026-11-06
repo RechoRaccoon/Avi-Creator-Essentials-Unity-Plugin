@@ -235,6 +235,14 @@ namespace AviCreatorEssentials
         public int activeLayer;
         public bool editingMask;
 
+        // Hidden from the painter: the material's polygons don't render in the
+        // 3D view, can't be hit by the brush, and don't occlude what's behind
+        // them — so you can paint the things underneath. The material stays in
+        // the list, and its layers and texture are untouched. Hiding applies to
+        // every set of the same material (base, emission...): they share the
+        // same polygons, so one can't hide without the other.
+        public bool hidden;
+
         // Live mirror link: when set, this set's display is the source set's
         // composite flipped horizontally, updated every time the source changes.
         // The set's own layers are kept (and come back if the link is removed)

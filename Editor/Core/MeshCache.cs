@@ -87,6 +87,10 @@ namespace AviCreatorEssentials
         public readonly List<RendererEntry> entries = new List<RendererEntry>();
         bool m_PoseDirty = true;
         bool m_BvhDirty = true;
+        // (renderer entry, submesh) pairs hidden by material (see TextureSet.hidden).
+        // Keyed like TextureSet.SelKey so the picking BVH, the occlusion depth pass
+        // and the paint passes all agree on what's hidden.
+        readonly HashSet<int> m_HiddenSubmeshes = new HashSet<int>();
         readonly Bvh m_Bvh = new Bvh();
         readonly Dictionary<long, int[]> m_IslandCache = new Dictionary<long, int[]>();
 
@@ -169,6 +173,23 @@ namespace AviCreatorEssentials
 
         public void MarkVisibilityDirty() => m_BvhDirty = true;
 
+        /// <summary>True when this renderer slot's polygons are hidden by material.</summary>
+        public bool IsSubmeshHidden(int entry, int submesh) => m_HiddenSubmeshes.Contains(TextureSet.SelKey(entry, submesh));
+
+        public void SetSubmeshHidden(int entry, int submesh, bool hidden)
+        {
+            int key = TextureSet.SelKey(entry, submesh);
+            if (hidden) m_HiddenSubmeshes.Add(key);
+            else m_HiddenSubmeshes.Remove(key);
+            m_BvhDirty = true;
+        }
+
+        public void ClearHiddenSubmeshes()
+        {
+            m_HiddenSubmeshes.Clear();
+            m_BvhDirty = true;
+        }
+
         public void EnsurePosed()
         {
             if (!m_PoseDirty) return;
@@ -226,7 +247,7 @@ namespace AviCreatorEssentials
             EnsurePosed();
             if (!m_BvhDirty) return;
             m_BvhDirty = false;
-            m_Bvh.Build(entries);
+            m_Bvh.Build(entries, m_HiddenSubmeshes);
         }
 
         public bool Raycast(Ray ray, out MeshHit hit, float maxDistance = float.MaxValue)
@@ -459,7 +480,7 @@ namespace AviCreatorEssentials
             m_NodeCount = 0;
         }
 
-        public void Build(List<RendererEntry> entries)
+        public void Build(List<RendererEntry> entries, HashSet<int> hiddenSubmeshes)
         {
             var tris = new List<Tri>();
             foreach (var e in entries)
@@ -468,6 +489,9 @@ namespace AviCreatorEssentials
                 var v = e.worldVerts;
                 for (int s = 0; s < e.submeshIndices.Length; s++)
                 {
+                    // Hidden material: its polygons can't be hit, so the brush
+                    // reaches the polygons underneath instead.
+                    if (hiddenSubmeshes != null && hiddenSubmeshes.Contains(TextureSet.SelKey(e.index, s))) continue;
                     var idx = e.submeshIndices[s];
                     for (int i = 0; i + 2 < idx.Length; i += 3)
                     {

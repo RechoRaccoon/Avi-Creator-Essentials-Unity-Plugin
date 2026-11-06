@@ -466,6 +466,13 @@ namespace AviCreatorEssentials
                 var row = W.Row("ap-material-row");
                 W.SetOn(row, set == s.ActiveSet, "ap-active");
                 W.SetOn(row, APSession.IsEmission(set) && s.Sibling(set, false) != null, "ap-material-child");
+                W.SetOn(row, set.hidden, "ap-hidden");
+                var captured = set;
+                // Hide this material's polygons in the 3D view, like hiding a
+                // layer: the brush can then reach what's underneath it.
+                var eye = W.IconButton(set.hidden ? IconKind.EyeOff : IconKind.Eye, set.hidden ? "Show material" : "Hide material",
+                    () => { s.SetMaterialHidden(captured, !captured.hidden); m_Ctx.Render(); }, "ap-eye");
+                row.Add(eye);
                 var thumb = new VisualElement();
                 thumb.AddToClassList("ap-thumb");
                 thumb.AddToClassList("ap-thumb-small");
@@ -481,7 +488,6 @@ namespace AviCreatorEssentials
                 if (set.IsMirrored) sub += " · Mirrors " + set.mirrorSource.displayName;
                 info.Add(W.Text(sub, "ap-layer-sub"));
                 row.Add(info);
-                var captured = set;
                 W.SetOn(row, set != s.ActiveSet && s.IsSelected(set), "ap-selected");
                 row.RegisterCallback<PointerDownEvent>(e =>
                 {
@@ -497,6 +503,20 @@ namespace AviCreatorEssentials
             m_List.Add(W.Text(count > 1
                 ? count + " textures selected: brushes, gradients and stars paint all of them. Click one to select it alone."
                 : "Ctrl-click (Shift-click for a range) to paint several textures at once, such as a material's color and emission.", "ap-hint"));
+            bool anyHidden = false;
+            foreach (var hiddenCheck in s.sets)
+                if (hiddenCheck.hidden) { anyHidden = true; break; }
+            if (anyHidden)
+            {
+                var showAllRow = W.Row("ap-row-gap");
+                showAllRow.Add(W.TextButton("Show all materials", () =>
+                {
+                    foreach (var showCheck in s.sets)
+                        if (showCheck.hidden) s.SetMaterialHidden(showCheck, false);
+                    m_Ctx.Render();
+                }, "ap-small"));
+                m_List.Add(showAllRow);
+            }
 
             var active = s.ActiveSet;
             if (active == null) return;

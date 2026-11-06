@@ -756,6 +756,9 @@ namespace AviCreatorEssentials
                 if (!e.Visible) continue;
                 for (int s = 0; s < e.SubmeshCount; s++)
                 {
+                    // Hidden material: its polygons must not occlude the
+                    // polygons underneath, or the brush could never reach them.
+                    if (m_Meshes.IsSubmeshHidden(e.index, s)) continue;
                     m.SetPass(PaintPass.Depth);
                     Graphics.DrawMeshNow(e.paintMesh, e.matrix, s);
                 }

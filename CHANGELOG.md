@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.0
+
+- Hide materials: every row in the Materials list now has an eye toggle, like hiding a layer. Hiding a material hides its polygons in the 3D view, so the brush can reach — and paint — the things underneath it that it was blocking: hidden polygons can't be hit by the brush, and they don't occlude what's behind them either. The material stays in the list (dimmed, with a "Show all materials" button while anything is hidden), its layers and texture are untouched, and unhiding restores it exactly. Hiding applies to every texture set of the same material (base, emission...), since they share the same polygons. The 2D view is untouched: each material has its own texture there, so nothing blocks anything. Like hiding a mesh, it is a view toggle, not undoable — and it is saved with the project, so hidden materials stay hidden when the project is reopened. It only affects the painter, never the avatar.
+
 ## 0.13.3
 
 - Fixed the new compile error in 0.13.2 (`TextImage.cs(90,30)`, error CS0136): the `DrawTexture` fix introduced a `foreach (var g in glyphs)` loop, but `Render` already has a pre-existing local named `g` (the green tint channel, `byte g`), and C# forbids a nested-scope local sharing a name with an enclosing-scope local — even though the `byte g` is declared later in the method. The loop variable is now `glyph`, the pre-existing `g` is untouched. This also explains the still-missing Blendshapes section: the assembly was still broken, so nothing in the plugin could run. The Pose tab's Blendshapes section is already in the code, right under the Reset/Mirror pose buttons, with a "No blendshapes on this avatar." message when the avatar has none.

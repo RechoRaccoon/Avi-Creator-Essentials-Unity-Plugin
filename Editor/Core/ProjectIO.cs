@@ -37,6 +37,9 @@ namespace AviCreatorEssentials
         // (JsonUtility keeps this initializer value when an older save has no
         // such field, so existing links keep flipping after the update).
         public bool mirrorFlip = true;
+        // Hidden from the painter (see TextureSet.hidden). Defaults to false,
+        // so older saves load with every material visible.
+        public bool hidden;
         public List<LayerData> layers = new List<LayerData>();
     }
 
@@ -151,6 +154,7 @@ namespace AviCreatorEssentials
                         activeLayer = set.activeLayer,
                         mirrorSource = set.mirrorSource != null ? SetLabel(set.mirrorSource) : null,
                         mirrorFlip = set.mirrorFlip,
+                        hidden = set.hidden,
                     };
                     if (set.originalMaterial != null &&
                         AssetDatabase.TryGetGUIDAndLocalFileIdentifier(set.originalMaterial, out string guid, out long localId))
@@ -343,6 +347,7 @@ namespace AviCreatorEssentials
                         s.engine.InitializeSet(set, s.view.preferSourceFiles);
                     }
                     set.activeLayer = Mathf.Clamp(sd.activeLayer, 0, set.layers.Count - 1);
+                    set.hidden = sd.hidden;
                     set.initialized = true;
                     s.engine.EnsureBuffers(set);
                     foreach (var l in set.layers)
@@ -370,6 +375,9 @@ namespace AviCreatorEssentials
                     else
                         target.mirrorFlip = sd.mirrorFlip;
                 }
+                // Hidden materials, restored after every set exists: the flag
+                // was read per set above, this applies it to the clone and BVH.
+                s.RefreshMaterialVisibility();
                 if (data.pose != null && data.pose.Count > 0)
                     s.pose.Restore(s.pose.SnapshotFrom(data.pose));
                 if (!string.IsNullOrEmpty(data.activeSet))

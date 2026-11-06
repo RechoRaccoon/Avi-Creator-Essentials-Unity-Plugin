@@ -58,6 +58,9 @@ namespace AviCreatorEssentials
 
         readonly Dictionary<Material, Material> m_CloneMaterials = new Dictionary<Material, Material>();
         readonly Dictionary<Renderer, Material[]> m_RendererMaterials = new Dictionary<Renderer, Material[]>();
+        // Emission-view materials per renderer, so hidden slots can be restored
+        // to the emission material (not the clone material) while that view is on.
+        readonly Dictionary<Renderer, Material[]> m_EmissionRendererMaterials = new Dictionary<Renderer, Material[]>();
         readonly List<Material> m_EmissionMaterials = new List<Material>();
         bool m_EmissionApplied;
         readonly Dictionary<string, HumanBodyBones> m_HumanPaths = new Dictionary<string, HumanBodyBones>();
@@ -666,6 +669,76 @@ namespace AviCreatorEssentials
             StructureChanged?.Invoke();
         }
 
+        /// <summary>Hide or show a material's polygons in the painter, like hiding a layer.
+        /// Hiding applies to every texture set of the same material (base, emission...):
+        /// they share the same polygons, so one can't hide without the other. Hidden
+        /// polygons don't render in the 3D view, can't be hit by the brush, and don't
+        /// occlude what's behind them — so you can paint the things underneath. The 2D
+        /// view is untouched: each material has its own texture there, so nothing blocks
+        /// anything. This only affects the painter, never the avatar. Not undoable, like
+        /// hiding a mesh: it is a view toggle, and it is saved with the project.</summary>
+        public void SetMaterialHidden(TextureSet set, bool hidden)
+        {
+            if (set == null) return;
+            bool changed = false;
+            foreach (var sibling in sets)
+            {
+                if (sibling.originalMaterial != set.originalMaterial) continue;
+                if (sibling.hidden != hidden) { sibling.hidden = hidden; changed = true; }
+            }
+            if (!changed) return;
+            RefreshMaterialVisibility();
+            StructureChanged?.Invoke();
+        }
+
+        /// <summary>Re-applies every hidden material to the clone and the picking BVH.</summary>
+        public void RefreshMaterialVisibility()
+        {
+            meshes.ClearHiddenSubmeshes();
+            foreach (var hiddenSet in sets)
+            {
+                if (!hiddenSet.hidden) continue;
+                foreach (var hiddenUser in hiddenSet.users)
+                    meshes.SetSubmeshHidden(hiddenUser.renderer, hiddenUser.submesh, true);
+            }
+            ApplyMaterialVisibility();
+            meshes.MarkVisibilityDirty();
+        }
+
+        void ApplyMaterialVisibility()
+        {
+            // A null material slot renders nothing, so the hidden polygons vanish
+            // from the 3D view; the slot's real material comes back from the stored
+            // arrays on show — the emission material while that view is on, else
+            // the clone material.
+            foreach (var kv in m_RendererMaterials)
+            {
+                var renderer = kv.Key;
+                if (renderer == null) continue;
+                Material[] baseMats = kv.Value;
+                if (m_EmissionApplied && m_EmissionRendererMaterials.TryGetValue(renderer, out var emissionMats)) baseMats = emissionMats;
+                if (baseMats == null) continue;
+                var current = renderer.sharedMaterials;
+                var next = new Material[baseMats.Length];
+                for (int slotIdx = 0; slotIdx < baseMats.Length; slotIdx++) next[slotIdx] = baseMats[slotIdx];
+                foreach (var hiddenSet in sets)
+                {
+                    if (!hiddenSet.hidden) continue;
+                    foreach (var hiddenUser in hiddenSet.users)
+                    {
+                        if (hiddenUser.renderer < 0 || hiddenUser.renderer >= meshes.entries.Count) continue;
+                        if (meshes.entries[hiddenUser.renderer].renderer != renderer) continue;
+                        if (hiddenUser.materialSlot >= 0 && hiddenUser.materialSlot < next.Length) next[hiddenUser.materialSlot] = null;
+                    }
+                }
+                bool same = current != null && current.Length == next.Length;
+                if (same)
+                    for (int slotIdx = 0; slotIdx < next.Length; slotIdx++)
+                        if (current[slotIdx] != next[slotIdx]) { same = false; break; }
+                if (!same) renderer.sharedMaterials = next;
+            }
+        }
+
         // ================================================================== emission view
 
         public void SetEmissionView(bool on)
@@ -702,9 +775,11 @@ namespace AviCreatorEssentials
                     dst[i] = em;
                 }
                 r.sharedMaterials = dst;
+                m_EmissionRendererMaterials[r] = dst;
             }
             m_EmissionApplied = true;
             RefreshEmissionMaterials();
+            ApplyMaterialVisibility();
         }
 
         void RefreshEmissionMaterials()
@@ -775,7 +850,9 @@ namespace AviCreatorEssentials
             foreach (var m in m_EmissionMaterials)
                 if (m != null) Object.DestroyImmediate(m);
             m_EmissionMaterials.Clear();
+            m_EmissionRendererMaterials.Clear();
             m_EmissionApplied = false;
+            ApplyMaterialVisibility();
         }
 
         public void RefreshEmissionView()
@@ -928,6 +1005,7 @@ namespace AviCreatorEssentials
                 if (kv.Value != null) Object.DestroyImmediate(kv.Value);
             m_CloneMaterials.Clear();
             m_RendererMaterials.Clear();
+            m_EmissionRendererMaterials.Clear();
             if (m_Container != null) Object.DestroyImmediate(m_Container);
             if (camera != null) Object.DestroyImmediate(camera.gameObject);
             if (m_Key != null) Object.DestroyImmediate(m_Key.gameObject);
