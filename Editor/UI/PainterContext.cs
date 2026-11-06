@@ -15,6 +15,7 @@ namespace AviCreatorEssentials
         Select,
         Transform,
         Gradient,
+        LassoRecolor,
     }
 
     public enum FillMode

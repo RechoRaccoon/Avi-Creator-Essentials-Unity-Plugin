@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.6
+
+- New Lasso recolor tool (L): draw a freehand loop around part of a layer in the texture (2D) view and everything inside the loop is recoloured to the primary colour, while everything outside is untouched. Transparent pixels are left alone and alpha is preserved, shading is kept, and — unlike the normal Recolor adjustment, which is a multiply tint and can never change black (black x any colour = black) — black turns into the new colour too: black ink gets the new colour at full strength, since black text's shape lives in its alpha, not its luminance. So lassoing the black "Pancake" text and picking pink turns the letters pink while the pink heart outside the loop stays pink. Image layers are rasterized first (the same as painting on one), as part of the same undo step, so one Ctrl+Z undoes the whole thing. The loop draws in amber so it reads as a recolor rather than the blue UV selection.
+
 ## 0.14.5
 
 - Fixed text layers previewing the wrong letters: the preview showed mirrored / jumbled letters instead of what was typed. The glyph UV code only flipped the V axis for atlas-flipped glyphs, but Unity flips flipped glyphs in BOTH U and V (they are stored rotated 180 degrees in the atlas), so every flipped glyph came out mirrored horizontally. With Arial's private, freshly-packed atlas almost no glyph was flipped, so it looked right; LegacyRuntime shares its atlas with the whole editor UI, so many glyphs come back flipped and the preview turned to nonsense. Flipped glyphs now sample backwards on both axes. The redundant second font-texture request between capturing the glyph UVs and drawing them is also gone, since a texture regeneration there would have invalidated the captured UVs.

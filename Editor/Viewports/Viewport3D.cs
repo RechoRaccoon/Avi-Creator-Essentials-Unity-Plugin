@@ -522,6 +522,9 @@ namespace AviCreatorEssentials
                     m_SelPoints.Clear();
                     m_SelPoints.Add(m_Mouse);
                     break;
+                case PaintTool.LassoRecolor:
+                    ctx.ShowHint("Lasso recolor works in the texture (2D) view: draw a loop around the area there.");
+                    break;
             }
         }
 

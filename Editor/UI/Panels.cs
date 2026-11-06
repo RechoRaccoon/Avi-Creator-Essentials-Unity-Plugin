@@ -19,6 +19,7 @@ namespace AviCreatorEssentials
         readonly VisualElement m_SelectBox;
         readonly VisualElement m_TransformBox;
         readonly VisualElement m_GradientBox;
+        readonly VisualElement m_LassoRecolorBox;
         readonly VisualElement m_BrushBox;
 
         BrushSettings B => m_Ctx.brush;
@@ -123,6 +124,13 @@ namespace AviCreatorEssentials
                 "One gradient runs over every material that uses the same kind of texture (each on its selected layer). " +
                 "Off: only the textures selected in Materials.")));
             Add(m_GradientBox);
+
+            m_LassoRecolorBox = W.Column("ap-lasso-recolor-options");
+            m_LassoRecolorBox.Add(W.Text("Draw a loop around part of the selected layer in the texture (2D) view. Everything inside the loop is " +
+                                         "recoloured to the primary colour (the colour wheel above) — transparent pixels are left alone, shading is kept, " +
+                                         "and black turns into the new colour too, so black text can become any colour. Image layers are rasterized first, " +
+                                         "like painting on them. One Ctrl+Z undoes it.", "ap-hint"));
+            Add(m_LassoRecolorBox);
 
             m_BrushBox = W.Column();
             Add(m_BrushBox);
@@ -375,11 +383,13 @@ namespace AviCreatorEssentials
             bool select = m_Ctx.Tool == PaintTool.Select;
             bool transform = m_Ctx.Tool == PaintTool.Transform;
             bool gradient = m_Ctx.Tool == PaintTool.Gradient;
+            bool lassoRecolor = m_Ctx.Tool == PaintTool.LassoRecolor;
             m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
             m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
             m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
             m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
-            m_BrushBox.style.display = fill || select || transform || gradient ? DisplayStyle.None : DisplayStyle.Flex;
+            m_LassoRecolorBox.style.display = lassoRecolor ? DisplayStyle.Flex : DisplayStyle.None;
+            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         void RebuildTips()

@@ -725,6 +725,104 @@ namespace AviCreatorEssentials
             PixelEdit(set, layer.content, "Clear layer", () => APUtil.Clear(layer.content, new Color(0, 0, 0, 0)));
         }
 
+        /// <summary>Luminance in the shader's terms (AP_Composite AP_Lum), on 0..1 colour values.</summary>
+        static float Lum(float r, float g, float b) => 0.3f * r + 0.59f * g + 0.11f * b;
+
+        static float Lum(Color32 p) => (0.3f * p.r + 0.59f * p.g + 0.11f * p.b) / 255f;
+
+        /// <summary>AP_Composite AP_ClipColor / AP_SetLum, in C#: shift a colour to a target luminance, keeping it in gamut.</summary>
+        static Vector3 ClipColor(Vector3 c)
+        {
+            float l = Lum(c.x, c.y, c.z);
+            float n = Mathf.Min(c.x, Mathf.Min(c.y, c.z));
+            float x = Mathf.Max(c.x, Mathf.Max(c.y, c.z));
+            if (n < 0f) c = new Vector3(l, l, l) + (c - new Vector3(l, l, l)) * (l / Mathf.Max(l - n, 1e-5f));
+            if (x > 1f) c = new Vector3(l, l, l) + (c - new Vector3(l, l, l)) * ((1f - l) / Mathf.Max(x - l, 1e-5f));
+            return c;
+        }
+
+        static Vector3 SetLum(Vector3 c, float l) => ClipColor(c + new Vector3(l - Lum(c.x, c.y, c.z), l - Lum(c.x, c.y, c.z), l - Lum(c.x, c.y, c.z)));
+
+        /// <summary>
+        /// Lasso recolor: recolors only the pixels inside a freehand loop on the active layer, to the given colour.
+        /// Transparent pixels are left alone and alpha is preserved. This is NOT a multiply tint (black x any colour
+        /// is still black, which is why the normal Recolor adjustment never changes black text): the colour is
+        /// replaced while the pixel's shading is kept, using the same luminance math as the Recolor adjustment
+        /// (AP_Composite frag_adjust: the area's mean luminance becomes the new colour's luminance, detail kept) —
+        /// and pixels that are essentially black ink get the new colour at full strength, because black text's shape
+        /// lives in its alpha, not its luminance. An image layer is rasterized first (the same as painting on one),
+        /// as part of the same undo step. Returns a message for the user when nothing could be recoloured.
+        /// </summary>
+        public string LassoRecolor(TextureSet set, byte[] mask, Color target)
+        {
+            if (set == null || set.ActiveLayer == null) return "Pick a material and a layer first.";
+            if (set.IsMirrored) return "This material live-mirrors another — recolor on that material instead.";
+            if (set.editingMask) return "Lasso recolor paints the layer, not its mask — turn mask editing off first.";
+            var layer = set.ActiveLayer;
+            if (layer.content == null)
+            {
+                if (layer.kind != LayerKind.Image || layer.placement == null) return "That layer has no pixels to recolor.";
+                engine.RenderImageLayer(set, layer);
+                if (layer.content == null) return "That layer has no pixels to recolor.";
+            }
+            if (mask == null || mask.Length != set.width * set.height) return "Draw a loop around the area to recolor first.";
+            int w = set.width, h = set.height;
+            var tex = APUtil.ReadToTexture(layer.content);
+            var px = tex.GetPixels32();
+            Object.DestroyImmediate(tex);
+            // First pass: how much shading is there to keep? Mean luminance of the affected pixels, like the
+            // Recolor adjustment's _SrcMean.
+            float meanLum = 0f;
+            int count = 0;
+            for (int i = 0; i < px.Length; i++)
+            {
+                if (mask[i] == 0 || px[i].a == 0) continue;
+                meanLum += Lum(px[i]);
+                count++;
+            }
+            if (count == 0) return "There's nothing painted on this layer inside the loop.";
+            meanLum = Mathf.Max(meanLum / count, 0.03f);
+            float targetLum = Lum(target.r, target.g, target.b);
+            // Second pass: recolor. Black ink (luminance ~0) gets the new colour at full strength — its shape is
+            // in the alpha, so there is no shading to scale. Everything else keeps its shading the way the Recolor
+            // adjustment does. Alpha is never touched.
+            var targetVec = new Vector3(target.r, target.g, target.b);
+            for (int i = 0; i < px.Length; i++)
+            {
+                if (mask[i] == 0 || px[i].a == 0) continue;
+                var p = px[i];
+                float lum = Lum(p);
+                Vector3 recoloured = lum <= 0.02f
+                    ? targetVec
+                    : SetLum(targetVec, lum * targetLum / meanLum);
+                p.r = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.x * 255f), 0, 255);
+                p.g = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.y * 255f), 0, 255);
+                p.b = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.z * 255f), 0, 255);
+                px[i] = p;
+            }
+            var cut = new Texture2D(w, h, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave };
+            cut.SetPixels32(px);
+            cut.Apply(false);
+            var entries = new List<IHistoryEntry>();
+            if (layer.kind == LayerKind.Image)
+            {
+                var placement = layer.placement;
+                entries.Add(new ActionEntry("Rasterize image",
+                    () => { layer.kind = LayerKind.Image; layer.placement = placement; Changed(set); },
+                    () => { layer.kind = LayerKind.Paint; layer.placement = null; Changed(set); },
+                    applied => { if (applied && placement != null && placement.image != null) Object.DestroyImmediate(placement.image); }));
+                layer.kind = LayerKind.Paint;
+                layer.placement = null;
+            }
+            var snap = engine.CloneRT(layer.content, "Undo");
+            APUtil.CopyToGammaData(cut, layer.content, false);
+            Object.DestroyImmediate(cut);
+            entries.Add(new PixelEntry("Lasso recolor", layer.content, snap, () => Changed(set)));
+            Push(entries.Count == 1 ? entries[0] : new CompoundEntry("Lasso recolor", entries));
+            Changed(set);
+            return null;
+        }
+
         // ------------------------------------------------------------------ masks
 
         public void AddMask(TextureSet set, PaintLayer layer, float value)

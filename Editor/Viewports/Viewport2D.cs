@@ -19,6 +19,7 @@ namespace AviCreatorEssentials
             ImageRotate,
             Select,
             Transform,
+            LassoRecolor,
         }
 
         Vector2 m_Center = new Vector2(0.5f, 0.5f);
@@ -52,6 +53,7 @@ namespace AviCreatorEssentials
 
         public bool MouseInside => m_Inside;
         readonly List<Vector2> m_SelPoints = new List<Vector2>();
+        readonly List<Vector2> m_LassoPoints = new List<Vector2>();
         SelectOp m_SelOp;
 
         public Viewport2D(PainterContext context) : base(context)
@@ -196,6 +198,11 @@ namespace AviCreatorEssentials
                         m_SelPoints.Clear();
                         m_SelPoints.Add(m_Mouse);
                         break;
+                    case PaintTool.LassoRecolor:
+                        m_Drag = Drag.LassoRecolor;
+                        m_LassoPoints.Clear();
+                        m_LassoPoints.Add(m_Mouse);
+                        break;
                 }
             }
             if (m_Drag != Drag.None)
@@ -250,6 +257,9 @@ namespace AviCreatorEssentials
                         if (Vector2.Distance(m_SelPoints[m_SelPoints.Count - 1], m_Mouse) > 3f) m_SelPoints.Add(m_Mouse);
                     }
                     break;
+                case Drag.LassoRecolor:
+                    if (Vector2.Distance(m_LassoPoints[m_LassoPoints.Count - 1], m_Mouse) > 3f) m_LassoPoints.Add(m_Mouse);
+                    break;
             }
             m_DragLast = m_Mouse;
             RepaintOverlay();
@@ -272,6 +282,7 @@ namespace AviCreatorEssentials
             else if (m_Drag == Drag.Picker) ctx.colors.Use(ctx.primary);
             else if (m_Drag == Drag.BrushSize) ctx.NotifyBrushChanged();
             else if (m_Drag == Drag.Select) FinishSelect();
+            else if (m_Drag == Drag.LassoRecolor) FinishLassoRecolor();
             else if (m_Drag == Drag.Transform) EndTransform();
             m_Drag = Drag.None;
             m_PointerId = -1;
@@ -602,6 +613,34 @@ namespace AviCreatorEssentials
                 s.Select(set, s.TrianglesInUV(set, poly), m_SelOp, ctx.selectIslands);
             }
             m_SelPoints.Clear();
+            ctx.Render();
+        }
+
+        /// <summary>Lasso recolor: close the freehand loop and recolor what's inside it on the active layer.</summary>
+        void FinishLassoRecolor()
+        {
+            var s = ctx.session;
+            var set = Set;
+            if (s == null || set == null)
+            {
+                m_LassoPoints.Clear();
+                return;
+            }
+            if (Vector2.Distance(m_DragStart, m_Mouse) < 4f || m_LassoPoints.Count < 3)
+            {
+                ctx.ShowHint("Lasso recolor: draw a loop around the area to recolor in the texture view.");
+                m_LassoPoints.Clear();
+                return;
+            }
+            if (!set.initialized) s.InitializeSet(set);
+            m_LassoPoints.Add(m_Mouse);
+            var poly = new List<Vector2>();
+            foreach (var p in m_LassoPoints) poly.Add(LocalToUV(p));
+            var mask = APSession.PolygonMask(set, poly);
+            m_LassoPoints.Clear();
+            var msg = s.LassoRecolor(set, mask, ctx.primary);
+            if (msg != null) ctx.ShowHint(msg);
+            else ctx.colors.Use(ctx.primary);
             ctx.Render();
         }
 
@@ -1010,6 +1049,15 @@ namespace AviCreatorEssentials
                 }
             }
 
+            // Lasso recolor loop: amber, so it reads as a recolor rather than the blue UV selection.
+            if (m_Drag == Drag.LassoRecolor && m_LassoPoints.Count > 1)
+            {
+                var pts = new List<Vector2>(m_LassoPoints) { m_Mouse };
+                var arr = pts.ToArray();
+                Polyline(p, arr, arr.Length, true, new Color(0, 0, 0, 0.6f), 3f);
+                Polyline(p, arr, arr.Length, true, new Color(1f, 0.75f, 0.3f, 1f), 1.25f);
+            }
+
             if (!m_Inside && m_Drag != Drag.Paint) return;
             if (ctx.Tool == PaintTool.Brush || ctx.Tool == PaintTool.Eraser || m_Drag == Drag.BrushSize)
             {
@@ -1034,7 +1082,7 @@ namespace AviCreatorEssentials
                 if (ctx.brush.symmetry && m_Drag != Drag.BrushSize && ctx.session.MirrorUV(set, ctx.brush.symmetryAxis, LocalToUV(center), out var symUV))
                     Circle(p, UVToLocal(symUV), r, new Color(1, 1, 1, 0.4f), 1f);
             }
-            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select ||
+            else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select || ctx.Tool == PaintTool.LassoRecolor ||
                      (ctx.Tool == PaintTool.Transform && ActiveUVImage(out _) == null))
             {
                 var c = m_Mouse;

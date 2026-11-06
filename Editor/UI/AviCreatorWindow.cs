@@ -672,6 +672,7 @@ namespace AviCreatorEssentials
                 T(PaintTool.Picker, IconKind.Picker, "Color picker (I). Shift-click picks the secondary color.");
                 T(PaintTool.Image, IconKind.Image, "Image (T) — move, scale and rotate image layers");
                 T(PaintTool.Select, IconKind.Select, "Select UV islands or polygons (S). Painting then stays inside the selection.");
+                T(PaintTool.LassoRecolor, IconKind.Select, "Lasso recolor (L) — draw a loop around part of a layer in the texture view to recolor just what's inside it");
                 T(PaintTool.Transform, IconKind.Move, "Transform (V) — pick up part of a layer (draw around it, or click a color) and move, scale, rotate or warp it");
             }
             else
@@ -1128,6 +1129,7 @@ namespace AviCreatorEssentials
                     case KeyCode.I: m_Ctx.Tool = PaintTool.Picker; break;
                     case KeyCode.T: m_Ctx.Tool = PaintTool.Image; break;
                     case KeyCode.S: m_Ctx.Tool = PaintTool.Select; break;
+                    case KeyCode.L: m_Ctx.Tool = PaintTool.LassoRecolor; break;
                     case KeyCode.V: m_Ctx.Tool = PaintTool.Transform; break;
                     case KeyCode.Return:
                     case KeyCode.KeypadEnter:
@@ -1347,7 +1349,7 @@ namespace AviCreatorEssentials
             });
             Group("Painting", new[,]
             {
-                { "B  E  G  I  T  S  V", "Brush, eraser, fill, color picker, image, select, transform" },
+                { "B  E  G  I  T  S  V  L", "Brush, eraser, fill, color picker, image, select, transform, lasso recolor" },
                 { "Enter  /  Esc (transform)", "Apply / cancel the floating piece" },
                 { "Ctrl+A  /  Ctrl+D  /  Ctrl+I", "Select all / clear / invert the UV selection" },
                 { "[  ]", "Brush size (Shift: hardness)" },
