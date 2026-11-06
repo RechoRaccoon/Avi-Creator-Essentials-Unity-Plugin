@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.1
+
+- Fixed blendshapes not moving the painting hit mesh: opening a mouth (or any blendshape) with the Pose tab's sliders showed the mouth open in the 3D view, but the brush still hit the closed mouth — it painted over the lips instead of inside. The hit test uses a baked copy of the mesh (MeshCache), and the Pose tab's blendshape path set the weights on the clone without telling the cache the pose had changed, so the baked copy kept the old vertices. It now marks the pose dirty, so the hit mesh is re-baked from the current blendshape weights on the next brush stroke. The Scene view overlay's blendshape sliders already did this, and bone poses already mark the cache dirty too, so both are covered now.
+
 ## 0.14.0
 
 - Hide materials: every row in the Materials list now has an eye toggle, like hiding a layer. Hiding a material hides its polygons in the 3D view, so the brush can reach — and paint — the things underneath it that it was blocking: hidden polygons can't be hit by the brush, and they don't occlude what's behind them either. The material stays in the list (dimmed, with a "Show all materials" button while anything is hidden), its layers and texture are untouched, and unhiding restores it exactly. Hiding applies to every texture set of the same material (base, emission...), since they share the same polygons. The 2D view is untouched: each material has its own texture there, so nothing blocks anything. Like hiding a mesh, it is a view toggle, not undoable — and it is saved with the project, so hidden materials stay hidden when the project is reopened. It only affects the painter, never the avatar.

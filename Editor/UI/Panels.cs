@@ -1232,6 +1232,14 @@ namespace AviCreatorEssentials
                 int si = scene.sharedMesh.GetBlendShapeIndex(cloneSmr.sharedMesh.GetBlendShapeName(index));
                 if (si >= 0) scene.SetBlendShapeWeight(si, weight);
             }
+            // The hit mesh is a baked copy (MeshCache): without this, the BVH keeps the
+            // pre-blendshape vertices, so the brush hits the closed mouth even though the
+            // rendered clone shows it open. Marking dirty only sets flags; the re-bake
+            // happens lazily on the next raycast/paint, so dragging a slider stays cheap.
+            // (The Scene view overlay path already did this via MirrorToPainterClone; the
+            // painter's Pose tab path was the one missing it. Bone poses are covered by
+            // PoseChanged in APSession.)
+            m_Ctx.session?.meshes?.MarkPoseDirty();
             SceneView.RepaintAll();
             m_Ctx.Render();
         }
