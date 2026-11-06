@@ -706,27 +706,45 @@ namespace AviCreatorEssentials
             meshes.MarkVisibilityDirty();
         }
 
-        /// <summary>One shared fully-transparent material for hidden slots. A null
-        /// material slot does NOT hide a submesh in Unity — the renderer falls back
-        /// to the magenta error material, so hidden polygons showed up pink instead
-        /// of vanishing. Unlit/Transparent with alpha 0 writes no colour and no
-        /// depth (ZWrite Off), so the polygons are truly invisible and don't occlude
-        /// what's behind them. Created once, never saved (HideAndDontSave).</summary>
+        /// <summary>One shared invisible material for hidden slots. A null material
+        /// slot does NOT hide a submesh in Unity — the renderer falls back to the
+        /// magenta error material, so hidden polygons showed up pink instead of
+        /// vanishing. A fully-transparent Unlit/Transparent material was tried next,
+        /// but it still showed the hidden polygons white in the painter's 3D view,
+        /// so hiding no longer depends on alpha blending at all: the Invisible
+        /// shader writes no colour and no depth (ColorMask 0, ZWrite Off), so the
+        /// polygons cannot show up regardless of how the view treats blending or
+        /// alpha, and they don't occlude what's behind them. Falls back to the
+        /// alpha-0 transparent material if the shader is somehow missing, and to
+        /// null (slot keeps its real material) if that is missing too. Created once,
+        /// never saved (HideAndDontSave).</summary>
         Material HiddenMaterial
         {
             get
             {
                 if (m_HiddenMaterial == null)
                 {
-                    var shader = Shader.Find("Unlit/Transparent");
-                    if (shader != null)
+                    var invisibleShader = Shader.Find("Hidden/AviCreatorEssentials/Invisible");
+                    if (invisibleShader != null)
                     {
-                        m_HiddenMaterial = new Material(shader)
+                        m_HiddenMaterial = new Material(invisibleShader)
                         {
                             hideFlags = HideFlags.HideAndDontSave,
                             name = "AP Hidden Material",
                         };
-                        m_HiddenMaterial.color = new Color(0f, 0f, 0f, 0f);
+                    }
+                    else
+                    {
+                        var transparentShader = Shader.Find("Unlit/Transparent");
+                        if (transparentShader != null)
+                        {
+                            m_HiddenMaterial = new Material(transparentShader)
+                            {
+                                hideFlags = HideFlags.HideAndDontSave,
+                                name = "AP Hidden Material",
+                            };
+                            m_HiddenMaterial.color = new Color(0f, 0f, 0f, 0f);
+                        }
                     }
                 }
                 return m_HiddenMaterial;
@@ -824,6 +842,10 @@ namespace AviCreatorEssentials
                     var m = src[i];
                     var em = dst[i];
                     if (m == null || em == null) continue;
+                    // Hidden slot: the shared invisible material lives here while the
+                    // emission view is on. Never write emission textures or colours
+                    // onto it — it must stay a material that writes nothing.
+                    if (em == m_HiddenMaterial) continue;
                     Texture map = null;
                     foreach (var name in new[] { "_EmissionMap", "_EmissionTex", "_Emission" })
                     {

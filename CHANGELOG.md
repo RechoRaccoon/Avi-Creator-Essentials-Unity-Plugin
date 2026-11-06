@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.3
+
+- Fixed hidden materials showing white instead of hiding: 0.14.2 gave hidden slots a fully-transparent material (Unlit/Transparent, alpha 0), but it still rendered the polygons white in the painter's 3D view — hiding was depending on alpha blending that the view doesn't honour that way. Hidden slots now use a dedicated invisible shader (Hidden/AviCreatorEssentials/Invisible) that writes no colour and no depth at all (ColorMask 0, ZWrite Off), so the polygons cannot show up regardless of blending or alpha, and they still don't occlude what's behind them. The brush still passes through to what's underneath, and unhiding still restores the real material exactly, including the emission material while the emission view is on. The emission refresh also skips hidden slots now, so it never writes textures onto the shared invisible material.
+
 ## 0.14.2
 
 - Fixed hidden materials turning pink instead of hiding: 0.14.0 set hidden material slots to null, but Unity renders a null material slot with the magenta error material, so the polygons stayed visible in pink. Hidden slots now get one shared fully-transparent material (Unlit/Transparent, alpha 0, ZWrite Off), so the polygons are truly invisible and don't occlude what's behind them. The brush still passes through to what's underneath (the picking BVH skip from 0.14.0 is unchanged), and unhiding still restores the real material exactly, including the emission material while the emission view is on.
