@@ -54,6 +54,18 @@ namespace AviCreatorEssentials
 
             EditorGUI.BeginChangeCheck();
             m_Text = EditorGUILayout.TextArea(m_Text, GUILayout.Height(64));
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.FlexibleSpace();
+                // A paste button as well as the field itself: it appends whatever is on the clipboard
+                // (emoji included) even if the text field drops a pasted emoji, and the words show up
+                // in the field so the paste landing is visible.
+                if (GUILayout.Button("Paste", GUILayout.Width(64)))
+                {
+                    string clip = GUIUtility.systemCopyBuffer;
+                    if (!string.IsNullOrEmpty(clip)) { m_Text += clip; m_PreviewKey = null; }
+                }
+            }
             m_FontSize = EditorGUILayout.IntSlider("Size", m_FontSize, 16, 256);
             m_Color = EditorGUILayout.ColorField("Colour", m_Color);
             m_Bold = EditorGUILayout.Toggle("Bold", m_Bold);

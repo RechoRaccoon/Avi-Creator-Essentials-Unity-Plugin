@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.4
+
+- Fixed text layers never previewing (and the console spamming "Arial.ttf is no longer a valid built in font" every second): TextImage asked Unity for the built-in Arial font first, but in this Unity version that lookup throws an ArgumentException instead of returning null, so rendering died before any word was drawn — even plain "Pancake" showed "Nothing to preview yet". It now tries LegacyRuntime.ttf first, and every font lookup is guarded so the search can never throw and always falls through to the next font. The text window also has a Paste button that appends whatever is on the clipboard (emoji included) even if the text field itself drops a pasted emoji.
+
 ## 0.14.3
 
 - Fixed hidden materials showing white instead of hiding: 0.14.2 gave hidden slots a fully-transparent material (Unlit/Transparent, alpha 0), but it still rendered the polygons white in the painter's 3D view — hiding was depending on alpha blending that the view doesn't honour that way. Hidden slots now use a dedicated invisible shader (Hidden/AviCreatorEssentials/Invisible) that writes no colour and no depth at all (ColorMask 0, ZWrite Off), so the polygons cannot show up regardless of blending or alpha, and they still don't occlude what's behind them. The brush still passes through to what's underneath, and unhiding still restores the real material exactly, including the emission material while the emission view is on. The emission refresh also skips hidden slots now, so it never writes textures onto the shared invisible material.

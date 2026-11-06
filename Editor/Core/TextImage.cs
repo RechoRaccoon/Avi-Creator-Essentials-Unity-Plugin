@@ -24,11 +24,28 @@ namespace AviCreatorEssentials
             get
             {
                 if (s_Font != null) return s_Font;
-                s_Font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-                if (s_Font == null) s_Font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                if (s_Font == null) s_Font = Font.CreateDynamicFontFromOSFont(new[] { "Arial", "Segoe UI", "Helvetica", "sans-serif" }, 64);
+                // LegacyRuntime.ttf first: in this Unity version Resources.GetBuiltinResource<Font>("Arial.ttf")
+                // throws ArgumentException ("Arial.ttf is no longer a valid built in font") instead of
+                // returning null, so an Arial-first lookup never falls through — the exception escapes
+                // Render, spams the console on every repaint, and the preview stays blank. Every lookup
+                // below is guarded so the font search can never throw.
+                s_Font = TryBuiltinFont("LegacyRuntime.ttf");
+                if (s_Font == null) s_Font = TryBuiltinFont("Arial.ttf");
+                if (s_Font == null) s_Font = TryOSFont();
                 return s_Font;
             }
+        }
+
+        static Font TryBuiltinFont(string name)
+        {
+            try { return Resources.GetBuiltinResource<Font>(name); }
+            catch (System.Exception) { return null; }
+        }
+
+        static Font TryOSFont()
+        {
+            try { return Font.CreateDynamicFontFromOSFont(new[] { "Arial", "Segoe UI", "Helvetica", "sans-serif" }, 64); }
+            catch (System.Exception) { return null; }
         }
 
         struct Glyph
