@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.3
+
+- Fixed the new compile error in 0.13.2 (`TextImage.cs(90,30)`, error CS0136): the `DrawTexture` fix introduced a `foreach (var g in glyphs)` loop, but `Render` already has a pre-existing local named `g` (the green tint channel, `byte g`), and C# forbids a nested-scope local sharing a name with an enclosing-scope local — even though the `byte g` is declared later in the method. The loop variable is now `glyph`, the pre-existing `g` is untouched. This also explains the still-missing Blendshapes section: the assembly was still broken, so nothing in the plugin could run. The Pose tab's Blendshapes section is already in the code, right under the Reset/Mirror pose buttons, with a "No blendshapes on this avatar." message when the avatar has none.
+
 ## 0.13.2
 
 - Fixed the 0.13.1 compile error that broke the whole plugin: `TextImage.cs(91)` called `Graphics.DrawTexture` with a source `Rect` as the third argument, but the only 3-argument overload takes a `Material` there (`error CS1503: cannot convert from 'UnityEngine.Rect' to 'UnityEngine.Material'`), so the entire editor assembly failed to compile. It now uses the overload that takes the source rect plus border sizes (`0, 0, 0, 0`), so text layers render again. This also explains the missing Blendshapes section: the Pose tab's Blendshapes section was already in the code, but nothing in the plugin could run while the assembly failed to compile. The section is always shown, right under the Reset/Mirror pose buttons — with a "No blendshapes on this avatar." message when the avatar has none, so missing and none are easy to tell apart.

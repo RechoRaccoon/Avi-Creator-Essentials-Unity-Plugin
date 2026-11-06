@@ -87,8 +87,8 @@ namespace AviCreatorEssentials
                 RenderTexture.active = rt;
                 GL.PushMatrix();
                 GL.LoadPixelMatrix(0, w, 0, h);
-                foreach (var g in glyphs)
-                    Graphics.DrawTexture(g.dest, atlas, g.src, 0, 0, 0, 0);
+                foreach (var glyph in glyphs)
+                    Graphics.DrawTexture(glyph.dest, atlas, glyph.src, 0, 0, 0, 0);
                 GL.PopMatrix();
                 RenderTexture.active = prev;
             }
