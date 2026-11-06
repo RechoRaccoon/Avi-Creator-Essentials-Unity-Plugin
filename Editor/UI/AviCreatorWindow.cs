@@ -353,6 +353,36 @@ namespace AviCreatorEssentials
                 card.Add(list);
             }
 
+            var templates = ProjectIO.ListTemplates();
+            if (templates.Count > 0)
+            {
+                card.Add(W.Text("Templates", "ap-subtle-heading"));
+                card.Add(W.Text("A template copies one avatar's full layer layout onto another avatar with the same material names, so you can edit what you already made instead of redrawing it. Pick the avatar to copy onto in the Avatar field, then apply.", "ap-hint"));
+                var tlist = W.Column("ap-project-list");
+                foreach (var t in templates)
+                {
+                    var tr = W.Row("ap-project-row");
+                    var tinfo = W.Column("ap-grow");
+                    tinfo.Add(W.Text(t.templateName, "ap-layer-name"));
+                    tinfo.Add(W.Text("From " + t.avatarName + "  ·  " + t.savedAt.ToString("MMM d, HH:mm") + "  ·  " + t.setCount + (t.setCount == 1 ? " material" : " materials"), "ap-layer-sub"));
+                    tr.Add(tinfo);
+                    var tmpl = t;
+                    tr.Add(W.TextButton("Apply to avatar", () =>
+                    {
+                        var avatar = m_PendingAvatar;
+                        if (avatar == null)
+                        {
+                            ShowNotification(new GUIContent("Pick the avatar to copy onto in the Avatar field first"));
+                            return;
+                        }
+                        if (StartSession(avatar, false)) ApplyTemplate(tmpl.folder);
+                    }, "ap-small"));
+                    tr.Add(W.IconButton(IconKind.Folder, "Show folder", () => EditorUtility.RevealInFinder(Path.Combine(tmpl.folder, ProjectIO.FileName))));
+                    tlist.Add(tr);
+                }
+                card.Add(tlist);
+            }
+
             card.Add(W.Text("Tip: right-click an avatar in the Hierarchy › Avi Creator Essentials › Paint This Avatar.", "ap-hint"));
         }
 
@@ -452,6 +482,32 @@ namespace AviCreatorEssentials
             m_V2?.RequestRender();
         }
 
+        void ApplyTemplate(string folder)
+        {
+            if (m_Session == null) return;
+            try
+            {
+                var result = ProjectIO.ApplyTemplate(m_Session, folder);
+                string msg = "Template applied: " + result.layersApplied + (result.layersApplied == 1 ? " layer" : " layers") +
+                             " on " + result.setsApplied + (result.setsApplied == 1 ? " material" : " materials") + ".";
+                if (result.skipped.Count > 0)
+                    msg += "\n\nSkipped — no matching material on this avatar:\n" + string.Join("\n", result.skipped);
+                if (result.warnings.Count > 0)
+                    msg += "\n\nNotes:\n" + string.Join("\n", result.warnings);
+                msg += "\n\nOne Ctrl+Z undoes the whole apply. Save the project to keep it.";
+                EditorUtility.DisplayDialog("Avi Creator Essentials", msg, "OK");
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                EditorUtility.DisplayDialog("Avi Creator Essentials", "Couldn't apply the template: " + e.Message, "OK");
+            }
+            m_StructureDirty = true;
+            m_ThumbsDirty = true;
+            m_V3?.RequestRender();
+            m_V2?.RequestRender();
+        }
+
         bool ConfirmClose()
         {
             if (m_Session == null || !m_Session.dirty) return true;
@@ -497,6 +553,31 @@ namespace AviCreatorEssentials
             {
                 Debug.LogException(e);
                 EditorUtility.DisplayDialog("Avi Creator Essentials", "Couldn't save: " + e.Message, "OK");
+            }
+        }
+
+        void SaveAsTemplate()
+        {
+            if (m_Session == null) return;
+            // Templates are named after the avatar they came from, so the start
+            // screen list reads as "this avatar's layout, ready to copy".
+            string name = m_Session.avatarName;
+            string folder = ProjectIO.TemplateFolder(name);
+            if (File.Exists(Path.Combine(folder, ProjectIO.FileName)))
+            {
+                int choice = EditorUtility.DisplayDialogComplex("Avi Creator Essentials",
+                    "A template named '" + name + "' already exists. Replace it with the current layers?", "Replace", "Cancel", "");
+                if (choice != 0) return;
+            }
+            try
+            {
+                ProjectIO.SaveAsTemplate(m_Session, name);
+                ShowNotification(new GUIContent("Template '" + name + "' saved — apply it to another avatar from the start screen"));
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                EditorUtility.DisplayDialog("Avi Creator Essentials", "Couldn't save the template: " + e.Message, "OK");
             }
         }
 
@@ -632,7 +713,11 @@ namespace AviCreatorEssentials
 
             var save = W.IconTextButton(IconKind.Save, "Save", () => Save(false));
             save.tooltip = "Save the layered project (Ctrl+S). Right-click for Save As.";
-            save.AddManipulator(new ContextualMenuManipulator(e => e.menu.AppendAction("Save as…", _ => Save(true))));
+            save.AddManipulator(new ContextualMenuManipulator(e =>
+            {
+                e.menu.AppendAction("Save as…", _ => Save(true));
+                e.menu.AppendAction("Save as template…", _ => SaveAsTemplate());
+            }));
             bar.Add(save);
             var bake = W.IconTextButton(IconKind.Bake, "Bake", ShowBakeDialog, "ap-accent");
             bake.tooltip = "Write the final textures as PNGs and put them on your avatar";

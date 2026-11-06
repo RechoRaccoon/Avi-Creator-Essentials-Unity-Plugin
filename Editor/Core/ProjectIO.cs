@@ -15,6 +15,10 @@ namespace AviCreatorEssentials
         public string avatarName;
         public string savedAt;
         public string activeSet;
+        // Templates: a project saved as a reusable layout. The same file format,
+        // just flagged and stored under _Templates instead of the avatar's folder.
+        public bool isTemplate;
+        public string templateName;
         public List<SetData> sets = new List<SetData>();
         public List<PoseBone> pose = new List<PoseBone>();
     }
@@ -75,6 +79,8 @@ namespace AviCreatorEssentials
         public DateTime savedAt;
         public int setCount;
         public bool recovery;
+        public bool isTemplate;
+        public string templateName;
     }
 
     /// <summary>Saving and loading layered projects. Projects live outside Assets so Unity never imports them.</summary>
@@ -101,6 +107,7 @@ namespace AviCreatorEssentials
                     try
                     {
                         var data = JsonUtility.FromJson<ProjectData>(File.ReadAllText(file));
+                        if (data.isTemplate) continue;
                         DateTime.TryParse(data.savedAt, out var when);
                         list.Add(new ProjectInfo
                         {
@@ -123,9 +130,75 @@ namespace AviCreatorEssentials
             return list;
         }
 
+        // ------------------------------------------------------------------ templates
+        //
+        // A template is a saved project kept as a reusable layout: the same file
+        // format, stored under _Templates so it never shows up in "Saved projects".
+        // Applying one copies its layer stacks onto another avatar's matching
+        // materials (same material names) — the target avatar's own project file
+        // is never touched, only its open session.
+
+        public static string TemplatesRoot => Path.Combine(APUtil.ProjectsRoot, "_Templates");
+
+        public static string TemplateFolder(string name) =>
+            Path.Combine(TemplatesRoot, APUtil.SafeFileName(name));
+
+        public static List<ProjectInfo> ListTemplates()
+        {
+            var list = new List<ProjectInfo>();
+            string root = TemplatesRoot;
+            if (!Directory.Exists(root)) return list;
+            foreach (var dir in Directory.GetDirectories(root))
+            {
+                string file = Path.Combine(dir, FileName);
+                if (!File.Exists(file)) continue;
+                try
+                {
+                    var data = JsonUtility.FromJson<ProjectData>(File.ReadAllText(file));
+                    DateTime.TryParse(data.savedAt, out var when);
+                    list.Add(new ProjectInfo
+                    {
+                        folder = dir,
+                        avatarName = data.avatarName,
+                        savedAt = when,
+                        setCount = data.sets.Count,
+                        isTemplate = true,
+                        templateName = string.IsNullOrEmpty(data.templateName) ? data.avatarName : data.templateName,
+                    });
+                }
+                catch (Exception)
+                {
+                    // ignore unreadable templates
+                }
+            }
+            list.Sort((a, b) => b.savedAt.CompareTo(a.savedAt));
+            return list;
+        }
+
+        /// <summary>Saves the open session's full layer stacks as a named template. Returns its folder.</summary>
+        public static string SaveAsTemplate(APSession s, string name)
+        {
+            string folder = TemplateFolder(name);
+            Save(s, folder, true, true, name);
+            return folder;
+        }
+
+        public static string ReadTemplateName(string folder)
+        {
+            try
+            {
+                var data = JsonUtility.FromJson<ProjectData>(File.ReadAllText(Path.Combine(folder, FileName)));
+                return string.IsNullOrEmpty(data.templateName) ? data.avatarName : data.templateName;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         // ------------------------------------------------------------------ save
 
-        public static void Save(APSession s, string folder, bool showProgress = true)
+        public static void Save(APSession s, string folder, bool showProgress = true, bool asTemplate = false, string templateName = null)
         {
             Directory.CreateDirectory(folder);
             var data = new ProjectData
@@ -133,6 +206,8 @@ namespace AviCreatorEssentials
                 avatarName = s.avatarName,
                 savedAt = DateTime.Now.ToString("o"),
                 activeSet = s.ActiveSet != null ? SetLabel(s.ActiveSet) : null,
+                isTemplate = asTemplate,
+                templateName = templateName,
                 pose = s.pose.ToPoseBones(),
             };
             var written = new HashSet<string> { FileName };
@@ -297,63 +372,7 @@ namespace AviCreatorEssentials
                         warnings.Add("Material '" + sd.materialName + "' (" + sd.property + ") was not found on this avatar.");
                         continue;
                     }
-                    set.ReleaseAll();
-                    set.width = Mathf.Clamp(sd.width, 16, 8192);
-                    set.height = Mathf.Clamp(sd.height, 16, 8192);
-                    set.uvChannel = sd.uvChannel;
-                    set.islandDirty = true;
-                    foreach (var ld in sd.layers)
-                    {
-                        var layer = new PaintLayer
-                        {
-                            id = string.IsNullOrEmpty(ld.id) ? Guid.NewGuid().ToString("N") : ld.id,
-                            name = ld.name,
-                            kind = (LayerKind)ld.kind,
-                            visible = ld.visible,
-                            opacity = ld.opacity,
-                            blend = (LayerBlendMode)ld.blend,
-                            lockAlpha = ld.lockAlpha,
-                            fillColor = ld.fillColor,
-                            maskEnabled = ld.maskEnabled,
-                            adjMode = (AdjustMode)ld.adjMode,
-                            clipBelow = ld.clipBelow,
-                            adjColor = ld.adjColor,
-                            hue = ld.hue,
-                            saturation = ld.saturation,
-                            lightness = ld.lightness,
-                            srcMean = ld.srcMean,
-                            srcStd = ld.srcStd,
-                            refMean = ld.refMean,
-                            refStd = ld.refStd,
-                            refValid = ld.refValid,
-                            srcHist = ld.srcHist != null && ld.srcHist.Length == 768 ? ld.srcHist : null,
-                            refHist = ld.refHist != null && ld.refHist.Length == 768 ? ld.refHist : null,
-                        };
-                        if (!string.IsNullOrEmpty(ld.contentFile))
-                            layer.content = LoadRT(s, set, Path.Combine(folder, ld.contentFile), false);
-                        if (!string.IsNullOrEmpty(ld.maskFile))
-                            layer.mask = LoadRT(s, set, Path.Combine(folder, ld.maskFile), true);
-                        if (ld.hasPlacement && ld.placement != null)
-                        {
-                            layer.placement = ld.placement.Clone();
-                            if (!string.IsNullOrEmpty(ld.placement.imageFile))
-                                layer.placement.image = APUtil.LoadImageFile(Path.Combine(folder, ld.placement.imageFile));
-                        }
-                        if (layer.kind != LayerKind.Fill && layer.kind != LayerKind.Adjustment && layer.content == null) layer.content = s.engine.NewContentRT(set);
-                        set.layers.Add(layer);
-                    }
-                    if (set.layers.Count == 0)
-                    {
-                        s.engine.InitializeSet(set, s.view.preferSourceFiles);
-                    }
-                    set.activeLayer = Mathf.Clamp(sd.activeLayer, 0, set.layers.Count - 1);
-                    set.hidden = sd.hidden;
-                    set.initialized = true;
-                    s.engine.EnsureBuffers(set);
-                    foreach (var l in set.layers)
-                        if (l.kind == LayerKind.Image) s.engine.RenderImageLayer(set, l);
-                    set.dirty = true;
-                    s.ForceAssign(set);
+                    LoadSetLayers(s, sd, folder, set, false);
                 }
                 // Live mirror links, resolved after every set exists (a source
                 // set may be saved after its target). Links to a missing set are
@@ -395,6 +414,235 @@ namespace AviCreatorEssentials
             s.NotifyStructureChanged();
             s.dirty = false;
             return warnings;
+        }
+
+        /// <summary>Rebuilds one set's layer stack from its saved data, exactly as a project load does.
+        /// When keepTargetSize is true (applying a template to another avatar) the target's own texture
+        /// size is kept and the template's pixels are resampled into it; otherwise the saved size is
+        /// restored. The set's previous layers are released, so snapshot anything to keep first.</summary>
+        static void LoadSetLayers(APSession s, SetData sd, string folder, TextureSet set, bool keepTargetSize)
+        {
+            set.ReleaseAll();
+            if (!keepTargetSize)
+            {
+                set.width = Mathf.Clamp(sd.width, 16, 8192);
+                set.height = Mathf.Clamp(sd.height, 16, 8192);
+                set.uvChannel = sd.uvChannel;
+            }
+            set.islandDirty = true;
+            foreach (var ld in sd.layers)
+            {
+                var layer = new PaintLayer
+                {
+                    id = string.IsNullOrEmpty(ld.id) ? Guid.NewGuid().ToString("N") : ld.id,
+                    name = ld.name,
+                    kind = (LayerKind)ld.kind,
+                    visible = ld.visible,
+                    opacity = ld.opacity,
+                    blend = (LayerBlendMode)ld.blend,
+                    lockAlpha = ld.lockAlpha,
+                    fillColor = ld.fillColor,
+                    maskEnabled = ld.maskEnabled,
+                    adjMode = (AdjustMode)ld.adjMode,
+                    clipBelow = ld.clipBelow,
+                    adjColor = ld.adjColor,
+                    hue = ld.hue,
+                    saturation = ld.saturation,
+                    lightness = ld.lightness,
+                    srcMean = ld.srcMean,
+                    srcStd = ld.srcStd,
+                    refMean = ld.refMean,
+                    refStd = ld.refStd,
+                    refValid = ld.refValid,
+                    srcHist = ld.srcHist != null && ld.srcHist.Length == 768 ? ld.srcHist : null,
+                    refHist = ld.refHist != null && ld.refHist.Length == 768 ? ld.refHist : null,
+                };
+                if (!string.IsNullOrEmpty(ld.contentFile))
+                    layer.content = LoadRT(s, set, Path.Combine(folder, ld.contentFile), false);
+                if (!string.IsNullOrEmpty(ld.maskFile))
+                    layer.mask = LoadRT(s, set, Path.Combine(folder, ld.maskFile), true);
+                if (ld.hasPlacement && ld.placement != null)
+                {
+                    layer.placement = ld.placement.Clone();
+                    if (!string.IsNullOrEmpty(ld.placement.imageFile))
+                        layer.placement.image = APUtil.LoadImageFile(Path.Combine(folder, ld.placement.imageFile));
+                }
+                if (layer.kind != LayerKind.Fill && layer.kind != LayerKind.Adjustment && layer.content == null) layer.content = s.engine.NewContentRT(set);
+                set.layers.Add(layer);
+            }
+            if (set.layers.Count == 0)
+            {
+                s.engine.InitializeSet(set, s.view.preferSourceFiles);
+            }
+            set.activeLayer = Mathf.Clamp(sd.activeLayer, 0, set.layers.Count - 1);
+            set.hidden = sd.hidden;
+            set.initialized = true;
+            s.engine.EnsureBuffers(set);
+            foreach (var l in set.layers)
+                if (l.kind == LayerKind.Image) s.engine.RenderImageLayer(set, l);
+            set.dirty = true;
+            s.ForceAssign(set);
+        }
+
+        public class ApplyTemplateResult
+        {
+            public int setsApplied;
+            public int layersApplied;
+            public List<string> skipped = new List<string>();
+            public List<string> warnings = new List<string>();
+        }
+
+        class AppliedSet
+        {
+            public TextureSet set;
+            public List<PaintLayer> before;
+            public List<PaintLayer> after;
+            public int beforeActive;
+            public int afterActive;
+            public bool beforeHidden;
+            public bool afterHidden;
+            public TextureSet beforeMirror;
+            public TextureSet afterMirror;
+            public bool beforeFlip;
+            public bool afterFlip;
+        }
+
+        /// <summary>Copies every layer stack from a saved template onto the matching materials of the
+        /// open session, matched by material name and texture property — so an avatar's full layout
+        /// (layer order, names, opacity, blend, placement, hidden state and pixels) lands on another
+        /// avatar to edit from, instead of redrawing it. Materials with no match on this avatar are
+        /// skipped and reported, never created. The pose is not copied (it belongs to the other
+        /// avatar's bones), the session's own project file is untouched, and the whole apply is one
+        /// undo step.</summary>
+        public static ApplyTemplateResult ApplyTemplate(APSession s, string folder)
+        {
+            var result = new ApplyTemplateResult();
+            var data = JsonUtility.FromJson<ProjectData>(File.ReadAllText(Path.Combine(folder, FileName)));
+            var applied = new Dictionary<TextureSet, AppliedSet>();
+            try
+            {
+                int si = 0;
+                foreach (var sd in data.sets)
+                {
+                    EditorUtility.DisplayProgressBar("Avi Creator Essentials", "Applying template to " + sd.materialName, si++ / (float)Mathf.Max(1, data.sets.Count));
+                    var set = FindSetByName(s, sd) ?? FindSet(s, sd);
+                    if (set == null)
+                    {
+                        result.skipped.Add(sd.materialName + " (" + sd.property + ")");
+                        continue;
+                    }
+                    // Snapshot the target's own stack first: LoadSetLayers releases it,
+                    // and these clones are what one Ctrl+Z restores.
+                    var snap = new AppliedSet
+                    {
+                        set = set,
+                        before = CloneStack(s, set),
+                        beforeActive = set.activeLayer,
+                        beforeHidden = set.hidden,
+                        beforeMirror = set.mirrorSource,
+                        beforeFlip = set.mirrorFlip,
+                    };
+                    LoadSetLayers(s, sd, folder, set, true);
+                    snap.after = new List<PaintLayer>(set.layers);
+                    snap.afterActive = set.activeLayer;
+                    snap.afterHidden = set.hidden;
+                    snap.afterMirror = null;
+                    snap.afterFlip = true;
+                    applied[set] = snap;
+                    result.setsApplied++;
+                    result.layersApplied += sd.layers.Count;
+                }
+                // Live mirror links, resolved after every set exists (a source set
+                // may be saved after its target). Links to a missing set are dropped
+                // with a warning, never left dangling — same as a project load.
+                foreach (var sd in data.sets)
+                {
+                    if (string.IsNullOrEmpty(sd.mirrorSource)) continue;
+                    var target = FindSetByName(s, sd) ?? FindSet(s, sd);
+                    if (target == null || !applied.TryGetValue(target, out var snap)) continue;
+                    TextureSet source = null;
+                    foreach (var cand in s.sets)
+                        if (SetLabel(cand) == sd.mirrorSource) { source = cand; break; }
+                    if (source == null)
+                    {
+                        result.warnings.Add("Live mirror link for '" + sd.materialName + "' was dropped: its source material was not found.");
+                        continue;
+                    }
+                    if (!s.SetMirror(target, source))
+                    {
+                        result.warnings.Add("Live mirror link for '" + sd.materialName + "' was dropped: it would close a cycle.");
+                        continue;
+                    }
+                    target.mirrorFlip = sd.mirrorFlip;
+                    snap.afterMirror = source;
+                    snap.afterFlip = sd.mirrorFlip;
+                }
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+            if (applied.Count > 0)
+            {
+                var entries = new List<IHistoryEntry>();
+                foreach (var snap in applied.Values)
+                {
+                    var a = snap;
+                    long bytes = 0;
+                    foreach (var l in a.before) bytes += l.Bytes;
+                    entries.Add(new ActionEntry("Apply template to '" + (a.set.originalMaterial != null ? a.set.originalMaterial.name : a.set.displayName) + "'",
+                        () => RestoreStack(s, a, a.before, a.beforeActive, a.beforeHidden, a.beforeMirror, a.beforeFlip),
+                        () => RestoreStack(s, a, a.after, a.afterActive, a.afterHidden, a.afterMirror, a.afterFlip),
+                        appliedNow =>
+                        {
+                            // Dropped while the template is in effect: the old stack is
+                            // unreachable, so release it. Dropped while undone: release
+                            // the template stack instead.
+                            foreach (var l in appliedNow ? a.before : a.after) l.Release();
+                        },
+                        bytes));
+                }
+                s.history.Push(new CompoundEntry("Apply template", entries));
+            }
+            s.RefreshMaterialVisibility();
+            s.NotifyStructureChanged();
+            s.dirty = true;
+            return result;
+        }
+
+        static List<PaintLayer> CloneStack(APSession s, TextureSet set)
+        {
+            var list = new List<PaintLayer>(set.layers.Count);
+            foreach (var l in set.layers) list.Add(s.CloneLayer(l));
+            return list;
+        }
+
+        static void RestoreStack(APSession s, AppliedSet a, List<PaintLayer> layers, int active, bool hidden, TextureSet mirror, bool flip)
+        {
+            // Swap the stack without releasing anything: the other stack stays
+            // referenced by the undo entry, so redo can bring it back.
+            a.set.layers.Clear();
+            a.set.layers.AddRange(layers);
+            a.set.activeLayer = Mathf.Clamp(active, 0, Mathf.Max(0, a.set.layers.Count - 1));
+            a.set.hidden = hidden;
+            a.set.mirrorSource = mirror;
+            a.set.mirrorFlip = flip;
+            a.set.initialized = true;
+            a.set.islandDirty = true;
+            s.engine.EnsureBuffers(a.set);
+            foreach (var l in a.set.layers)
+                if (l.kind == LayerKind.Image) s.engine.RenderImageLayer(a.set, l);
+            a.set.dirty = true;
+            s.ForceAssign(a.set);
+            s.engine.SetChanged?.Invoke(a.set);
+        }
+
+        static TextureSet FindSetByName(APSession s, SetData sd)
+        {
+            foreach (var set in s.sets)
+                if (set.originalMaterial != null && set.originalMaterial.name == sd.materialName && set.property == sd.property)
+                    return set;
+            return null;
         }
 
         static RenderTexture LoadRT(APSession s, TextureSet set, string file, bool mask)

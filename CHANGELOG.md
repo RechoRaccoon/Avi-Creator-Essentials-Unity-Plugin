@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.7
+
+- Avatar templates: copy one avatar's full layout onto another avatar instead of redrawing it from scratch. With the finished avatar open, right-click the Save button and pick "Save as template…" — it saves every layer stack (layer order, names, opacity, blend, placement, hidden state and pixels) as a template named after that avatar. Then, on the start screen, pick the other avatar in the Avatar field and press "Apply to avatar" on the template in the new Templates list. Layers land on the matching materials by material name (your avatars share the same names), so eye layers land on the new avatar's eyes, and you just edit from there. Materials with no match on the new avatar are skipped and listed, never created; the pose isn't copied, and the new avatar's own project file is untouched — applying only changes its open session, so save normally afterwards. The whole apply is one Ctrl+Z step, and texture sizes stay the target avatar's own (the template's pixels are resampled into them).
+
 ## 0.14.6
 
 - New Lasso recolor tool (L): draw a freehand loop around part of a layer in the texture (2D) view and everything inside the loop is recoloured to the primary colour, while everything outside is untouched. Transparent pixels are left alone and alpha is preserved, shading is kept, and — unlike the normal Recolor adjustment, which is a multiply tint and can never change black (black x any colour = black) — black turns into the new colour too: black ink gets the new colour at full strength, since black text's shape lives in its alpha, not its luminance. So lassoing the black "Pancake" text and picking pink turns the letters pink while the pink heart outside the loop stays pink. Image layers are rasterized first (the same as painting on one), as part of the same undo step, so one Ctrl+Z undoes the whole thing. The loop draws in amber so it reads as a recolor rather than the blue UV selection.
