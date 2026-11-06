@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.2
+
+- Fixed hidden materials turning pink instead of hiding: 0.14.0 set hidden material slots to null, but Unity renders a null material slot with the magenta error material, so the polygons stayed visible in pink. Hidden slots now get one shared fully-transparent material (Unlit/Transparent, alpha 0, ZWrite Off), so the polygons are truly invisible and don't occlude what's behind them. The brush still passes through to what's underneath (the picking BVH skip from 0.14.0 is unchanged), and unhiding still restores the real material exactly, including the emission material while the emission view is on.
+
 ## 0.14.1
 
 - Fixed blendshapes not moving the painting hit mesh: opening a mouth (or any blendshape) with the Pose tab's sliders showed the mouth open in the 3D view, but the brush still hit the closed mouth — it painted over the lips instead of inside. The hit test uses a baked copy of the mesh (MeshCache), and the Pose tab's blendshape path set the weights on the clone without telling the cache the pose had changed, so the baked copy kept the old vertices. It now marks the pose dirty, so the hit mesh is re-baked from the current blendshape weights on the next brush stroke. The Scene view overlay's blendshape sliders already did this, and bone poses already mark the cache dirty too, so both are covered now.

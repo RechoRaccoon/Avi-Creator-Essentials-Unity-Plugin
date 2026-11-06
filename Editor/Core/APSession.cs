@@ -62,6 +62,7 @@ namespace AviCreatorEssentials
         // to the emission material (not the clone material) while that view is on.
         readonly Dictionary<Renderer, Material[]> m_EmissionRendererMaterials = new Dictionary<Renderer, Material[]>();
         readonly List<Material> m_EmissionMaterials = new List<Material>();
+        Material m_HiddenMaterial;
         bool m_EmissionApplied;
         readonly Dictionary<string, HumanBodyBones> m_HumanPaths = new Dictionary<string, HumanBodyBones>();
 
@@ -705,12 +706,39 @@ namespace AviCreatorEssentials
             meshes.MarkVisibilityDirty();
         }
 
+        /// <summary>One shared fully-transparent material for hidden slots. A null
+        /// material slot does NOT hide a submesh in Unity — the renderer falls back
+        /// to the magenta error material, so hidden polygons showed up pink instead
+        /// of vanishing. Unlit/Transparent with alpha 0 writes no colour and no
+        /// depth (ZWrite Off), so the polygons are truly invisible and don't occlude
+        /// what's behind them. Created once, never saved (HideAndDontSave).</summary>
+        Material HiddenMaterial
+        {
+            get
+            {
+                if (m_HiddenMaterial == null)
+                {
+                    var shader = Shader.Find("Unlit/Transparent");
+                    if (shader != null)
+                    {
+                        m_HiddenMaterial = new Material(shader)
+                        {
+                            hideFlags = HideFlags.HideAndDontSave,
+                            name = "AP Hidden Material",
+                        };
+                        m_HiddenMaterial.color = new Color(0f, 0f, 0f, 0f);
+                    }
+                }
+                return m_HiddenMaterial;
+            }
+        }
+
         void ApplyMaterialVisibility()
         {
-            // A null material slot renders nothing, so the hidden polygons vanish
-            // from the 3D view; the slot's real material comes back from the stored
-            // arrays on show — the emission material while that view is on, else
-            // the clone material.
+            // Hidden slots get the shared invisible material, so the hidden polygons
+            // vanish from the 3D view; the slot's real material comes back from the
+            // stored arrays on show — the emission material while that view is on,
+            // else the clone material.
             foreach (var kv in m_RendererMaterials)
             {
                 var renderer = kv.Key;
@@ -728,7 +756,7 @@ namespace AviCreatorEssentials
                     {
                         if (hiddenUser.renderer < 0 || hiddenUser.renderer >= meshes.entries.Count) continue;
                         if (meshes.entries[hiddenUser.renderer].renderer != renderer) continue;
-                        if (hiddenUser.materialSlot >= 0 && hiddenUser.materialSlot < next.Length) next[hiddenUser.materialSlot] = null;
+                        if (hiddenUser.materialSlot >= 0 && hiddenUser.materialSlot < next.Length && HiddenMaterial != null) next[hiddenUser.materialSlot] = HiddenMaterial;
                     }
                 }
                 bool same = current != null && current.Length == next.Length;
