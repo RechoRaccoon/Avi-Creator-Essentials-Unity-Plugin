@@ -758,6 +758,7 @@ namespace AviCreatorEssentials
                 T(PaintTool.Image, IconKind.Image, "Image (T) — move, scale and rotate image layers");
                 T(PaintTool.Select, IconKind.Select, "Select UV islands or polygons (S). Painting then stays inside the selection.");
                 T(PaintTool.LassoRecolor, IconKind.Select, "Lasso recolor (L) — draw a loop around part of a layer in the texture view to recolor just what's inside it");
+                T(PaintTool.ColorRecolor, IconKind.Theme, "Color recolor (C) — click a color on the texture or the model to give every pixel of that color its own Hue/Saturation layer, then shift the hue");
                 T(PaintTool.Transform, IconKind.Move, "Transform (V) — pick up part of a layer (draw around it, or click a color) and move, scale, rotate or warp it");
             }
             else
@@ -1084,6 +1085,8 @@ namespace AviCreatorEssentials
                 case PaintTool.Image: return "Import an image from the Layers section, then drag it on the model or in the texture view.";
                 case PaintTool.Transform: return "Draw around part of the layer in the texture view, or click a color, to pick it up. Then drag, scale, rotate or warp it. Enter applies, Esc cancels.";
                 case PaintTool.Gradient: return "Drag across the model from where the gradient starts to where it ends. It follows the model in 3D, across every UV seam. Esc cancels.";
+                case PaintTool.ColorRecolor: return "Click a color on the model or texture. Every pixel of that color gets its own Hue/Saturation layer — shift Hue in the Adjust section.";
+                case PaintTool.LassoRecolor: return "Draw a loop around part of the selected layer in the texture view to recolor just what's inside it.";
                 default:
                     return "Left-drag to paint. Right-drag orbits, middle-drag pans, scroll zooms. Right-click for the color wheel. Ctrl+right-drag resizes the brush.";
             }
@@ -1215,6 +1218,7 @@ namespace AviCreatorEssentials
                     case KeyCode.T: m_Ctx.Tool = PaintTool.Image; break;
                     case KeyCode.S: m_Ctx.Tool = PaintTool.Select; break;
                     case KeyCode.L: m_Ctx.Tool = PaintTool.LassoRecolor; break;
+                    case KeyCode.C: m_Ctx.Tool = PaintTool.ColorRecolor; break;
                     case KeyCode.V: m_Ctx.Tool = PaintTool.Transform; break;
                     case KeyCode.Return:
                     case KeyCode.KeypadEnter:

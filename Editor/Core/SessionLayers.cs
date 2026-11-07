@@ -268,7 +268,11 @@ namespace AviCreatorEssentials
         /// Adds an adjustment layer that changes the colors below it. It is limited to the current UV selection
         /// (or covers everything when nothing is selected); paint its mask to refine it.
         /// </summary>
-        public PaintLayer AddAdjustmentLayer(TextureSet set, AdjustMode mode, Color color)
+        public PaintLayer AddAdjustmentLayer(TextureSet set, AdjustMode mode, Color color) =>
+            AddAdjustmentLayer(set, mode, color, MaskFromSelection(set) ?? engine.NewMaskRT(set, 1f));
+
+        /// <summary>Adds an adjustment layer limited to the given mask instead of the current UV selection.</summary>
+        public PaintLayer AddAdjustmentLayer(TextureSet set, AdjustMode mode, Color color, RenderTexture mask)
         {
             if (!set.initialized) InitializeSet(set);
             string baseName = mode == AdjustMode.Recolor ? "Recolor" : mode == AdjustMode.Match ? "Match colors" : "Hue/Saturation";
@@ -279,12 +283,57 @@ namespace AviCreatorEssentials
                 adjMode = mode,
                 adjColor = color,
             };
-            layer.mask = MaskFromSelection(set) ?? engine.NewMaskRT(set, 1f);
+            layer.mask = mask;
             int index = InsertIndex(set);
             InsertLayer(set, layer, index, "New " + baseName.ToLowerInvariant() + " layer");
             set.editingMask = false;
             MeasureSource(set, layer);
             return layer;
+        }
+
+        /// <summary>
+        /// Select-by-color recolor: builds a mask of every pixel on the active layer whose color is within
+        /// tolerance of the one at uv, then adds a Hue/Saturation adjustment layer limited to that mask,
+        /// clipped to the layer below. The Hue slider (Adjust section) then shifts just those pixels' hue —
+        /// the shader rotates hue in HSV space, so saturation, brightness, shading and detail stay — live on
+        /// the model. The new layer's mask is shown tinted red in the texture view, and painting refines it.
+        /// Returns a message for the user when nothing could be selected.
+        /// </summary>
+        public string AddColorRecolorLayer(TextureSet set, Vector2 uv, float tolerance, bool contiguous, bool sampleLayer)
+        {
+            if (set == null) return "Pick a material first.";
+            if (set.IsMirrored) return "This material live-mirrors another — recolor on that material instead.";
+            if (!set.initialized) InitializeSet(set);
+            var layer = set.ActiveLayer;
+            if (layer == null) return "Pick a material and a layer first.";
+            if (layer.kind == LayerKind.Image && layer.content == null)
+            {
+                if (layer.placement == null) return "That layer has no pixels to recolor.";
+                engine.RenderImageLayer(set, layer);
+                if (layer.content == null) return "That layer has no pixels to recolor.";
+            }
+            var tex = engine.FloodSelect(set, uv, tolerance, contiguous, sampleLayer);
+            if (tex == null) return "Couldn't sample that color.";
+            RenderTexture src = sampleLayer && layer.content != null ? layer.content : set.lastComposite;
+            var wrapped = new Vector2(uv.x - Mathf.Floor(uv.x), uv.y - Mathf.Floor(uv.y));
+            var seed = APUtil.ReadPixel(src, wrapped);
+            if (seed.a < 0.02f)
+            {
+                Object.DestroyImmediate(tex);
+                return "There's nothing painted on this layer there — click a colored pixel.";
+            }
+            var maskRT = engine.NewMaskRT(set, 0f);
+            var comp = APResources.Composite;
+            comp.SetFloat(APIds.CopyMode, 1f);
+            comp.SetFloat(APIds.SrcToGamma, 0f);
+            var prev = RenderTexture.active;
+            Graphics.Blit(tex, maskRT, comp, CompPass.Copy);
+            RenderTexture.active = prev;
+            Object.DestroyImmediate(tex);
+            AddAdjustmentLayer(set, AdjustMode.HueSatLight, Color.white, maskRT);
+            // The texture view tints the mask red while it is being edited, so the selection is visible.
+            set.editingMask = true;
+            return null;
         }
 
         /// <summary>Measures the current colors under the layer's mask (what Recolor and Match start from).</summary>

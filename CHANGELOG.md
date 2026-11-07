@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.8
+
+- New Color recolor tool (C): click a color on the texture or the model and every pixel of that color on the selected layer gets its own Hue/Saturation layer, masked to just those pixels — the two green sleeves change together even though they are separate islands. Shift Hue in the Adjust section and the hue changes while shading and detail stay. The Tolerance slider catches the shade variants, and Merge down bakes it into the layer below.
+
 ## 0.14.7
 
 - Avatar templates: copy one avatar's full layout onto another avatar instead of redrawing it from scratch. With the finished avatar open, right-click the Save button and pick "Save as template…" — it saves every layer stack (layer order, names, opacity, blend, placement, hidden state and pixels) as a template named after that avatar. Then, on the start screen, pick the other avatar in the Avatar field and press "Apply to avatar" on the template in the new Templates list. Layers land on the matching materials by material name (your avatars share the same names), so eye layers land on the new avatar's eyes, and you just edit from there. Materials with no match on the new avatar are skipped and listed, never created; the pose isn't copied, and the new avatar's own project file is untouched — applying only changes its open session, so save normally afterwards. The whole apply is one Ctrl+Z step, and texture sizes stay the target avatar's own (the template's pixels are resampled into them).

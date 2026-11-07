@@ -20,6 +20,7 @@ namespace AviCreatorEssentials
         readonly VisualElement m_TransformBox;
         readonly VisualElement m_GradientBox;
         readonly VisualElement m_LassoRecolorBox;
+        readonly VisualElement m_ColorRecolorBox;
         readonly VisualElement m_BrushBox;
 
         BrushSettings B => m_Ctx.brush;
@@ -131,6 +132,23 @@ namespace AviCreatorEssentials
                                          "and black turns into the new colour too, so black text can become any colour. Image layers are rasterized first, " +
                                          "like painting on them. One Ctrl+Z undoes it.", "ap-hint"));
             Add(m_LassoRecolorBox);
+
+            m_ColorRecolorBox = W.Column("ap-color-recolor-options");
+            m_ColorRecolorBox.Add(W.Text("Click a color on the texture or the model. Every pixel of that color on the selected layer (within the " +
+                                         "tolerance) gets its own Hue/Saturation layer, masked to just those pixels — the texture view tints the selection " +
+                                         "red, so you can see what will change. Then shift Hue in the Adjust section: the hue changes, shading and detail " +
+                                         "stay. Merge down bakes it into the layer below; deleting the layer undoes it.", "ap-hint"));
+            m_ColorRecolorBox.Add(Track(new W.SliderRow("Tolerance", 0f, 1f, () => m_Ctx.colorTolerance, v => m_Ctx.colorTolerance = v, 100f,
+                "How different a pixel may be and still count as the clicked color")));
+            m_ColorRecolorBox.Add(Track(new W.ToggleRow("Only touching pixels", () => m_Ctx.colorContiguous, v => m_Ctx.colorContiguous = v,
+                "Off: every matching pixel in the texture. On: only the connected patch around the click")));
+            m_ColorRecolorBox.Add(Track(new W.ToggleRow("Sample this layer only", () => m_Ctx.colorSampleLayer, v => m_Ctx.colorSampleLayer = v,
+                "Compare against the selected layer instead of the finished texture")));
+            var crRow = W.Row("ap-row-gap", "ap-wrap");
+            crRow.Add(W.TextButton("Merge down", () => WithColorLayer((s, set, layer) => s.MergeDown(set, layer)), "ap-small", "ap-accent"));
+            crRow.Add(W.TextButton("Delete layer", () => WithColorLayer((s, set, layer) => s.DeleteLayer(set, layer)), "ap-small"));
+            m_ColorRecolorBox.Add(crRow);
+            Add(m_ColorRecolorBox);
 
             m_BrushBox = W.Column();
             Add(m_BrushBox);
@@ -297,6 +315,21 @@ namespace AviCreatorEssentials
 
         void Changed() => m_Ctx.NotifyBrushChanged();
 
+        /// <summary>Runs an action on the active layer when it is the Hue/Saturation layer this tool made.</summary>
+        void WithColorLayer(Action<APSession, TextureSet, PaintLayer> action)
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            var layer = set?.ActiveLayer;
+            if (layer == null || layer.kind != LayerKind.Adjustment || layer.adjMode != AdjustMode.HueSatLight)
+            {
+                m_Ctx.ShowHint("Click a color first (Color recolor tool, C) — it makes a Hue/Saturation layer for that color.");
+                return;
+            }
+            action(s, set, layer);
+            m_Ctx.Render();
+        }
+
         /// <summary>Runs an action on the floating piece (or the selected image layer) of the active material.</summary>
         void WithFloating(Action<APSession, TextureSet, PaintLayer> action, bool floatingOnly = false)
         {
@@ -384,12 +417,14 @@ namespace AviCreatorEssentials
             bool transform = m_Ctx.Tool == PaintTool.Transform;
             bool gradient = m_Ctx.Tool == PaintTool.Gradient;
             bool lassoRecolor = m_Ctx.Tool == PaintTool.LassoRecolor;
+            bool colorRecolor = m_Ctx.Tool == PaintTool.ColorRecolor;
             m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
             m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
             m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
             m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
             m_LassoRecolorBox.style.display = lassoRecolor ? DisplayStyle.Flex : DisplayStyle.None;
-            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor ? DisplayStyle.None : DisplayStyle.Flex;
+            m_ColorRecolorBox.style.display = colorRecolor ? DisplayStyle.Flex : DisplayStyle.None;
+            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         void RebuildTips()

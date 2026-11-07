@@ -203,6 +203,9 @@ namespace AviCreatorEssentials
                         m_LassoPoints.Clear();
                         m_LassoPoints.Add(m_Mouse);
                         break;
+                    case PaintTool.ColorRecolor:
+                        ColorRecolorAt(LocalToUV(m_Mouse));
+                        break;
                 }
             }
             if (m_Drag != Drag.None)
@@ -641,6 +644,24 @@ namespace AviCreatorEssentials
             var msg = s.LassoRecolor(set, mask, ctx.primary);
             if (msg != null) ctx.ShowHint(msg);
             else ctx.colors.Use(ctx.primary);
+            ctx.Render();
+        }
+
+        /// <summary>Color recolor: sample the color under the click and give every matching pixel on the active layer its own Hue/Saturation layer.</summary>
+        void ColorRecolorAt(Vector2 uv)
+        {
+            var s = ctx.session;
+            var set = Set;
+            if (s == null || set == null) return;
+            if (set.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + set.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
+            if (!set.initialized) s.InitializeSet(set);
+            var msg = s.AddColorRecolorLayer(set, uv, ctx.colorTolerance, ctx.colorContiguous, ctx.colorSampleLayer);
+            if (msg != null) ctx.ShowHint(msg);
+            else ctx.ShowHint("Hue/Saturation layer added for that color — shift Hue in the Adjust section.");
             ctx.Render();
         }
 
@@ -1083,6 +1104,7 @@ namespace AviCreatorEssentials
                     Circle(p, UVToLocal(symUV), r, new Color(1, 1, 1, 0.4f), 1f);
             }
             else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select || ctx.Tool == PaintTool.LassoRecolor ||
+                     ctx.Tool == PaintTool.ColorRecolor ||
                      (ctx.Tool == PaintTool.Transform && ActiveUVImage(out _) == null))
             {
                 var c = m_Mouse;

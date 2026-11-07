@@ -525,6 +525,9 @@ namespace AviCreatorEssentials
                 case PaintTool.LassoRecolor:
                     ctx.ShowHint("Lasso recolor works in the texture (2D) view: draw a loop around the area there.");
                     break;
+                case PaintTool.ColorRecolor:
+                    ColorRecolorAt(m_Mouse);
+                    break;
             }
         }
 
@@ -956,6 +959,28 @@ namespace AviCreatorEssentials
             for (int t = 0; t < islands.Length; t++)
                 if (islands[t] == id) tris.Add(t * 3);
             s.engine.CoverTriangles(stroke, set, e, mh.submesh, tris);
+        }
+
+        /// <summary>Color recolor: sample the color under the cursor on the model and give every matching pixel on that material's active layer its own Hue/Saturation layer.</summary>
+        void ColorRecolorAt(Vector2 local)
+        {
+            var s = ctx.session;
+            if (!Raycast(local, out var h)) return;
+            var set = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
+            if (set == null) return;
+            if (set.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + set.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
+            if (set != s.ActiveSet) s.ActiveSet = set;
+            if (!set.initialized) s.InitializeSet(set);
+            var e = s.meshes.entries[h.entry];
+            var uv = e.InterpolateUV(h, set.uvChannel);
+            var msg = s.AddColorRecolorLayer(set, uv, ctx.colorTolerance, ctx.colorContiguous, ctx.colorSampleLayer);
+            if (msg != null) ctx.ShowHint(msg);
+            else ctx.ShowHint("Hue/Saturation layer added for that color — shift Hue in the Adjust section.");
+            ctx.Render();
         }
 
         void PickAt(Vector2 local, bool first, bool secondary)
@@ -1638,6 +1663,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Transform: hudRight.text = "Transform  ·  click a color to pick it up, drag it to move, Enter applies"; break;
                 case PaintTool.Select: hudRight.text = "Select " + (ctx.selectIslands ? "UV islands" : "polygons") + "  ·  Shift add, Ctrl remove"; break;
                 case PaintTool.Gradient: hudRight.text = "Gradient  ·  " + ObjectNames.NicifyVariableName(ctx.gradientShape.ToString()) + "  ·  drag across the model"; break;
+                case PaintTool.ColorRecolor: hudRight.text = "Color recolor  ·  click a color, then shift Hue in Adjust"; break;
             }
         }
     }
