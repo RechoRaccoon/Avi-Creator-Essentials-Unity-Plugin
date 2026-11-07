@@ -21,6 +21,8 @@ namespace AviCreatorEssentials
         readonly VisualElement m_GradientBox;
         readonly VisualElement m_LassoRecolorBox;
         readonly VisualElement m_ColorRecolorBox;
+        readonly VisualElement m_MajorColorsBox;
+        readonly VisualElement m_MajorColorsList;
         readonly VisualElement m_BrushBox;
 
         BrushSettings B => m_Ctx.brush;
@@ -151,6 +153,15 @@ namespace AviCreatorEssentials
             crRow.Add(W.TextButton("Delete layer", () => WithColorLayer((s, set, layer) => s.DeleteLayer(set, layer)), "ap-small"));
             m_ColorRecolorBox.Add(crRow);
             Add(m_ColorRecolorBox);
+
+            m_MajorColorsBox = W.Column("ap-major-colors-options");
+            m_MajorColorsBox.Add(W.Text("Detects the big colors of the selected material — all the shades of the green count as one green, all the beige as one beige. Change a color below and only that color changes; the dark folds stay dark and the lit parts stay light.", "ap-hint"));
+            m_MajorColorsBox.Add(Track(new W.SliderRow("Tolerance", 0f, 1f, () => m_Ctx.colorTolerance, v => m_Ctx.colorTolerance = v, 100f,
+                "How different a pixel may be and still count as the same major color when the mask is built")));
+            m_MajorColorsBox.Add(W.TextButton("Detect major colors", DetectMajorColors, "ap-small", "ap-accent"));
+            m_MajorColorsList = W.Column("ap-major-colors-list");
+            m_MajorColorsBox.Add(m_MajorColorsList);
+            Add(m_MajorColorsBox);
 
             m_BrushBox = W.Column();
             Add(m_BrushBox);
@@ -332,6 +343,65 @@ namespace AviCreatorEssentials
             m_Ctx.Render();
         }
 
+        /// <summary>Detects the major colors of the active material and lists them below.</summary>
+        void DetectMajorColors()
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set == null) { m_Ctx.ShowHint("Pick a material first."); return; }
+            m_Ctx.majorColors.Clear();
+            m_Ctx.majorColors.AddRange(s.DetectMajorColors(set));
+            m_Ctx.majorColorSet = set;
+            RebuildMajorColors();
+            m_Ctx.Render();
+            m_Ctx.ShowHint(m_Ctx.majorColors.Count == 0
+                ? "No major colors found on this material."
+                : "Found " + m_Ctx.majorColors.Count + " major colors — change each one below.");
+        }
+
+        void RebuildMajorColors()
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            // The detected colors belong to one material; switching materials clears them.
+            if (m_Ctx.majorColorSet != set) m_Ctx.majorColors.Clear();
+            m_MajorColorsList.Clear();
+            foreach (var mc in m_Ctx.majorColors)
+            {
+                var cluster = mc;
+                // Sync the field with the layer, in case it was changed from the Adjust section or the wheel.
+                if (cluster.HasLayer && set != null)
+                    foreach (var l in set.layers)
+                        if (l.id == cluster.layerId) { cluster.target = l.adjColor; break; }
+                var row = W.Row("ap-row-gap", "ap-wrap");
+                row.Add(W.Swatch(cluster.color, 24, cluster.name + " — " + Mathf.RoundToInt(cluster.coverage * 100) + "% of the material"));
+                row.Add(W.Text(cluster.name + " · " + Mathf.RoundToInt(cluster.coverage * 100) + "%"));
+                var field = new ColorField { value = cluster.target, showAlpha = false, hdr = false, tooltip = "New color for all the " + cluster.name };
+                field.style.width = 64;
+                field.RegisterValueChangedCallback(e =>
+                {
+                    var ss = m_Ctx.session;
+                    var sset = ss?.ActiveSet;
+                    if (sset == null) return;
+                    ss.ApplyMajorColor(sset, cluster, e.newValue, m_Ctx.colorTolerance);
+                    m_Ctx.Render();
+                });
+                row.Add(field);
+                row.Add(W.TextButton("Reset", () =>
+                {
+                    var ss = m_Ctx.session;
+                    var sset = ss?.ActiveSet;
+                    if (sset == null) return;
+                    ss.ResetMajorColor(sset, cluster);
+                    RebuildMajorColors();
+                    m_Ctx.Render();
+                }, "ap-small"));
+                m_MajorColorsList.Add(row);
+            }
+            if (m_Ctx.majorColors.Count == 0)
+                m_MajorColorsList.Add(W.Text("Press Detect major colors to list the colors of the selected material.", "ap-hint"));
+        }
+
         /// <summary>Runs an action on the floating piece (or the selected image layer) of the active material.</summary>
         void WithFloating(Action<APSession, TextureSet, PaintLayer> action, bool floatingOnly = false)
         {
@@ -420,13 +490,16 @@ namespace AviCreatorEssentials
             bool gradient = m_Ctx.Tool == PaintTool.Gradient;
             bool lassoRecolor = m_Ctx.Tool == PaintTool.LassoRecolor;
             bool colorRecolor = m_Ctx.Tool == PaintTool.ColorRecolor;
+            bool majorColors = m_Ctx.Tool == PaintTool.MajorColors;
             m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
             m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
             m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
             m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
             m_LassoRecolorBox.style.display = lassoRecolor ? DisplayStyle.Flex : DisplayStyle.None;
             m_ColorRecolorBox.style.display = colorRecolor ? DisplayStyle.Flex : DisplayStyle.None;
-            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor ? DisplayStyle.None : DisplayStyle.Flex;
+            m_MajorColorsBox.style.display = majorColors ? DisplayStyle.Flex : DisplayStyle.None;
+            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor || majorColors ? DisplayStyle.None : DisplayStyle.Flex;
+            if (majorColors) RebuildMajorColors();
         }
 
         void RebuildTips()

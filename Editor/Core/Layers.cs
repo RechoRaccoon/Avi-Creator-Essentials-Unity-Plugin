@@ -162,6 +162,7 @@ namespace AviCreatorEssentials
         public float saturation;                 // -1..1
         public float lightness;                  // -1..1
         public Vector4 srcMean, srcStd;          // colors of the masked area (measured)
+        public Vector4 srcValStats;          // value (brightest channel) of the masked area: x mean, y min, z max — the Recolor mapping fits the spread into 0..1
         public Vector4 refMean, refStd;          // colors of the reference area (match mode)
         public bool refValid;
         public float[] srcHist, refHist;          // match mode: luma/chroma histograms (3 x 256) of both areas

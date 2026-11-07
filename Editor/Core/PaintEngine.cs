@@ -417,6 +417,7 @@ namespace AviCreatorEssentials
             comp.SetVector(APIds.AdjHSL, new Vector4(layer.hue / 360f, layer.saturation, layer.lightness, 0f));
             comp.SetVector(APIds.SrcMean, layer.srcMean);
             comp.SetVector(APIds.SrcStd, layer.srcStd);
+            comp.SetVector(APIds.SrcValStats, layer.srcValStats);
             comp.SetVector(APIds.RefMean, layer.refMean);
             comp.SetVector(APIds.RefStd, layer.refStd);
             comp.SetFloat(APIds.RefValid, layer.refValid ? 1f : 0f);
@@ -522,17 +523,19 @@ namespace AviCreatorEssentials
         /// Returns false when the region is empty.
         /// </summary>
         public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std) =>
-            MeasureRegion(set, layerIndex, region, out mean, out std, out _);
+            MeasureRegion(set, layerIndex, region, out mean, out std, out _, out _);
 
         /// <summary>
         /// Average, spread and luma/chroma histograms (Y, Cb, Cr; 256 bins each, normalised) of the colors under
-        /// the region, as composited by the layers below layerIndex.
+        /// the region, as composited by the layers below layerIndex. valStats is the value (brightest channel)
+        /// of those colors: x mean, y min, z max — the Recolor mapping fits the spread into 0..1.
         /// </summary>
         public bool MeasureRegion(TextureSet set, int layerIndex, Texture region, out Vector4 mean, out Vector4 std, out float[] hist,
-            bool whatItAdjusts = false)
+            out Vector4 valStats, bool whatItAdjusts = false)
         {
             mean = std = Vector4.zero;
             hist = null;
+            valStats = Vector4.zero;
             if (region == null) return false;
             // whatItAdjusts: for a clipped adjustment layer, only its layer below (with the clipped adjustments under it).
             int from = whatItAdjusts ? Mathf.Max(0, ClipBase(set.layers, layerIndex)) : 0;
@@ -556,6 +559,8 @@ namespace AviCreatorEssentials
             APUtil.Release(ref colorRT);
             APUtil.Release(ref maskRT);
             double w = 0, r = 0, g = 0, b = 0, rr = 0, gg = 0, bb = 0;
+            double vSum = 0;
+            float vMin = 1f, vMax = 0f;
             var h = new double[768];
             for (int i = 0; i < cp.Length && i < mp.Length; i++)
             {
@@ -566,11 +571,16 @@ namespace AviCreatorEssentials
                 h[Bin(y)] += 1;
                 h[256 + Bin(u)] += 1;
                 h[512 + Bin(v)] += 1;
+                double pv = Math.Max(cr, Math.Max(cg, cb));
+                vSum += pv;
+                if (pv < vMin) vMin = (float)pv;
+                if (pv > vMax) vMax = (float)pv;
                 w += 1;
                 r += cr; g += cg; b += cb;
                 rr += cr * cr; gg += cg * cg; bb += cb * cb;
             }
             if (w < 1) return false;
+            valStats = new Vector4((float)(vSum / w), vMin, vMax, 0f);
             hist = new float[768];
             for (int i = 0; i < 768; i++) hist[i] = (float)(h[i] / w);
             r /= w; g /= w; b /= w;

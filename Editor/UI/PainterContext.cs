@@ -17,6 +17,7 @@ namespace AviCreatorEssentials
         Gradient,
         LassoRecolor,
         ColorRecolor,
+        MajorColors,
     }
 
     public enum FillMode
@@ -133,6 +134,8 @@ namespace AviCreatorEssentials
         public float colorTolerance = 0.12f;
         public bool colorContiguous;      // false: every matching pixel in the texture (both sleeves at once)
         public bool colorSampleLayer = true;
+        public readonly List<MajorColor> majorColors = new List<MajorColor>();
+        public TextureSet majorColorSet;  // the material the detected major colors belong to
         public GradientShape gradientShape = GradientShape.Linear;
         public bool gradientToTransparent = true;   // primary color fading out; off: primary to secondary color
         public readonly StarSettings stars = StarSettings.Load();

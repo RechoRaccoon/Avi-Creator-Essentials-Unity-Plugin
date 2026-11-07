@@ -333,6 +333,7 @@ Shader "Hidden/AviCreatorEssentials/Composite"
     float4 _AdjColor;
     float4 _AdjHSL;       // x hue shift (0..1 turns), y saturation, z lightness
     float4 _SrcMean;
+    float4 _SrcValStats;   // value (brightest channel) of the masked area: x mean, y min, z max
     float4 _SrcStd;
     float4 _RefMean;
     float4 _RefStd;
@@ -390,14 +391,28 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         if (_AdjMode < 0.5)
         {
             // Recolor: the area's average becomes the chosen color, light and dark detail is kept.
-            // Done in HSV: the target's hue and saturation, with the value taken from the source
-            // pixel scaled so the area's mean value becomes the target's value. Scaling RGB
-            // directly still clipped the brightest pixels to white (all three channels hit 1);
-            // in HSV the brightest pixels stay the target color at full brightness.
+            // Done in HSV: the target's hue and saturation, with the value shifted by the same
+            // amount as the area's mean value, so the whole spread of shades moves together —
+            // the dark folds stay dark and the lit parts stay light. Scaling the value instead
+            // crushed the bright end whenever the target was much paler than the mean; a plain
+            // shift still clips when the target sits near white or black, so the spread is
+            // compressed just enough to fit (k < 1 only when it has to be). Layers saved before
+            // this keep the old scaling (their _SrcValStats is empty).
             float3 srcHSV = AP_RGBtoHSV(c);
             float3 tgtHSV = AP_RGBtoHSV(_AdjColor.rgb);
-            float srcMeanV = max(AP_RGBtoHSV(_SrcMean.rgb).z, 0.03);
-            float v = saturate(srcHSV.z * tgtHSV.z / srcMeanV);
+            float vMean = max(_SrcValStats.x, 0.03);
+            float v;
+            if (_SrcValStats.z > _SrcValStats.y)
+            {
+                float k = min(1.0, min(tgtHSV.z / max(vMean - _SrcValStats.y, 1e-3),
+                                      (1.0 - tgtHSV.z) / max(_SrcValStats.z - vMean, 1e-3)));
+                v = saturate(tgtHSV.z + (srcHSV.z - vMean) * k);
+            }
+            else
+            {
+                float srcMeanV = max(AP_RGBtoHSV(_SrcMean.rgb).z, 0.03);
+                v = saturate(srcHSV.z * tgtHSV.z / srcMeanV);
+            }
             a = AP_HSVtoRGB(float3(tgtHSV.x, tgtHSV.y, v));
         }
         else if (_AdjMode < 1.5)

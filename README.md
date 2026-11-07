@@ -47,6 +47,7 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 | Opacity | **1** … **0** |
 | Fill an area | **G**, then click a UV island, mesh part, material or similar color |
 | Recolor one color | **C**, then click a color — every pixel of that color is recoloured to the color wheel's color; Shift-click adds to the selection, Ctrl-click takes away |
+| Change the major colors | Major colors tool: **Detect major colors** lists the big colors of the material, then change each one from the list |
 | 3D gradient | **D**, then drag across the model |
 | Pick a color | **I**, then click |
 | Undo / redo | Ctrl+Z / Ctrl+Y |
@@ -89,6 +90,8 @@ Stars that shift as you look around (parallax, matcap, World Pos) are worked out
 - **Match colors** makes the area look like another one, shade for shade (dark rim, mid tones and highlights all line up). Example for two different-colored eyes: select the eye you want to change, add a *Match colors* layer, then select the other eye and press **Use selected area as reference**.
 
 **Recolor one color.** Press **C** (Color recolor tool) and click a color on the texture or the model. Every pixel of that color on the selected layer — within the **Tolerance** slider — gets its own Recolor layer, masked to just those pixels, so the two green sleeves change together even though they are separate islands. The layer takes the color wheel's color and follows it when you turn the wheel, while shading and detail stay; the texture view tints the selection red, and you can paint the mask to refine it. Click again to pick a different color for the same layer, **Shift**-click to add more colors to it, **Ctrl**-click to take colors away. The Adjust section can switch the layer to Hue/Saturation instead. **Merge down** in the tool's options bakes it into the layer below.
+
+**Major colors.** Pick the Major colors tool (palette button in the tool rail) and press **Detect major colors**: it lists the big colors of the selected material — all the shades of the green count as one green, all the beige as one beige — each with how much of the material it covers. Change a color in the list and only that color changes, as its own Recolor layer; the dark folds stay dark and the lit parts stay light, and the area's average becomes exactly the color you picked, whether it is pale or deep. **Reset** removes that color's layer.
 
 To make two sides identical instead, use **Mirror texture** in the Layers **⋯** menu: it copies the left half of the texture onto the right half (or any other direction) as a new layer. With an area selected, the **Mirror…** button next to the selection count copies just that area to its flipped spot on the texture. This works when the UV layout is symmetric, as on most avatars.
 

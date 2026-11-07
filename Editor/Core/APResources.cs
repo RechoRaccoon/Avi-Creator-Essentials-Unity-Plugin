@@ -91,6 +91,7 @@ namespace AviCreatorEssentials
         public static readonly int AdjHSL = Shader.PropertyToID("_AdjHSL");
         public static readonly int SrcMean = Shader.PropertyToID("_SrcMean");
         public static readonly int SrcStd = Shader.PropertyToID("_SrcStd");
+        public static readonly int SrcValStats = Shader.PropertyToID("_SrcValStats");
         public static readonly int RefMean = Shader.PropertyToID("_RefMean");
         public static readonly int RefStd = Shader.PropertyToID("_RefStd");
         public static readonly int RefValid = Shader.PropertyToID("_RefValid");

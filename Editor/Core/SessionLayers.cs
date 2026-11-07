@@ -272,7 +272,7 @@ namespace AviCreatorEssentials
             AddAdjustmentLayer(set, mode, color, MaskFromSelection(set) ?? engine.NewMaskRT(set, 1f));
 
         /// <summary>Adds an adjustment layer limited to the given mask instead of the current UV selection.</summary>
-        public PaintLayer AddAdjustmentLayer(TextureSet set, AdjustMode mode, Color color, RenderTexture mask)
+        public PaintLayer AddAdjustmentLayer(TextureSet set, AdjustMode mode, Color color, RenderTexture mask, bool clipBelow = true, bool atTop = false)
         {
             if (!set.initialized) InitializeSet(set);
             string baseName = mode == AdjustMode.Recolor ? "Recolor" : mode == AdjustMode.Match ? "Match colors" : "Hue/Saturation";
@@ -282,9 +282,10 @@ namespace AviCreatorEssentials
                 kind = LayerKind.Adjustment,
                 adjMode = mode,
                 adjColor = color,
+                clipBelow = clipBelow,
             };
             layer.mask = mask;
-            int index = InsertIndex(set);
+            int index = atTop ? set.layers.Count : InsertIndex(set);
             InsertLayer(set, layer, index, "New " + baseName.ToLowerInvariant() + " layer");
             set.editingMask = false;
             MeasureSource(set, layer);
@@ -402,11 +403,12 @@ namespace AviCreatorEssentials
         {
             int idx = set.layers.IndexOf(layer);
             if (idx < 0) return;
-            if (engine.MeasureRegion(set, idx, layer.mask != null ? (Texture)layer.mask : APResources.White, out var mean, out var std, out var hist, true))
+            if (engine.MeasureRegion(set, idx, layer.mask != null ? (Texture)layer.mask : APResources.White, out var mean, out var std, out var hist, out var valStats, true))
             {
                 layer.srcMean = mean;
                 layer.srcStd = std;
                 layer.srcHist = hist;
+                layer.srcValStats = valStats;
                 ResetLut(layer);
             }
             Changed(set);
@@ -424,7 +426,7 @@ namespace AviCreatorEssentials
             if (!set.HasSelection) return false;
             if (set.selectionDirty || set.selectionRT == null) engine.BuildSelection(set);
             int idx = set.layers.IndexOf(layer);
-            if (!engine.MeasureRegion(set, idx, set.selectionRT, out var mean, out var std, out var hist)) return false;
+            if (!engine.MeasureRegion(set, idx, set.selectionRT, out var mean, out var std, out var hist, out _)) return false;
             MeasureSource(set, layer);
             var oldMean = layer.refMean; var oldStd = layer.refStd; bool oldValid = layer.refValid; var oldHist = layer.refHist;
             void Set(Vector4 m, Vector4 s, bool v, float[] h)
@@ -858,8 +860,8 @@ namespace AviCreatorEssentials
         /// Transparent pixels are left alone and alpha is preserved. This is NOT a multiply tint (black x any colour
         /// is still black, which is why the normal Recolor adjustment never changes black text): the colour is
         /// replaced while the pixel's shading is kept, using the same HSV math as the Recolor adjustment
-        /// (AP_Composite frag_adjust: the target's hue and saturation, the pixel's value scaled so the area's
-        /// mean value becomes the target's value, detail kept) —
+        /// (AP_Composite frag_adjust: the target's hue and saturation, the pixel's value shifted by the
+        /// same amount as the area's mean value, the spread compressed just enough to fit) —
         /// and pixels that are essentially black ink get the new colour at full strength, because black text's shape
         /// lives in its alpha, not its luminance. An image layer is rasterized first (the same as painting on one),
         /// as part of the same undo step. Returns a message for the user when nothing could be recoloured.
@@ -881,24 +883,32 @@ namespace AviCreatorEssentials
             var tex = APUtil.ReadToTexture(layer.content);
             var px = tex.GetPixels32();
             Object.DestroyImmediate(tex);
-            // First pass: how much shading is there to keep? Mean value (brightest channel) of the affected
-            // pixels, like the Recolor adjustment's _SrcMean.
-            float meanV = 0f;
+            // First pass: how much shading is there to keep? Mean, min and max value (brightest channel)
+            // of the affected pixels, like the Recolor adjustment's _SrcValStats.
+            float meanV = 0f, minV = 1f, maxV = 0f;
             int count = 0;
             for (int i = 0; i < px.Length; i++)
             {
                 if (mask[i] == 0 || px[i].a == 0) continue;
-                meanV += Mathf.Max(px[i].r, Mathf.Max(px[i].g, px[i].b)) / 255f;
+                float v = Mathf.Max(px[i].r, Mathf.Max(px[i].g, px[i].b)) / 255f;
+                meanV += v;
+                if (v < minV) minV = v;
+                if (v > maxV) maxV = v;
                 count++;
             }
             if (count == 0) return "There's nothing painted on this layer inside the loop.";
             meanV = Mathf.Max(meanV / count, 0.03f);
             Color.RGBToHSV(target, out float tH, out float tS, out float tV);
+            // The spread is compressed just enough to fit, like the Recolor adjustment: k is 1
+            // unless the target sits so near white or black that a plain shift would clip.
+            float k = 1f;
+            if (maxV > minV)
+                k = Mathf.Min(1f, Mathf.Min(tV / Mathf.Max(meanV - minV, 0.001f), (1f - tV) / Mathf.Max(maxV - meanV, 0.001f)));
             // Second pass: recolor. Black ink (luminance ~0) gets the new colour at full strength — its shape is
             // in the alpha, so there is no shading to scale. Everything else takes the target's hue and
-            // saturation with its own value scaled so the mean becomes the target's value, the same as the
-            // Recolor adjustment: in HSV the brightest pixels stay the target colour at full brightness instead
-            // of clipping to white. Alpha is never touched.
+            // saturation with its value shifted by the same amount as the mean, the same as the Recolor
+            // adjustment: the dark folds stay dark and the lit parts stay light instead of crushing flat.
+            // Alpha is never touched.
             var targetVec = new Vector3(target.r, target.g, target.b);
             for (int i = 0; i < px.Length; i++)
             {
@@ -910,7 +920,7 @@ namespace AviCreatorEssentials
                 if (lum <= 0.02f) recoloured = targetVec;
                 else
                 {
-                    Color rc = Color.HSVToRGB(tH, tS, Mathf.Clamp01(v * tV / meanV));
+                    Color rc = Color.HSVToRGB(tH, tS, Mathf.Clamp01(tV + (v - meanV) * k));
                     recoloured = new Vector3(rc.r, rc.g, rc.b);
                 }
                 p.r = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.x * 255f), 0, 255);

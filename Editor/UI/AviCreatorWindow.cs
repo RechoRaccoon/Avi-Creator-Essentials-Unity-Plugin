@@ -759,6 +759,7 @@ namespace AviCreatorEssentials
                 T(PaintTool.Select, IconKind.Select, "Select UV islands or polygons (S). Painting then stays inside the selection.");
                 T(PaintTool.LassoRecolor, IconKind.Select, "Lasso recolor (L) — draw a loop around part of a layer in the texture view to recolor just what's inside it");
                 T(PaintTool.ColorRecolor, IconKind.Theme, "Color recolor (C) — click a color on the texture or the model to recolor every pixel of that color to the color wheel's color. Shift-click adds to the selection, Ctrl-click takes away");
+                T(PaintTool.MajorColors, IconKind.Palette, "Major colors — detect the big colors of a material and change each one");
                 T(PaintTool.Transform, IconKind.Move, "Transform (V) — pick up part of a layer (draw around it, or click a color) and move, scale, rotate or warp it");
             }
             else
@@ -876,7 +877,7 @@ namespace AviCreatorEssentials
             var title = m_BrushSection?.Q<Label>(className: "ap-section-title");
             if (title != null)
                 title.text = m_Ctx.Tool == PaintTool.Fill ? "Fill" : m_Ctx.Tool == PaintTool.Select ? "Select" : m_Ctx.Tool == PaintTool.Transform ? "Transform" :
-                    m_Ctx.Tool == PaintTool.Gradient ? "Gradient" : "Brush";
+                    m_Ctx.Tool == PaintTool.Gradient ? "Gradient" : m_Ctx.Tool == PaintTool.MajorColors ? "Major colors" : "Brush";
             foreach (var r in m_TopBarRefresh) r();
             RefreshToolButtons();
             RefreshHistoryButtons();
@@ -1089,6 +1090,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Transform: return "Draw around part of the layer in the texture view, or click a color, to pick it up. Then drag, scale, rotate or warp it. Enter applies, Esc cancels.";
                 case PaintTool.Gradient: return "Drag across the model from where the gradient starts to where it ends. It follows the model in 3D, across every UV seam. Esc cancels.";
                 case PaintTool.ColorRecolor: return "Click a color on the model or texture to recolor every pixel of that color to the color wheel's color. Shift-click adds more, Ctrl-click takes some away.";
+                case PaintTool.MajorColors: return "Detect the major colors of the material, then change each one below.";
                 case PaintTool.LassoRecolor: return "Draw a loop around part of the selected layer in the texture view to recolor just what's inside it.";
                 default:
                     return "Left-drag to paint. Right-drag orbits, middle-drag pans, scroll zooms. Right-click for the color wheel. Ctrl+right-drag resizes the brush.";

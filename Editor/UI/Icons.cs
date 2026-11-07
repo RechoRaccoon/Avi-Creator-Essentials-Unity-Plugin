@@ -8,7 +8,7 @@ namespace AviCreatorEssentials
     {
         Brush, Eraser, Fill, Picker, Image, Bone, Rotate, Move, Undo, Redo, Save, Bake, Eye, EyeOff, Plus, Trash,
         Duplicate, Mask, Merge, Gear, Frame, Symmetry, Emission, Armature, Layers, Swap, Folder, More, Close, Light,
-        View3D, View2D, Split, Reset, Mirror, Lock, Unlock, FillLayer, Help, Select, Theme, Record, Key, Gradient, Stars,
+        View3D, View2D, Split, Reset, Mirror, Lock, Unlock, FillLayer, Help, Select, Theme, Record, Key, Gradient, Stars, Palette,
     }
 
     /// <summary>Vector icons drawn with Painter2D, so the tool needs no image assets and stays crisp at any DPI.</summary>
@@ -309,6 +309,11 @@ namespace AviCreatorEssentials
                     p.Arc(P(8f, 8f), 6f * s, Angle.Degrees(-90), Angle.Degrees(90));
                     p.ClosePath();
                     p.Fill();
+                    break;
+                case IconKind.Palette:
+                    Circ(5f, 5.5f, 2.4f, true);
+                    Circ(11f, 5.5f, 2.4f, true);
+                    Circ(8f, 11f, 2.4f, true);
                     break;
                 case IconKind.Record:
                     Circ(8f, 8f, 5f, true);
