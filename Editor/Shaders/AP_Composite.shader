@@ -390,9 +390,11 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         if (_AdjMode < 0.5)
         {
             // Recolor: the area's average becomes the chosen color, light and dark detail is kept.
+            // The target color is SCALED by the pixel's brightness relative to the area's mean, not
+            // shifted: adding the same amount to all channels washes pale colors out to white in
+            // the highlights. Scaling keeps the hue and saturation, so bright spots stay pink.
             float srcL = max(AP_Lum(_SrcMean.rgb), 0.03);
-            float l = AP_Lum(c) * AP_Lum(_AdjColor.rgb) / srcL;
-            a = AP_SetLum(_AdjColor.rgb, l);
+            a = _AdjColor.rgb * (AP_Lum(c) / srcL);
         }
         else if (_AdjMode < 1.5)
         {

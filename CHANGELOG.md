@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.10
+
+- Fixed the Color recolor tool (C) washing pale colors out to white in the highlights: the recolor now scales the chosen color by each pixel's brightness instead of adding the same brightness to every channel, so bright spots stay pink instead of going white. Dark colors already looked right and are unchanged. Same fix in the Lasso recolor.
+
 ## 0.14.9
 
 - Color recolor tool (C) now makes a Recolor layer by default: click a color and every pixel of that color becomes the color wheel's color, shading kept, and turning the wheel follows live. Clicking again picks a different color for the same layer instead of making a new one; Shift-click adds more colors to the selection and Ctrl-click (Cmd on Mac) takes colors away. The color match is now measured by hue, so the lit and shaded parts of the same color are all picked up instead of scattered patches. Fixed the red selection tint showing on the unselected area instead of the selected one.

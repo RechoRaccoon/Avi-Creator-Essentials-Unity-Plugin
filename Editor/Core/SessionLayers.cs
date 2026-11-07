@@ -892,10 +892,11 @@ namespace AviCreatorEssentials
             }
             if (count == 0) return "There's nothing painted on this layer inside the loop.";
             meanLum = Mathf.Max(meanLum / count, 0.03f);
-            float targetLum = Lum(target.r, target.g, target.b);
             // Second pass: recolor. Black ink (luminance ~0) gets the new colour at full strength — its shape is
-            // in the alpha, so there is no shading to scale. Everything else keeps its shading the way the Recolor
-            // adjustment does. Alpha is never touched.
+            // in the alpha, so there is no shading to scale. Everything else is the target colour SCALED by the
+            // pixel's brightness relative to the mean, the same as the Recolor adjustment: scaling keeps the hue
+            // and saturation, so pale colours stay pale in the highlights instead of washing out to white the way
+            // an additive luminance shift did. Alpha is never touched.
             var targetVec = new Vector3(target.r, target.g, target.b);
             for (int i = 0; i < px.Length; i++)
             {
@@ -904,7 +905,7 @@ namespace AviCreatorEssentials
                 float lum = Lum(p);
                 Vector3 recoloured = lum <= 0.02f
                     ? targetVec
-                    : SetLum(targetVec, lum * targetLum / meanLum);
+                    : targetVec * (lum / meanLum);
                 p.r = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.x * 255f), 0, 255);
                 p.g = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.y * 255f), 0, 255);
                 p.b = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.z * 255f), 0, 255);
