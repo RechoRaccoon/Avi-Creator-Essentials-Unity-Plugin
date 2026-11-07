@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.13
+
+- Fixed the Major colors tool not compiling: the color field lives in UnityEditor.UIElements, which Panels.cs was not importing.
+
 ## 0.14.12
 
 - New Major colors tool (palette button in the tool rail): Detect major colors lists the big colors of the selected material — all the shades of the green count as one green, all the beige as one beige — each with its coverage, and changing one recolors only that color as its own Recolor layer. The Recolor mapping now shifts brightness instead of scaling it, with the spread compressed just enough to fit: the area's average becomes exactly the picked color, pale or deep, and the dark folds stay dark and the lit parts stay light instead of crushing flat. Same fix in the Lasso recolor.
