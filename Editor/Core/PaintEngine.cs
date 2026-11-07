@@ -1517,10 +1517,29 @@ namespace AviCreatorEssentials
             int tol = Mathf.RoundToInt(Mathf.Clamp01(tolerance) * 255f);
             var sel = new byte[w * h];
 
+            // Similarity is measured in HSV, not as a per-channel RGB box: shading moves all three
+            // channels together, so a flat RGB box only catches the mid-tones and the selection comes
+            // out as scattered patches. Hue is what identifies "the same color", so it gets the tight
+            // band; saturation and value get much wider bands so lit and shaded parts of the same color
+            // stay in. Near-gray colors have no meaningful hue, so they fall back to the RGB box.
+            Color.RGBToHSV((Color)seed, out float seedH, out float seedS, out float seedV);
+            bool seedGray = seedS < 0.08f || seedV < 0.04f;
+            float t01 = Mathf.Clamp01(tolerance);
+            float hueTol = t01 * 0.5f;
+            float satTol = t01 * 2f;
+            float valTol = t01 * 4f;
+
             bool Match(Color32 c)
             {
-                return Mathf.Abs(c.r - seed.r) <= tol && Mathf.Abs(c.g - seed.g) <= tol &&
-                       Mathf.Abs(c.b - seed.b) <= tol && Mathf.Abs(c.a - seed.a) <= tol;
+                if (Mathf.Abs(c.a - seed.a) > tol) return false;
+                if (seedGray)
+                    return Mathf.Abs(c.r - seed.r) <= tol && Mathf.Abs(c.g - seed.g) <= tol &&
+                           Mathf.Abs(c.b - seed.b) <= tol;
+                Color.RGBToHSV((Color)c, out float h, out float s, out float v);
+                if (s < 0.08f) return false;
+                float dh = Mathf.Abs(h - seedH);
+                dh = Mathf.Min(dh, 1f - dh);
+                return dh <= hueTol && Mathf.Abs(s - seedS) <= satTol && Mathf.Abs(v - seedV) <= valTol;
             }
 
             if (!contiguous)

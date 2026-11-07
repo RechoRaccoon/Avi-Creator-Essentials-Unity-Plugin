@@ -204,7 +204,7 @@ namespace AviCreatorEssentials
                         m_LassoPoints.Add(m_Mouse);
                         break;
                     case PaintTool.ColorRecolor:
-                        ColorRecolorAt(LocalToUV(m_Mouse));
+                        ColorRecolorAt(LocalToUV(m_Mouse), shift, ctrl);
                         break;
                 }
             }
@@ -647,8 +647,8 @@ namespace AviCreatorEssentials
             ctx.Render();
         }
 
-        /// <summary>Color recolor: sample the color under the click and give every matching pixel on the active layer its own Hue/Saturation layer.</summary>
-        void ColorRecolorAt(Vector2 uv)
+        /// <summary>Color recolor: sample the color under the click and recolor every matching pixel on the active layer. Plain click picks a new color for the layer, Shift-click adds to the selection, Ctrl/Cmd-click takes away.</summary>
+        void ColorRecolorAt(Vector2 uv, bool add, bool subtract)
         {
             var s = ctx.session;
             var set = Set;
@@ -659,9 +659,7 @@ namespace AviCreatorEssentials
                 return;
             }
             if (!set.initialized) s.InitializeSet(set);
-            var msg = s.AddColorRecolorLayer(set, uv, ctx.colorTolerance, ctx.colorContiguous, ctx.colorSampleLayer);
-            if (msg != null) ctx.ShowHint(msg);
-            else ctx.ShowHint("Hue/Saturation layer added for that color — shift Hue in the Adjust section.");
+            ctx.ShowHint(s.ColorRecolorClick(set, uv, ctx.colorTolerance, ctx.colorContiguous, ctx.colorSampleLayer, ctx.primary, add, subtract));
             ctx.Render();
         }
 

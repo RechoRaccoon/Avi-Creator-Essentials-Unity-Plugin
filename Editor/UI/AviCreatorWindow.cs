@@ -758,7 +758,7 @@ namespace AviCreatorEssentials
                 T(PaintTool.Image, IconKind.Image, "Image (T) — move, scale and rotate image layers");
                 T(PaintTool.Select, IconKind.Select, "Select UV islands or polygons (S). Painting then stays inside the selection.");
                 T(PaintTool.LassoRecolor, IconKind.Select, "Lasso recolor (L) — draw a loop around part of a layer in the texture view to recolor just what's inside it");
-                T(PaintTool.ColorRecolor, IconKind.Theme, "Color recolor (C) — click a color on the texture or the model to give every pixel of that color its own Hue/Saturation layer, then shift the hue");
+                T(PaintTool.ColorRecolor, IconKind.Theme, "Color recolor (C) — click a color on the texture or the model to recolor every pixel of that color to the color wheel's color. Shift-click adds to the selection, Ctrl-click takes away");
                 T(PaintTool.Transform, IconKind.Move, "Transform (V) — pick up part of a layer (draw around it, or click a color) and move, scale, rotate or warp it");
             }
             else
@@ -906,7 +906,10 @@ namespace AviCreatorEssentials
             if (m_SuppressLayerColor || m_Session == null || !m_View.pickerEditsLayer || m_Ctx.strokeActive || m_Ctx.PoseMode) return;
             var set = m_Session.ActiveSet;
             var layer = set?.ActiveLayer;
-            if (layer == null || !layer.HasEditableColor || set.editingMask) return;
+            if (layer == null || !layer.HasEditableColor) return;
+            // A Recolor layer keeps following the wheel even while its mask is being edited, so the
+            // Color Recolor tool's layer tracks the wheel color live; other layers stay as they were.
+            if (set.editingMask && !(layer.kind == LayerKind.Adjustment && layer.adjMode == AdjustMode.Recolor)) return;
             if (layer.EditableColor == m_Ctx.primary) return;
             var c = m_Ctx.primary;
             m_Session.EditLayer(set, layer, "Layer color", l => l.EditableColor = c);
@@ -1085,7 +1088,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Image: return "Import an image from the Layers section, then drag it on the model or in the texture view.";
                 case PaintTool.Transform: return "Draw around part of the layer in the texture view, or click a color, to pick it up. Then drag, scale, rotate or warp it. Enter applies, Esc cancels.";
                 case PaintTool.Gradient: return "Drag across the model from where the gradient starts to where it ends. It follows the model in 3D, across every UV seam. Esc cancels.";
-                case PaintTool.ColorRecolor: return "Click a color on the model or texture. Every pixel of that color gets its own Hue/Saturation layer — shift Hue in the Adjust section.";
+                case PaintTool.ColorRecolor: return "Click a color on the model or texture to recolor every pixel of that color to the color wheel's color. Shift-click adds more, Ctrl-click takes some away.";
                 case PaintTool.LassoRecolor: return "Draw a loop around part of the selected layer in the texture view to recolor just what's inside it.";
                 default:
                     return "Left-drag to paint. Right-drag orbits, middle-drag pans, scroll zooms. Right-click for the color wheel. Ctrl+right-drag resizes the brush.";

@@ -526,7 +526,7 @@ namespace AviCreatorEssentials
                     ctx.ShowHint("Lasso recolor works in the texture (2D) view: draw a loop around the area there.");
                     break;
                 case PaintTool.ColorRecolor:
-                    ColorRecolorAt(m_Mouse);
+                    ColorRecolorAt(m_Mouse, shift, ctrl);
                     break;
             }
         }
@@ -961,8 +961,8 @@ namespace AviCreatorEssentials
             s.engine.CoverTriangles(stroke, set, e, mh.submesh, tris);
         }
 
-        /// <summary>Color recolor: sample the color under the cursor on the model and give every matching pixel on that material's active layer its own Hue/Saturation layer.</summary>
-        void ColorRecolorAt(Vector2 local)
+        /// <summary>Color recolor: sample the color under the cursor on the model and recolor every matching pixel on that material's active layer. Plain click picks a new color for the layer, Shift-click adds to the selection, Ctrl/Cmd-click takes away.</summary>
+        void ColorRecolorAt(Vector2 local, bool add, bool subtract)
         {
             var s = ctx.session;
             if (!Raycast(local, out var h)) return;
@@ -977,9 +977,7 @@ namespace AviCreatorEssentials
             if (!set.initialized) s.InitializeSet(set);
             var e = s.meshes.entries[h.entry];
             var uv = e.InterpolateUV(h, set.uvChannel);
-            var msg = s.AddColorRecolorLayer(set, uv, ctx.colorTolerance, ctx.colorContiguous, ctx.colorSampleLayer);
-            if (msg != null) ctx.ShowHint(msg);
-            else ctx.ShowHint("Hue/Saturation layer added for that color — shift Hue in the Adjust section.");
+            ctx.ShowHint(s.ColorRecolorClick(set, uv, ctx.colorTolerance, ctx.colorContiguous, ctx.colorSampleLayer, ctx.primary, add, subtract));
             ctx.Render();
         }
 

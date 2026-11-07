@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.9
+
+- Color recolor tool (C) now makes a Recolor layer by default: click a color and every pixel of that color becomes the color wheel's color, shading kept, and turning the wheel follows live. Clicking again picks a different color for the same layer instead of making a new one; Shift-click adds more colors to the selection and Ctrl-click (Cmd on Mac) takes colors away. The color match is now measured by hue, so the lit and shaded parts of the same color are all picked up instead of scattered patches. Fixed the red selection tint showing on the unselected area instead of the selected one.
+
 ## 0.14.8
 
 - New Color recolor tool (C): click a color on the texture or the model and every pixel of that color on the selected layer gets its own Hue/Saturation layer, masked to just those pixels — the two green sleeves change together even though they are separate islands. Shift Hue in the Adjust section and the hue changes while shading and detail stay. The Tolerance slider catches the shade variants, and Merge down bakes it into the layer below.

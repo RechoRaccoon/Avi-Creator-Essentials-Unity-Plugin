@@ -291,15 +291,25 @@ namespace AviCreatorEssentials
             return layer;
         }
 
+        /// <summary>The active layer when the Color Recolor tool can extend it instead of making a new layer:
+        /// an adjustment layer (Recolor, or Hue/Saturation from before 0.14.9) with a mask.</summary>
+        PaintLayer ColorRecolorTarget(TextureSet set)
+        {
+            var layer = set?.ActiveLayer;
+            if (layer == null || layer.kind != LayerKind.Adjustment) return null;
+            if (layer.adjMode != AdjustMode.Recolor && layer.adjMode != AdjustMode.HueSatLight) return null;
+            if (!layer.HasMask || layer.mask == null) return null;
+            return layer;
+        }
+
         /// <summary>
-        /// Select-by-color recolor: builds a mask of every pixel on the active layer whose color is within
-        /// tolerance of the one at uv, then adds a Hue/Saturation adjustment layer limited to that mask,
-        /// clipped to the layer below. The Hue slider (Adjust section) then shifts just those pixels' hue —
-        /// the shader rotates hue in HSV space, so saturation, brightness, shading and detail stay — live on
-        /// the model. The new layer's mask is shown tinted red in the texture view, and painting refines it.
-        /// Returns a message for the user when nothing could be selected.
+        /// Select-by-color recolor, driven by the Color Recolor tool (C).
+        /// Plain click picks a new color for the active recolor layer, or makes a new Recolor layer when there
+        /// is none — the layer takes the color wheel's current color, so it matches whatever is selected there.
+        /// Shift+click adds the clicked color's region to the same layer's mask; Ctrl/Cmd+click takes it away.
+        /// The mask is shown tinted red in the texture view. Returns the hint to show the user.
         /// </summary>
-        public string AddColorRecolorLayer(TextureSet set, Vector2 uv, float tolerance, bool contiguous, bool sampleLayer)
+        public string ColorRecolorClick(TextureSet set, Vector2 uv, float tolerance, bool contiguous, bool sampleLayer, Color targetColor, bool add, bool subtract)
         {
             if (set == null) return "Pick a material first.";
             if (set.IsMirrored) return "This material live-mirrors another — recolor on that material instead.";
@@ -322,18 +332,69 @@ namespace AviCreatorEssentials
                 Object.DestroyImmediate(tex);
                 return "There's nothing painted on this layer there — click a colored pixel.";
             }
-            var maskRT = engine.NewMaskRT(set, 0f);
+
+            var target = ColorRecolorTarget(set);
+            if (target == null)
+            {
+                var maskRT = engine.NewMaskRT(set, 0f);
+                CopySelectionToMask(tex, maskRT);
+                Object.DestroyImmediate(tex);
+                // Recolor by default: the area's average becomes the color wheel's color, shading kept.
+                AddAdjustmentLayer(set, AdjustMode.Recolor, targetColor, maskRT);
+                // The texture view tints the mask red while it is being edited, so the selection is visible.
+                set.editingMask = true;
+                return "Recolor layer added for that color — it follows the color wheel.";
+            }
+
+            // Extend the same layer's mask instead of making a new layer.
+            if (add)
+                PixelEdit(set, target.mask, "Add to recolor selection", () => MergeSelectionIntoMask(tex, target.mask, true));
+            else if (subtract)
+                PixelEdit(set, target.mask, "Remove from recolor selection", () => MergeSelectionIntoMask(tex, target.mask, false));
+            else
+                PixelEdit(set, target.mask, "Recolor selection", () => CopySelectionToMask(tex, target.mask));
+            Object.DestroyImmediate(tex);
+            // Recolor maps the masked area's average onto the target color, so re-measure after the mask changes.
+            if (target.adjMode == AdjustMode.Recolor) MeasureSource(set, target);
+            set.editingMask = true;
+            return add ? "Added to the recolor selection."
+                : subtract ? "Removed from the recolor selection."
+                : target.adjMode == AdjustMode.Recolor
+                    ? "Recolor layer updated for that color — it follows the color wheel."
+                    : "Selection updated — shift Hue in the Adjust section.";
+        }
+
+        /// <summary>Copies a FloodSelect result (R8, white = selected) into a mask RenderTexture.</summary>
+        static void CopySelectionToMask(Texture2D sel, RenderTexture mask)
+        {
             var comp = APResources.Composite;
             comp.SetFloat(APIds.CopyMode, 1f);
             comp.SetFloat(APIds.SrcToGamma, 0f);
             var prev = RenderTexture.active;
-            Graphics.Blit(tex, maskRT, comp, CompPass.Copy);
+            Graphics.Blit(sel, mask, comp, CompPass.Copy);
             RenderTexture.active = prev;
+        }
+
+        /// <summary>Merges a FloodSelect result into an existing mask: add keeps the brighter of the two per
+        /// pixel, subtract keeps only what the new selection does not cover.</summary>
+        static void MergeSelectionIntoMask(Texture2D sel, RenderTexture mask, bool add)
+        {
+            int w = sel.width, h = sel.height;
+            var cur = APUtil.ReadToTexture(mask);
+            var curPx = cur.GetPixels32();
+            var selPx = sel.GetPixels32();
+            var merged = new byte[w * h];
+            for (int i = 0; i < merged.Length; i++)
+            {
+                int a = curPx[i].r, b = selPx[i].r;
+                merged[i] = add ? (byte)Mathf.Max(a, b) : (byte)(a * (255 - b) / 255);
+            }
+            Object.DestroyImmediate(cur);
+            var tex = new Texture2D(w, h, TextureFormat.R8, false, true) { hideFlags = HideFlags.HideAndDontSave };
+            tex.LoadRawTextureData(merged);
+            tex.Apply(false);
+            CopySelectionToMask(tex, mask);
             Object.DestroyImmediate(tex);
-            AddAdjustmentLayer(set, AdjustMode.HueSatLight, Color.white, maskRT);
-            // The texture view tints the mask red while it is being edited, so the selection is visible.
-            set.editingMask = true;
-            return null;
         }
 
         /// <summary>Measures the current colors under the layer's mask (what Recolor and Match start from).</summary>

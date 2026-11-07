@@ -46,7 +46,7 @@ The painter works on a private copy of your avatar. Your scene, materials and te
 | Steadier lines | Brush → Stabilizer: set the intensity, Smooth or Rope mode |
 | Opacity | **1** … **0** |
 | Fill an area | **G**, then click a UV island, mesh part, material or similar color |
-| Recolor one color | **C**, then click a color — every pixel of that color gets its own Hue/Saturation layer; shift Hue in the Adjust section |
+| Recolor one color | **C**, then click a color — every pixel of that color is recoloured to the color wheel's color; Shift-click adds to the selection, Ctrl-click takes away |
 | 3D gradient | **D**, then drag across the model |
 | Pick a color | **I**, then click |
 | Undo / redo | Ctrl+Z / Ctrl+Y |
@@ -88,7 +88,7 @@ Stars that shift as you look around (parallax, matcap, World Pos) are worked out
 - **Hue / Saturation / Lightness** shifts the existing colors.
 - **Match colors** makes the area look like another one, shade for shade (dark rim, mid tones and highlights all line up). Example for two different-colored eyes: select the eye you want to change, add a *Match colors* layer, then select the other eye and press **Use selected area as reference**.
 
-**Recolor one color.** Press **C** (Color recolor tool) and click a color on the texture or the model. Every pixel of that color on the selected layer — within the **Tolerance** slider — gets its own Hue/Saturation layer, masked to just those pixels, so the two green sleeves change together even though they are separate islands. Shift **Hue** in the Adjust section and the hue changes while shading and detail stay; the texture view tints the selection red, and you can paint the mask to refine it. **Merge down** in the tool's options bakes it into the layer below.
+**Recolor one color.** Press **C** (Color recolor tool) and click a color on the texture or the model. Every pixel of that color on the selected layer — within the **Tolerance** slider — gets its own Recolor layer, masked to just those pixels, so the two green sleeves change together even though they are separate islands. The layer takes the color wheel's color and follows it when you turn the wheel, while shading and detail stay; the texture view tints the selection red, and you can paint the mask to refine it. Click again to pick a different color for the same layer, **Shift**-click to add more colors to it, **Ctrl**-click to take colors away. The Adjust section can switch the layer to Hue/Saturation instead. **Merge down** in the tool's options bakes it into the layer below.
 
 To make two sides identical instead, use **Mirror texture** in the Layers **⋯** menu: it copies the left half of the texture onto the right half (or any other direction) as a new layer. With an area selected, the **Mirror…** button next to the selection count copies just that area to its flipped spot on the texture. This works when the UV layout is symmetric, as on most avatars.
 

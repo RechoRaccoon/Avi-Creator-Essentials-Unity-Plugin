@@ -321,7 +321,7 @@ Shader "Hidden/AviCreatorEssentials/Composite"
         if (_OverlayMaskView > 0.5)
         {
             float m = AP_SAMPLE_LOD(_MaskTex, suv, 0).r;
-            rgb = lerp(rgb, _OverlayColor.rgb, (1.0 - m) * _OverlayColor.a);
+            rgb = lerp(rgb, _OverlayColor.rgb, m * _OverlayColor.a);
         }
         if (_SelOverlay > 0.5) rgb = AP_DimUnselected(rgb, suv);
         if (!inside) rgb *= 0.55;
