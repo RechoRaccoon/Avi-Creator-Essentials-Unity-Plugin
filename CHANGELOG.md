@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.11
+
+- Color recolor (C) now works in HSV instead of scaling RGB: bright pixels keep the target color's hue and saturation at full brightness instead of clipping to white, so pale colors shift evenly across the whole area. Same fix in the Lasso recolor.
+
 ## 0.14.10
 
 - Fixed the Color recolor tool (C) washing pale colors out to white in the highlights: the recolor now scales the chosen color by each pixel's brightness instead of adding the same brightness to every channel, so bright spots stay pink instead of going white. Dark colors already looked right and are unchanged. Same fix in the Lasso recolor.

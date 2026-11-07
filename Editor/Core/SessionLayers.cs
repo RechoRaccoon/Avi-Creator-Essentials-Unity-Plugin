@@ -857,8 +857,9 @@ namespace AviCreatorEssentials
         /// Lasso recolor: recolors only the pixels inside a freehand loop on the active layer, to the given colour.
         /// Transparent pixels are left alone and alpha is preserved. This is NOT a multiply tint (black x any colour
         /// is still black, which is why the normal Recolor adjustment never changes black text): the colour is
-        /// replaced while the pixel's shading is kept, using the same luminance math as the Recolor adjustment
-        /// (AP_Composite frag_adjust: the area's mean luminance becomes the new colour's luminance, detail kept) —
+        /// replaced while the pixel's shading is kept, using the same HSV math as the Recolor adjustment
+        /// (AP_Composite frag_adjust: the target's hue and saturation, the pixel's value scaled so the area's
+        /// mean value becomes the target's value, detail kept) —
         /// and pixels that are essentially black ink get the new colour at full strength, because black text's shape
         /// lives in its alpha, not its luminance. An image layer is rasterized first (the same as painting on one),
         /// as part of the same undo step. Returns a message for the user when nothing could be recoloured.
@@ -880,32 +881,38 @@ namespace AviCreatorEssentials
             var tex = APUtil.ReadToTexture(layer.content);
             var px = tex.GetPixels32();
             Object.DestroyImmediate(tex);
-            // First pass: how much shading is there to keep? Mean luminance of the affected pixels, like the
-            // Recolor adjustment's _SrcMean.
-            float meanLum = 0f;
+            // First pass: how much shading is there to keep? Mean value (brightest channel) of the affected
+            // pixels, like the Recolor adjustment's _SrcMean.
+            float meanV = 0f;
             int count = 0;
             for (int i = 0; i < px.Length; i++)
             {
                 if (mask[i] == 0 || px[i].a == 0) continue;
-                meanLum += Lum(px[i]);
+                meanV += Mathf.Max(px[i].r, Mathf.Max(px[i].g, px[i].b)) / 255f;
                 count++;
             }
             if (count == 0) return "There's nothing painted on this layer inside the loop.";
-            meanLum = Mathf.Max(meanLum / count, 0.03f);
+            meanV = Mathf.Max(meanV / count, 0.03f);
+            Color.RGBToHSV(target, out float tH, out float tS, out float tV);
             // Second pass: recolor. Black ink (luminance ~0) gets the new colour at full strength — its shape is
-            // in the alpha, so there is no shading to scale. Everything else is the target colour SCALED by the
-            // pixel's brightness relative to the mean, the same as the Recolor adjustment: scaling keeps the hue
-            // and saturation, so pale colours stay pale in the highlights instead of washing out to white the way
-            // an additive luminance shift did. Alpha is never touched.
+            // in the alpha, so there is no shading to scale. Everything else takes the target's hue and
+            // saturation with its own value scaled so the mean becomes the target's value, the same as the
+            // Recolor adjustment: in HSV the brightest pixels stay the target colour at full brightness instead
+            // of clipping to white. Alpha is never touched.
             var targetVec = new Vector3(target.r, target.g, target.b);
             for (int i = 0; i < px.Length; i++)
             {
                 if (mask[i] == 0 || px[i].a == 0) continue;
                 var p = px[i];
                 float lum = Lum(p);
-                Vector3 recoloured = lum <= 0.02f
-                    ? targetVec
-                    : targetVec * (lum / meanLum);
+                float v = Mathf.Max(p.r, Mathf.Max(p.g, p.b)) / 255f;
+                Vector3 recoloured;
+                if (lum <= 0.02f) recoloured = targetVec;
+                else
+                {
+                    Color rc = Color.HSVToRGB(tH, tS, Mathf.Clamp01(v * tV / meanV));
+                    recoloured = new Vector3(rc.r, rc.g, rc.b);
+                }
                 p.r = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.x * 255f), 0, 255);
                 p.g = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.y * 255f), 0, 255);
                 p.b = (byte)Mathf.Clamp(Mathf.RoundToInt(recoloured.z * 255f), 0, 255);
