@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.22
+
+- The Major Colors popup now has a hex code box under the wheel: type or paste a hex code (with or without the #) and press Enter to set the row's color, just like moving the wheel. Bad input does nothing — the box just goes back to the current color.
+
 ## 0.14.21
 
 - Fixed the 2D texture view sometimes staying blank until a stroke was drawn on the model: a first render that failed or had nothing to show yet used to eat the render request and never ask again, so the view only appeared once a stroke requested a render. It now retries the next few updates until it actually draws, and asks again when there is nothing to show yet instead of settling on white.

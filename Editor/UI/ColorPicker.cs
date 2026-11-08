@@ -43,7 +43,7 @@ namespace AviCreatorEssentials
         /// <summary>Raised when a recent color or swatch is clicked (the quick popup closes on it).</summary>
         public event Action SwatchPicked;
 
-        /// <param name="compact">Just the wheel and the color lists, for the right-click popup in the viewports.</param>
+        /// <param name="compact">Just the wheel, the hex entry and the color lists, for the right-click popup in the viewports.</param>
         public ColorPicker(PainterContext ctx, bool compact = false)
         {
             m_Ctx = ctx;
@@ -128,8 +128,13 @@ namespace AviCreatorEssentials
             });
             hexRow.Add(m_Hex);
             hexRow.Add(W.Spacer());
-            hexRow.Add(new W.Segmented(new[] { "RGB", "HSV" }, () => m_HsvMode ? 1 : 0, i => { m_HsvMode = i == 1; Refresh(); }));
-            if (!compact) Add(hexRow);
+            // The RGB/HSV switch only relabels the sliders, which the compact popup
+            // doesn't show — keep it on the full Color panel only.
+            if (!compact) hexRow.Add(new W.Segmented(new[] { "RGB", "HSV" }, () => m_HsvMode ? 1 : 0, i => { m_HsvMode = i == 1; Refresh(); }));
+            // The hex row shows in the compact popup too (the Major Colors rows and the
+            // viewport right-click popup share it): same field, same live apply as the
+            // full panel — type a hex, press Enter, and the row recolors like a wheel move.
+            Add(hexRow);
 
             m_SliderBox = W.Column("ap-color-sliders");
             for (int i = 0; i < 4; i++)
