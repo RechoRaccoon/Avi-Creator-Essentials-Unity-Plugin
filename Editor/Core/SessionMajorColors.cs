@@ -21,6 +21,14 @@ namespace AviCreatorEssentials
 
     public partial class APSession
     {
+        /// <summary>Major Colors rows for one material (see MajorColorsPanel): the detected rows,
+        /// their picked target colors and whether each mask was hand-edited. Lives on the session,
+        /// not the panel, so the project file can save and restore the setup across reloads; the
+        /// masks themselves already persist as the "Major: &lt;name&gt;" layers' mask PNGs.
+        /// The panel reads these through PainterContext, which forwards to the session.</summary>
+        public readonly List<MajorColor> majorColors = new List<MajorColor>();
+        public TextureSet majorColorSet;  // the material the detected major colors belong to
+
         struct MajorCell
         {
             public int count;

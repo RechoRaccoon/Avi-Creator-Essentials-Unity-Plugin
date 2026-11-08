@@ -176,6 +176,7 @@ namespace AviCreatorEssentials
         protected readonly Label hudCenter;
         protected RenderTexture rt;
         bool m_RenderRequested = true;
+        int m_ConsecutiveFailures;  // failed renders in a row; a transient first-render failure retries instead of leaving the view blank
         protected int msaa = 1;
         protected int depthBits;
 
@@ -244,14 +245,21 @@ namespace AviCreatorEssentials
             if (!m_RenderRequested || panel == null || ctx.session == null) return;
             if (resolvedStyle.display == DisplayStyle.None || W < 4 || H < 4) return;
             m_RenderRequested = false;
-            EnsureRT();
             try
             {
+                EnsureRT();
                 DoRender(rt);
+                m_ConsecutiveFailures = 0;
             }
             catch (Exception e)
             {
                 Debug.LogException(e);
+                // A transient first-render failure used to consume the request and leave the
+                // view blank until a stroke requested a render (the 2D view sometimes only
+                // appeared after drawing on the model). Retry the next few editor updates
+                // instead; after five failures in a row it stops asking, so a genuinely
+                // broken render doesn't spam the console every frame.
+                if (++m_ConsecutiveFailures < 5) m_RenderRequested = true;
             }
             image.MarkDirtyRepaint();
             overlay.MarkDirtyRepaint();

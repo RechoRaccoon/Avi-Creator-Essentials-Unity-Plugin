@@ -44,7 +44,26 @@ namespace AviCreatorEssentials
         // Hidden from the painter (see TextureSet.hidden). Defaults to false,
         // so older saves load with every material visible.
         public bool hidden;
+        // Major Colors rows for this material (only filled for the material the rows belong
+        // to): the detected rows, their picked target colors and whether each mask was
+        // hand-edited. The masks themselves already persist as the "Major: <name>" layers'
+        // mask PNGs; these rows are what puts the panel back the way it was after a reload.
+        // Templates don't carry them: a template is a layer layout for another avatar.
+        public List<MajorColorData> major = new List<MajorColorData>();
         public List<LayerData> layers = new List<LayerData>();
+    }
+
+    [Serializable]
+    class MajorColorData
+    {
+        public string name;
+        public Color color;              // mean color of the detected cluster
+        public float coverage;           // share of the material's opaque pixels
+        public float valMean, valMin, valMax;
+        public int[] cellKeys;           // bin keys the auto mask is rasterized from — needed to rebuild the mask if the row's layer is gone
+        public Color target;             // the picked color (also on the layer's adjColor, but the row keeps it even if the layer was deleted)
+        public string layerId;           // the "Major: <name>" Recolor layer, if one was made
+        public bool maskEdited;          // the mask was painted by hand — a later Detect keeps it instead of rebuilding it
     }
 
     [Serializable]
@@ -298,6 +317,28 @@ namespace AviCreatorEssentials
                         sd.layers.Add(ld);
                         li++;
                     }
+                    // Major Colors setup for this material (not for templates): the rows,
+                    // their picked colors and which masks were hand-edited, so a reload puts
+                    // the panel back the way it was instead of starting empty.
+                    if (!asTemplate && s.majorColorSet == set && s.majorColors.Count > 0)
+                    {
+                        foreach (var mc in s.majorColors)
+                        {
+                            sd.major.Add(new MajorColorData
+                            {
+                                name = mc.name,
+                                color = mc.color,
+                                coverage = mc.coverage,
+                                valMean = mc.valMean,
+                                valMin = mc.valMin,
+                                valMax = mc.valMax,
+                                cellKeys = new List<int>(mc.cellKeys).ToArray(),
+                                target = mc.target,
+                                layerId = mc.layerId,
+                                maskEdited = mc.maskEdited,
+                            });
+                        }
+                    }
                     data.sets.Add(sd);
                     si++;
                 }
@@ -360,6 +401,10 @@ namespace AviCreatorEssentials
             var warnings = new List<string>();
             var data = JsonUtility.FromJson<ProjectData>(File.ReadAllText(Path.Combine(folder, FileName)));
             s.history.Clear();
+            // Loading another project drops the previous Major Colors setup; it comes back
+            // from this file's rows below, if it saved any.
+            s.majorColors.Clear();
+            s.majorColorSet = null;
             try
             {
                 int si = 0;
@@ -373,6 +418,7 @@ namespace AviCreatorEssentials
                         continue;
                     }
                     LoadSetLayers(s, sd, folder, set, false);
+                    if (sd.major != null && sd.major.Count > 0) RestoreMajorColors(s, set, sd.major);
                 }
                 // Live mirror links, resolved after every set exists (a source
                 // set may be saved after its target). Links to a missing set are
@@ -482,6 +528,43 @@ namespace AviCreatorEssentials
                 if (l.kind == LayerKind.Image) s.engine.RenderImageLayer(set, l);
             set.dirty = true;
             s.ForceAssign(set);
+        }
+
+        /// <summary>Restores saved Major Colors rows onto a set: the row's detected color,
+        /// coverage, picked target and hand-edited flag come back verbatim, and the layer link is
+        /// re-checked against the layers this load restored — a row whose layer is gone (deleted
+        /// before the save) keeps its target and gets a fresh layer on its next color change or
+        /// mask edit instead of pointing at nothing. The masks themselves are already on the
+        /// restored layers (their mask PNGs), so hand edits survive the reload, and a later
+        /// Detect adopts the layers by name with the restored hand-edited flags.</summary>
+        static void RestoreMajorColors(APSession s, TextureSet set, List<MajorColorData> rows)
+        {
+            s.majorColors.Clear();
+            s.majorColorSet = set;
+            foreach (var d in rows)
+            {
+                var mc = new MajorColor
+                {
+                    name = d.name,
+                    color = d.color,
+                    coverage = d.coverage,
+                    valMean = d.valMean,
+                    valMin = d.valMin,
+                    valMax = d.valMax,
+                    cellKeys = d.cellKeys != null ? new HashSet<int>(d.cellKeys) : new HashSet<int>(),
+                    target = d.target,
+                    layerId = d.layerId,
+                    maskEdited = d.maskEdited,
+                };
+                if (mc.HasLayer)
+                {
+                    bool found = false;
+                    foreach (var l in set.layers)
+                        if (l.id == mc.layerId) { found = true; break; }
+                    if (!found) mc.layerId = null;
+                }
+                s.majorColors.Add(mc);
+            }
         }
 
         public class ApplyTemplateResult

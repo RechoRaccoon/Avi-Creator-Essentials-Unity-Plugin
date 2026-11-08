@@ -895,6 +895,11 @@ namespace AviCreatorEssentials
         /// </summary>
         void SyncPickerToLayer(PaintLayer layer)
         {
+            // While a Major mask is being edited the wheel reads black or white, not the
+            // row's recolor color: skip the layer-follow sync until the edit ends. The guard
+            // is before the layer-id update, so ending the edit re-syncs the wheel to the
+            // restored layer on the next rebuild instead of staying stuck on white/black.
+            if (m_Ctx.majorMaskEdit != null) return;
             string id = layer != null ? layer.id + "|" + layer.kind + "|" + (layer.kind == LayerKind.Adjustment ? layer.adjMode.ToString() : "") : null;
             if (id == m_LastActiveLayerId) return;
             m_LastActiveLayerId = id;
@@ -1107,6 +1112,9 @@ namespace AviCreatorEssentials
         void OnToolChanged()
         {
             if (m_Session == null) return;
+            // While a Major mask is being edited the wheel follows the tool: white adds with
+            // the Brush, black removes with the Eraser.
+            if (m_Ctx.majorMaskEdit != null) m_Ctx.SetPrimary(m_Ctx.Tool == PaintTool.Eraser ? Color.black : Color.white);
             // Leaving the Transform tool puts any floating piece down, like committing a transform in Photoshop.
             if (m_LastTool == PaintTool.Transform && (m_Ctx.Tool != PaintTool.Transform || m_Ctx.PoseMode))
                 m_Session.ApplyAllFloating();

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.21
+
+- Fixed the 2D texture view sometimes staying blank until a stroke was drawn on the model: a first render that failed or had nothing to show yet used to eat the render request and never ask again, so the view only appeared once a stroke requested a render. It now retries the next few updates until it actually draws, and asks again when there is nothing to show yet instead of settling on white.
+- Fixed the color wheel while editing a Major mask: switching to a second row's mask used to drag the wheel to that row's recolor color, and ending the edit left the previous layer stuck in mask-editing mode, so the earlier edit's state broke. The wheel now reads white for the Brush and black for the Eraser the whole time a mask is being edited (and follows the tool if it is switched mid-edit), and ending an edit puts the layer that was active before back, like it should.
+- The Major Colors setup is now remembered across reloads: the detected rows, the color picked for each one, and which masks were painted by hand are saved in the project file, so after reopening the window or reloading scripts the panel shows the same rows and colors with the same masks — no Detect and no re-picking. Hand-painted masks survive the reload too, since the layers' masks were already saved and a later Detect now keeps them instead of rebuilding them.
+
 ## 0.14.20
 
 - Fixed painting a Major mask with the wrong color: the selected color no longer touches the row's recolor at all while its mask is being edited, and the Brush now adds solid white to the mask while the Eraser takes it away, whatever color the wheel holds — before, a dark color painted a grey mask that barely recolored anything.

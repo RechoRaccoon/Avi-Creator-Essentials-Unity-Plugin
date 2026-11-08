@@ -133,8 +133,12 @@ namespace AviCreatorEssentials
         public float colorTolerance = 0.12f;
         public bool colorContiguous;      // false: every matching pixel in the texture (both sleeves at once)
         public bool colorSampleLayer = true;
-        public readonly List<MajorColor> majorColors = new List<MajorColor>();
-        public TextureSet majorColorSet;  // the material the detected major colors belong to
+        // The Major Colors rows live on the session (so the project file can save and restore
+        // the setup across reloads); these just forward to the session's list, with a throwaway
+        // list while no session is open. The panel keeps using m_Ctx.majorColors unchanged.
+        readonly List<MajorColor> m_MajorColorsFallback = new List<MajorColor>();
+        public List<MajorColor> majorColors => session != null ? session.majorColors : m_MajorColorsFallback;
+        public TextureSet majorColorSet { get => session?.majorColorSet; set { if (session != null) session.majorColorSet = value; } }
         // Cleanup for Major Colors masks: smooths each row's mask (removes thin speck
         // lines, fills small holes, keeps fringes off neighboring colors). On by
         // default; only affects masks built after changing it.

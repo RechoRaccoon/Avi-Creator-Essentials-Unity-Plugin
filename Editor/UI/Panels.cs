@@ -487,13 +487,17 @@ namespace AviCreatorEssentials
             m_MajorColorsList = W.Column("ap-major-colors-list");
             Add(m_MajorColorsList);
             // Rebuild when the tool changes (the trigger the Brush panel used to give
-            // this list) and when the active material changes.
+            // this list), when the active material changes, and when the session structure
+            // changes — a project load restores the Major rows into the session, and the
+            // panel only picks them up if it rebuilds on that change too.
             m_Ctx.ToolChanged += RebuildMajorColors;
             if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged += RebuildMajorColors;
+            if (m_Ctx.session != null) m_Ctx.session.StructureChanged += RebuildMajorColors;
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 m_Ctx.ToolChanged -= RebuildMajorColors;
                 if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged -= RebuildMajorColors;
+                if (m_Ctx.session != null) m_Ctx.session.StructureChanged -= RebuildMajorColors;
                 if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
                 if (m_PopupOpen) OnMajorColorPopupClosed();
             });
@@ -663,6 +667,12 @@ namespace AviCreatorEssentials
             if (set == null) { m_Ctx.ShowHint("Pick a material first."); return; }
             if (set.IsMirrored) { m_Ctx.ShowHint("This material live-mirrors another — edit the mask on that material instead."); return; }
             if (m_Ctx.majorMaskEdit != null && m_Ctx.majorMaskEdit != cluster) ExitMajorMaskEdit(false);
+            // Remember the layer to go back to BEFORE making this row's layer: creating it
+            // makes it the active layer, so capturing after would "restore" the edited layer
+            // itself and leave mask editing on after Done — the previous edit's state broke
+            // the moment a second row was edited.
+            m_PrevMaskEditLayer = set.ActiveLayer;
+            m_PrevMaskEditMask = set.editingMask;
             PaintLayer layer = null;
             if (cluster.HasLayer)
                 foreach (var l in set.layers)
@@ -681,12 +691,15 @@ namespace AviCreatorEssentials
                 m_Ctx.ShowHint("That row's layer isn't a Recolor layer anymore — change its color once first.");
                 return;
             }
-            m_PrevMaskEditLayer = set.ActiveLayer;
-            m_PrevMaskEditMask = set.editingMask;
             m_Ctx.majorMaskEdit = cluster;
             s.SetActiveLayer(set, layer, true);
             // Brush (or Eraser, if that's the tool in hand) paints the mask; anything else would do nothing useful here.
             if (m_Ctx.Tool != PaintTool.Brush && m_Ctx.Tool != PaintTool.Eraser) m_Ctx.Tool = PaintTool.Brush;
+            // The wheel reads black or white while a mask is being edited — white adds, black
+            // removes — never the row's recolor color. (The layer-follow in OnPaintColorChanged
+            // is already guarded while editing; the picker sync that dragged the wheel to the
+            // row's color on the next rebuild is guarded in SyncPickerToLayer.)
+            m_Ctx.SetPrimary(m_Ctx.Tool == PaintTool.Eraser ? Color.black : Color.white);
             m_Ctx.Render();
             RebuildMajorColors();
             m_Ctx.ShowHint("Painting " + cluster.name + "'s mask: Brush adds, Eraser removes, Ctrl/Cmd erases and Shift paints. Toggle Edit mask off when done.");
