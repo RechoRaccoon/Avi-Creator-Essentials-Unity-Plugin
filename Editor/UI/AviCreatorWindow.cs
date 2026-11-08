@@ -754,6 +754,7 @@ namespace AviCreatorEssentials
                 T(PaintTool.Eraser, IconKind.Eraser, "Eraser (E)");
                 T(PaintTool.Fill, IconKind.Fill, "Fill (G) — fill a UV island, mesh part, material or similar colors");
                 T(PaintTool.Gradient, IconKind.Gradient, "Gradient (D) — drag across the model for a gradient laid out in 3D, unaffected by UV seams");
+                T(PaintTool.Stripes, IconKind.Stripes, "Stripes (P) — drag across the model for stripes laid out in 3D, unaffected by UV seams");
                 T(PaintTool.Picker, IconKind.Picker, "Color picker (I). Shift-click picks the secondary color.");
                 T(PaintTool.Image, IconKind.Image, "Image (T) — move, scale and rotate image layers");
                 T(PaintTool.Select, IconKind.Select, "Select UV islands or polygons (S). Painting then stays inside the selection.");
@@ -881,7 +882,7 @@ namespace AviCreatorEssentials
             var title = m_BrushSection?.Q<Label>(className: "ap-section-title");
             if (title != null)
                 title.text = m_Ctx.Tool == PaintTool.Fill ? "Fill" : m_Ctx.Tool == PaintTool.Select ? "Select" : m_Ctx.Tool == PaintTool.Transform ? "Transform" :
-                    m_Ctx.Tool == PaintTool.Gradient ? "Gradient" : "Brush";
+                    m_Ctx.Tool == PaintTool.Gradient ? "Gradient" : m_Ctx.Tool == PaintTool.Stripes ? "Stripes" : "Brush";
             foreach (var r in m_TopBarRefresh) r();
             RefreshToolButtons();
             RefreshHistoryButtons();
@@ -1100,6 +1101,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Image: return "Import an image from the Layers section, then drag it on the model or in the texture view.";
                 case PaintTool.Transform: return "Draw around part of the layer in the texture view, or click a color, to pick it up. Then drag, scale, rotate or warp it. Enter applies, Esc cancels.";
                 case PaintTool.Gradient: return "Drag across the model from where the gradient starts to where it ends. It follows the model in 3D, across every UV seam. Esc cancels.";
+                case PaintTool.Stripes: return "Drag across the model: the stripes run around it in 3D, across every UV seam. Esc cancels.";
                 case PaintTool.ColorRecolor: return "Click a color on the model or texture to recolor every pixel of that color to the color wheel's color. Shift-click adds more, Ctrl-click takes some away.";
                 case PaintTool.LassoRecolor: return "Draw a loop around part of the selected layer in the texture view to recolor just what's inside it.";
                 default:
@@ -1232,6 +1234,7 @@ namespace AviCreatorEssentials
                     case KeyCode.E: m_Ctx.Tool = PaintTool.Eraser; break;
                     case KeyCode.G: m_Ctx.Tool = PaintTool.Fill; break;
                     case KeyCode.D: m_Ctx.Tool = PaintTool.Gradient; break;
+                    case KeyCode.P: m_Ctx.Tool = PaintTool.Stripes; break;
                     case KeyCode.I: m_Ctx.Tool = PaintTool.Picker; break;
                     case KeyCode.T: m_Ctx.Tool = PaintTool.Image; break;
                     case KeyCode.S: m_Ctx.Tool = PaintTool.Select; break;

@@ -24,6 +24,7 @@ namespace AviCreatorEssentials
             Select,
             Transform,
             Gradient,
+            Stripes,
         }
 
         enum ImageDrag
@@ -68,6 +69,8 @@ namespace AviCreatorEssentials
         readonly List<TextureSet> m_Candidates = new List<TextureSet>();   // textures a stroke may spread onto as it reaches them
         Vector3 m_GradStart;
         Vector3 m_GradEnd;
+        Vector3 m_StripeStart;
+        Vector3 m_StripeEnd;
         float m_LastDepth = 1f;
         float m_StartRadius;
         float m_StartHardness;
@@ -382,6 +385,9 @@ namespace AviCreatorEssentials
                 case Drag.Gradient:
                     DragGradient();
                     break;
+                case Drag.Stripes:
+                    DragStripes();
+                    break;
                 case Drag.Select:
                     if (ctx.selectLasso && Vector2.Distance(m_SelPoints[m_SelPoints.Count - 1], m_Mouse) > 3f) m_SelPoints.Add(m_Mouse);
                     break;
@@ -428,6 +434,9 @@ namespace AviCreatorEssentials
                     break;
                 case Drag.Gradient:
                     EndGradient(cancelled);
+                    break;
+                case Drag.Stripes:
+                    EndStripes(cancelled);
                     break;
             }
             m_Drag = Drag.None;
@@ -515,6 +524,9 @@ namespace AviCreatorEssentials
                     break;
                 case PaintTool.Gradient:
                     BeginGradient();
+                    break;
+                case PaintTool.Stripes:
+                    BeginStripes();
                     break;
                 case PaintTool.Select:
                     m_Drag = Drag.Select;
@@ -873,6 +885,110 @@ namespace AviCreatorEssentials
             {
                 s.engine.CancelStroke(m_Stroke);
                 if (!touched && !cancelled) ctx.ShowHint("Drag from where the gradient starts to where it ends.");
+            }
+            else
+            {
+                var entry = s.engine.EndStroke(m_Stroke);
+                if (entry != null) s.Push(entry);
+            }
+            m_Stroke = null;
+            ctx.strokeActive = false;
+            s.NotifyStructureChanged();
+            ctx.Render();
+        }
+
+        // ------------------------------------------------------------------ 3D stripes
+
+        void BeginStripes()
+        {
+            var s = ctx.session;
+            if (!Raycast(m_Mouse, out var h))
+            {
+                ctx.ShowHint("Start the stripes on the model.");
+                return;
+            }
+            s.UpdateBounds();
+            SwitchToHitMaterial(h);
+            var active = s.ActiveSet;
+            if (active == null)
+            {
+                ctx.ShowHint("Pick a material to paint on first.");
+                return;
+            }
+            if (active.IsMirrored)
+            {
+                ctx.ShowHint("This material live-mirrors " + active.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
+            // Every selected texture, and with "whole model" the same kind of texture on every material, so one
+            // stripe pattern runs over the entire model.
+            var targets = s.PaintTargets(ctx.brush.wholeModel);
+            foreach (var set in targets)
+                if (!set.initialized) s.InitializeSet(set);
+            m_Stroke = s.engine.BeginStroke(targets, StrokeTool.Paint, ctx.primary, ctx.brush.opacity, "Stripes", Matrix4x4.identity, false);
+            if (!active.editingMask) ctx.colors.Use(ctx.primary);
+            m_StripeStart = m_StripeEnd = h.point;
+            m_Drag = Drag.Stripes;
+            ctx.strokeActive = true;
+        }
+
+        void DragStripes()
+        {
+            if (m_Stroke == null) return;
+            // The end follows the model under the cursor; off the model it slides on the plane facing the camera.
+            if (Raycast(m_Mouse, out var h)) m_StripeEnd = h.point;
+            else if (new Plane(-Cam.Forward, m_StripeStart).Raycast(RayAt(m_Mouse), out float d)) m_StripeEnd = RayAt(m_Mouse).GetPoint(d);
+            if ((m_StripeEnd - m_StripeStart).sqrMagnitude < 1e-10f) return;
+            var s = ctx.session;
+            // The repeat axis comes from the avatar itself, so the stripes stay horizontal or vertical on the model
+            // however it is turned in the scene.
+            var root = s.clone?.transform;
+            Vector3 axis = ctx.stripeOrientation == StripeOrientation.Horizontal
+                ? (root != null ? root.up : Vector3.up)
+                : (root != null ? root.right : Vector3.right);
+            float span = Vector3.Distance(m_StripeStart, m_StripeEnd);
+            var sp = new StripesParams
+            {
+                start = m_StripeStart,
+                axis = axis,
+                period = span / Mathf.Max(1, ctx.stripeCount),
+                width = ctx.stripeWidth,
+                offset = ctx.stripeOffset,
+                colors = ctx.stripeColors.ToArray(),
+            };
+            // Symmetry: the pattern is folded across the avatar's mirror plane, the same plane (avatar space,
+            // axis component negated) the brush's mirrored dab uses, so the other side gets its mirror image.
+            if (ctx.brush.symmetry && s.clone != null)
+            {
+                var r = s.clone.transform;
+                int ax = Mathf.Clamp(ctx.brush.symmetryAxis, 0, 2);
+                var flip = new Vector3(ax == 0 ? -1f : 1f, ax == 1 ? -1f : 1f, ax == 2 ? -1f : 1f);
+                sp.mirror = true;
+                sp.mirrorAxis = ax;
+                sp.worldToLocal = r.worldToLocalMatrix;
+                sp.mirrorMatrix = r.localToWorldMatrix * Matrix4x4.Scale(flip) * r.worldToLocalMatrix;
+                // The side the drag started on keeps the pattern as drawn; a start on the plane itself falls
+                // back to the end's side.
+                float ls = r.InverseTransformPoint(m_StripeStart)[ax];
+                float le = r.InverseTransformPoint(m_StripeEnd)[ax];
+                float side = Mathf.Abs(ls) > 1e-6f ? ls : le;
+                sp.mirrorSide = side >= 0f ? 1f : -1f;
+            }
+            ctx.session.engine.Stripes(m_Stroke, sp);
+            ctx.session.engine.Apply(m_Stroke);
+            ctx.Render();
+        }
+
+        void EndStripes(bool cancelled)
+        {
+            if (m_Stroke == null) return;
+            var s = ctx.session;
+            bool touched = false;
+            foreach (var t in m_Stroke.targets) touched |= t.touched;
+            if (cancelled || !touched)
+            {
+                s.engine.CancelStroke(m_Stroke);
+                if (!touched && !cancelled) ctx.ShowHint("Drag from where the stripes start to where they end.");
             }
             else
             {
@@ -1547,6 +1663,30 @@ namespace AviCreatorEssentials
                 return;
             }
 
+            if (m_Drag == Drag.Stripes)
+            {
+                var a = pr.ToLocal(m_StripeStart);
+                var b = pr.ToLocal(m_StripeEnd);
+                Line(p, a, b, new Color(0, 0, 0, 0.6f), 3f);
+                Line(p, a, b, Color.white, 1.25f);
+                Disc(p, a, 4f, new Color(0, 0, 0, 0.6f));
+                Disc(p, a, 3f, ctx.stripeColors[0]);
+                Disc(p, b, 4f, new Color(0, 0, 0, 0.6f));
+                Disc(p, b, 3f, ctx.stripeColors[ctx.stripeColors.Count - 1]);
+                if (ctx.brush.symmetry && s.clone != null)
+                {
+                    // The mirrored guide, fainter like the brush's mirrored ring.
+                    var ma = pr.ToLocal(MirrorPoint(m_StripeStart));
+                    var mb = pr.ToLocal(MirrorPoint(m_StripeEnd));
+                    Line(p, ma, mb, new Color(1f, 1f, 1f, 0.45f), 1.25f);
+                    var first = ctx.stripeColors[0];
+                    var last = ctx.stripeColors[ctx.stripeColors.Count - 1];
+                    Disc(p, ma, 3f, new Color(first.r, first.g, first.b, 0.45f));
+                    Disc(p, mb, 3f, new Color(last.r, last.g, last.b, 0.45f));
+                }
+                return;
+            }
+
             bool navigating = m_Drag == Drag.Orbit || m_Drag == Drag.Pan || m_Drag == Drag.Zoom;
             if (!m_Inside && m_Drag != Drag.Paint && m_Drag != Drag.BrushSize) return;
             if (navigating) return;
@@ -1587,7 +1727,7 @@ namespace AviCreatorEssentials
                 }
             }
             else if (ctx.Tool == PaintTool.Fill || ctx.Tool == PaintTool.Picker || ctx.Tool == PaintTool.Select || ctx.Tool == PaintTool.Transform ||
-                     ctx.Tool == PaintTool.Gradient)
+                     ctx.Tool == PaintTool.Gradient || ctx.Tool == PaintTool.Stripes)
             {
                 var c = m_Mouse;
                 var col = Color.white;
@@ -1682,6 +1822,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Transform: hudRight.text = "Transform  ·  click a color to pick it up, drag it to move, Enter applies"; break;
                 case PaintTool.Select: hudRight.text = "Select " + (ctx.selectIslands ? "UV islands" : "polygons") + "  ·  Shift add, Ctrl remove"; break;
                 case PaintTool.Gradient: hudRight.text = "Gradient  ·  " + ObjectNames.NicifyVariableName(ctx.gradientShape.ToString()) + "  ·  drag across the model"; break;
+                case PaintTool.Stripes: hudRight.text = "Stripes  ·  " + ObjectNames.NicifyVariableName(ctx.stripeOrientation.ToString()) + "  ·  drag across the model"; break;
                 case PaintTool.ColorRecolor: hudRight.text = "Color recolor  ·  click a color, then shift Hue in Adjust"; break;
             }
         }

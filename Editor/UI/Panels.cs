@@ -20,6 +20,12 @@ namespace AviCreatorEssentials
         readonly VisualElement m_SelectBox;
         readonly VisualElement m_TransformBox;
         readonly VisualElement m_GradientBox;
+        readonly VisualElement m_StripesBox;
+        readonly VisualElement m_StripeColorsRow;
+        readonly List<VisualElement> m_StripeColorFills = new List<VisualElement>();
+        int m_StripePopupIndex = -1;
+        VisualElement m_StripePopupFill;
+        bool m_StripePopupOpen;
         readonly VisualElement m_LassoRecolorBox;
         readonly VisualElement m_ColorRecolorBox;
         readonly VisualElement m_BrushBox;
@@ -117,6 +123,29 @@ namespace AviCreatorEssentials
                 "One gradient runs over every material that uses the same kind of texture (each on its selected layer). " +
                 "Off: only the textures selected in Materials.")));
             Add(m_GradientBox);
+
+            m_StripesBox = W.Column("ap-stripes-options");
+            m_StripesBox.Add(Track(new W.Segmented(new[] { "Horizontal", "Vertical" }, () => (int)m_Ctx.stripeOrientation,
+                i => { m_Ctx.stripeOrientation = (StripeOrientation)i; Changed(); }, new[]
+                {
+                    "Stripes run around the model like hoops; they repeat up the model",
+                    "Stripes run top to bottom; they repeat across the model",
+                })));
+            m_StripeColorsRow = W.Row("ap-row-gap", "ap-wrap", "ap-stripe-colors");
+            m_StripesBox.Add(m_StripeColorsRow);
+            RebuildStripeColors();
+            m_StripesBox.Add(Track(new W.SliderRow("Stripes", 1f, 32f, () => m_Ctx.stripeCount,
+                v => { m_Ctx.stripeCount = Mathf.Clamp(Mathf.RoundToInt(v), 1, 32); Changed(); }, 1f,
+                "How many stripes repeat across the distance you drag")));
+            m_StripesBox.Add(Track(new W.SliderRow("Stripe width", 0.05f, 1f, () => m_Ctx.stripeWidth, v => { m_Ctx.stripeWidth = v; Changed(); }, 100f,
+                "How much of each stripe cycle is colored; the rest is a gap showing what is underneath")));
+            m_StripesBox.Add(Track(new W.SliderRow("Offset", 0f, 1f, () => m_Ctx.stripeOffset, v => { m_Ctx.stripeOffset = v; Changed(); }, 100f,
+                "Slides the pattern along the stripes")));
+            m_StripesBox.Add(Track(new W.SliderRow("Opacity", 0f, 1f, () => B.opacity, v => { B.opacity = v; Changed(); }, 100f)));
+            m_StripesBox.Add(Track(new W.ToggleRow("Whole model", () => B.wholeModel, v => { B.wholeModel = v; Changed(); },
+                "One stripe pattern runs over every material that uses the same kind of texture (each on its selected layer). " +
+                "Off: only the textures selected in Materials.")));
+            Add(m_StripesBox);
 
             m_LassoRecolorBox = W.Column("ap-lasso-recolor-options");
             Add(m_LassoRecolorBox);
@@ -244,6 +273,8 @@ namespace AviCreatorEssentials
                 BrushLibrary.Changed -= RebuildTips;
                 m_Ctx.BrushChanged -= Refresh;
                 m_Ctx.ToolChanged -= RefreshMode;
+                if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
+                if (m_StripePopupOpen) OnStripeColorPopupClosed();
             });
             RebuildTips();
             RefreshMode();
@@ -400,15 +431,92 @@ namespace AviCreatorEssentials
             bool select = m_Ctx.Tool == PaintTool.Select;
             bool transform = m_Ctx.Tool == PaintTool.Transform;
             bool gradient = m_Ctx.Tool == PaintTool.Gradient;
+            bool stripes = m_Ctx.Tool == PaintTool.Stripes;
             bool lassoRecolor = m_Ctx.Tool == PaintTool.LassoRecolor;
             bool colorRecolor = m_Ctx.Tool == PaintTool.ColorRecolor;
             m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
             m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
             m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
             m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
+            m_StripesBox.style.display = stripes ? DisplayStyle.Flex : DisplayStyle.None;
             m_LassoRecolorBox.style.display = lassoRecolor ? DisplayStyle.Flex : DisplayStyle.None;
             m_ColorRecolorBox.style.display = colorRecolor ? DisplayStyle.Flex : DisplayStyle.None;
-            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor ? DisplayStyle.None : DisplayStyle.Flex;
+            m_BrushBox.style.display = fill || select || transform || gradient || stripes || lassoRecolor || colorRecolor ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        /// <summary>Rebuilds the stripe color swatches (one per color, plus add/remove) after the list changes.</summary>
+        void RebuildStripeColors()
+        {
+            m_StripeColorsRow.Clear();
+            m_StripeColorFills.Clear();
+            m_StripeColorsRow.Add(W.Text("Colors"));
+            for (int i = 0; i < m_Ctx.stripeColors.Count; i++)
+            {
+                int index = i;
+                var swatch = W.Swatch(m_Ctx.stripeColors[i], 24, "Stripe color " + (i + 1) + " — click to change it");
+                m_StripeColorFills.Add(swatch.Q<VisualElement>(className: "ap-swatch-fill"));
+                swatch.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button != 0) return;
+                    e.StopPropagation();
+                    OpenStripeColorPopup(index, e.position);
+                });
+                m_StripeColorsRow.Add(swatch);
+            }
+            var add = W.TextButton("+", () =>
+            {
+                if (m_Ctx.stripeColors.Count >= StripesParams.MaxColors) return;
+                m_Ctx.stripeColors.Add(m_Ctx.stripeColors[m_Ctx.stripeColors.Count - 1]);
+                RebuildStripeColors();
+            }, "ap-small");
+            add.tooltip = "Add another stripe color (up to " + StripesParams.MaxColors + ")";
+            m_StripeColorsRow.Add(add);
+            var remove = W.TextButton("-", () =>
+            {
+                if (m_Ctx.stripeColors.Count <= 2) return;
+                m_Ctx.stripeColors.RemoveAt(m_Ctx.stripeColors.Count - 1);
+                RebuildStripeColors();
+            }, "ap-small");
+            remove.tooltip = "Remove the last stripe color (at least two stay)";
+            m_StripeColorsRow.Add(remove);
+        }
+
+        /// <summary>Opens the plugin's own color popup for one stripe color: seeded with that color, so the wheel opens on it.</summary>
+        void OpenStripeColorPopup(int index, Vector2 worldPos)
+        {
+            if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
+            m_StripePopupIndex = index;
+            m_StripePopupFill = index >= 0 && index < m_StripeColorFills.Count ? m_StripeColorFills[index] : null;
+            m_StripePopupOpen = true;
+            m_Ctx.suppressLayerColorFollow = true;
+            m_Ctx.SetPrimary(m_Ctx.stripeColors[index]);
+            m_Ctx.ColorChanged += OnStripeColorPopupColor;
+            QuickColorPopup.Closed += OnStripeColorPopupClosed;
+            var root = panel?.visualTree;
+            if (root == null) { OnStripeColorPopupClosed(); return; }
+            QuickColorPopup.Show(root, m_Ctx, worldPos);
+        }
+
+        /// <summary>While the popup is open, every wheel move recolors the stripe swatch live.</summary>
+        void OnStripeColorPopupColor()
+        {
+            if (m_StripePopupIndex < 0 || m_StripePopupIndex >= m_Ctx.stripeColors.Count) return;
+            m_Ctx.stripeColors[m_StripePopupIndex] = m_Ctx.primary;
+            if (m_StripePopupFill != null) m_StripePopupFill.style.backgroundColor = m_Ctx.primary;
+        }
+
+        /// <summary>Popup closed however it closed: record the final color in history once (not
+        /// every drag tick), stop following the wheel, and leave the swatch showing the final color.</summary>
+        void OnStripeColorPopupClosed()
+        {
+            if (!m_StripePopupOpen) return;
+            m_StripePopupOpen = false;
+            QuickColorPopup.Closed -= OnStripeColorPopupClosed;
+            m_Ctx.ColorChanged -= OnStripeColorPopupColor;
+            m_Ctx.suppressLayerColorFollow = false;
+            if (m_StripePopupIndex >= 0) m_Ctx.colors.Use(m_Ctx.primary);
+            m_StripePopupIndex = -1;
+            m_StripePopupFill = null;
         }
 
         void RebuildTips()

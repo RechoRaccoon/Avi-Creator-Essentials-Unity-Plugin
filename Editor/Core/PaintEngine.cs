@@ -63,6 +63,30 @@ namespace AviCreatorEssentials
         public Matrix4x4 worldToLocal;  // world -> avatar space
     }
 
+    public enum StripeOrientation
+    {
+        Horizontal,   // stripes run around the model like hoops; they repeat up the model
+        Vertical,     // stripes run top to bottom; they repeat across the model
+    }
+
+    /// <summary>Stripes laid over the model in 3D, from one point along a direction.</summary>
+    public struct StripesParams
+    {
+        public const int MaxColors = 8;   // must match the _StripeColors array in AP_Paint.shader
+        public Vector3 start;      // world point the pattern is measured from
+        public Vector3 axis;       // unit world direction the stripes repeat along
+        public float period;       // world length of one full stripe cycle
+        public float width;        // 0..1 fraction of each cycle that is colored (the rest is a gap)
+        public float offset;       // 0..1 phase shift, in cycles
+        public Color[] colors;     // stripe colors, cycled in order (straight alpha, gamma)
+        // Symmetry (the mirror toggle): same fold as gradients (see GradientParams).
+        public bool mirror;
+        public int mirrorAxis;          // 0 X, 1 Y, 2 Z (avatar space)
+        public float mirrorSide;
+        public Matrix4x4 mirrorMatrix;  // world -> mirrored world
+        public Matrix4x4 worldToLocal;  // world -> avatar space
+    }
+
     public class StrokeTarget
     {
         public TextureSet set;
@@ -1423,6 +1447,68 @@ namespace AviCreatorEssentials
                 }
                 m.SetVector(APIds.GradColorA, APUtil.V(a));
                 m.SetVector(APIds.GradColorB, APUtil.V(b));
+                m.SetInt(APIds.UVChannel, t.set.uvChannel);
+                Graphics.SetRenderTarget(t.paint);
+                GL.Clear(false, true, new Color(0, 0, 0, 0));
+                foreach (int pass in passes)
+                {
+                    m.SetPass(pass);
+                    foreach (var u in t.set.users)
+                    {
+                        if (u.renderer < 0 || u.renderer >= m_Meshes.entries.Count) continue;
+                        var e = m_Meshes.entries[u.renderer];
+                        if (!e.Visible || u.submesh >= e.SubmeshCount) continue;
+                        Graphics.DrawMeshNow(e.paintMesh, e.matrix, u.submesh);
+                    }
+                }
+                t.pending = true;
+                t.touched = true;
+            }
+            RenderTexture.active = prev;
+        }
+
+        // ================================================================== 3D stripes
+
+        /// <summary>
+        /// Draws stripes laid over the model in 3D (by world position, not by UV), replacing whatever the stripes
+        /// drew before in this stroke, so they can be redrawn live while the end point is dragged.
+        /// </summary>
+        public void Stripes(StrokeContext ctx, StripesParams p)
+        {
+            int count = Mathf.Clamp(p.colors != null ? p.colors.Length : 0, 0, StripesParams.MaxColors);
+            if (count == 0) return;
+            m_Meshes.EnsurePosed();
+            var prev = RenderTexture.active;
+            var m = APResources.Paint;
+            m.SetVector(APIds.StripeStart, p.start);
+            m.SetVector(APIds.StripeAxis, p.axis);
+            m.SetFloat(APIds.StripePeriod, Mathf.Max(p.period, 1e-6f));
+            m.SetFloat(APIds.StripeWidth, Mathf.Clamp01(p.width));
+            m.SetFloat(APIds.StripeOffset, p.offset);
+            m.SetFloat(APIds.StripeMirror, p.mirror ? 1f : 0f);
+            m.SetFloat(APIds.StripeMirrorAxis, Mathf.Clamp(p.mirrorAxis, 0, 2));
+            m.SetFloat(APIds.StripeMirrorSide, p.mirrorSide >= 0f ? 1f : -1f);
+            m.SetMatrix(APIds.StripeMirrorMatrix, p.mirrorMatrix);
+            m.SetMatrix(APIds.StripeWorldToLocal, p.worldToLocal);
+            m.SetVector(APIds.UVTransform, new Vector4(1, 1, 0, 0));
+            m.SetFloat(APIds.StripeColorCount, count);
+            int[] passes = PaintPass.UseConservative ? new[] { PaintPass.StripesConservative, PaintPass.Stripes } : new[] { PaintPass.Stripes };
+            foreach (var t in ctx.targets)
+            {
+                EnsurePaintBuffers(t, false);
+                var cols = new Vector4[StripesParams.MaxColors];
+                for (int i = 0; i < count; i++)
+                {
+                    var c = p.colors[i];
+                    if (t.mask)
+                    {
+                        // Masks get gray: each stripe color's brightness, so different stripes land at different levels.
+                        float v = APUtil.Luminance(c);
+                        cols[i] = new Vector4(v, v, v, c.a);
+                    }
+                    else cols[i] = APUtil.V(c);
+                }
+                m.SetVectorArray(APIds.StripeColors, cols);
                 m.SetInt(APIds.UVChannel, t.set.uvChannel);
                 Graphics.SetRenderTarget(t.paint);
                 GL.Clear(false, true, new Color(0, 0, 0, 0));

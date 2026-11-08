@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.23
+
+- New stripes tool (P): drag across the model and it lays stripes around it in 3D, so they wrap right no matter how the UVs are laid out — same as gradients, and baked into the layer like any paint. Pick horizontal or vertical, add your own colors (up to 8, click a swatch to change it), and set how many stripes repeat across the drag, how wide each one is, and the offset.
+- Stripes work with the rest of the paint setup too: opacity, whole model, and the symmetry mirror all carry over from gradients.
+
 ## 0.14.22
 
 - The Major Colors popup now has a hex code box under the wheel: type or paste a hex code (with or without the #) and press Enter to set the row's color, just like moving the wheel. Bad input does nothing — the box just goes back to the current color.

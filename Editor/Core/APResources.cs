@@ -28,6 +28,8 @@ namespace AviCreatorEssentials
         public const int Stars = 17;
         public const int StarsConservative = 18;
         public const int StarsFlat = 19;
+        public const int Stripes = 20;
+        public const int StripesConservative = 21;
 
         public static bool UseConservative => SystemInfo.supportsConservativeRaster;
         public static int Stamp3DPass => UseConservative ? Stamp3DConservative : Stamp3D;
@@ -187,6 +189,19 @@ namespace AviCreatorEssentials
         public static readonly int GradMirrorSide = Shader.PropertyToID("_GradMirrorSide");
         public static readonly int GradMirrorMatrix = Shader.PropertyToID("_GradMirrorMatrix");
         public static readonly int GradWorldToLocal = Shader.PropertyToID("_GradWorldToLocal");
+
+        public static readonly int StripeStart = Shader.PropertyToID("_StripeStart");
+        public static readonly int StripeAxis = Shader.PropertyToID("_StripeAxis");
+        public static readonly int StripePeriod = Shader.PropertyToID("_StripePeriod");
+        public static readonly int StripeWidth = Shader.PropertyToID("_StripeWidth");
+        public static readonly int StripeOffset = Shader.PropertyToID("_StripeOffset");
+        public static readonly int StripeColors = Shader.PropertyToID("_StripeColors");
+        public static readonly int StripeColorCount = Shader.PropertyToID("_StripeColorCount");
+        public static readonly int StripeMirror = Shader.PropertyToID("_StripeMirror");
+        public static readonly int StripeMirrorAxis = Shader.PropertyToID("_StripeMirrorAxis");
+        public static readonly int StripeMirrorSide = Shader.PropertyToID("_StripeMirrorSide");
+        public static readonly int StripeMirrorMatrix = Shader.PropertyToID("_StripeMirrorMatrix");
+        public static readonly int StripeWorldToLocal = Shader.PropertyToID("_StripeWorldToLocal");
 
         public static readonly int StarCell = Shader.PropertyToID("_StarCell");
         public static readonly int StarAmount = Shader.PropertyToID("_StarAmount");

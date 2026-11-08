@@ -192,6 +192,9 @@ namespace AviCreatorEssentials
                     case PaintTool.Gradient:
                         ctx.ShowHint("The gradient tool works on the model: drag across it in the 3D view.");
                         break;
+                    case PaintTool.Stripes:
+                        ctx.ShowHint("The stripes tool works on the model: drag across it in the 3D view.");
+                        break;
                     case PaintTool.Select:
                         m_Drag = Drag.Select;
                         m_SelOp = shift ? SelectOp.Add : ctrl ? SelectOp.Subtract : SelectOp.Replace;

@@ -227,6 +227,48 @@ Shader "Hidden/AviCreatorEssentials/Paint"
         return c;
     }
 
+    // ---------------- 3D stripes (premultiplied color, by world position) ----------------
+    float3 _StripeStart;
+    float3 _StripeAxis;       // unit world direction the stripes repeat along
+    float _StripePeriod;      // world length of one full stripe cycle
+    float _StripeWidth;       // 0..1 fraction of each cycle that is colored
+    float _StripeOffset;      // 0..1 phase shift, in cycles
+    float4 _StripeColors[8];  // straight alpha, gamma (must match StripesParams.MaxColors)
+    float _StripeColorCount;
+    float _StripeMirror;          // 1: fold the pattern across the avatar's mirror plane (symmetry)
+    float _StripeMirrorAxis;      // 0 X, 1 Y, 2 Z, in avatar space
+    float _StripeMirrorSide;      // +1/-1: the side of the plane the drag started on (avatar space)
+    float4x4 _StripeMirrorMatrix; // world -> mirrored world (through avatar space)
+    float4x4 _StripeWorldToLocal; // world -> avatar space
+
+    float4 frag_stripes(ap_v2f_uv i) : SV_Target
+    {
+        float3 p = i.wpos;
+        if (_StripeMirror > 0.5)
+        {
+            // Same fold as the gradient: the far side gets the mirror image of the pattern.
+            float3 lp = mul(_StripeWorldToLocal, float4(p, 1.0)).xyz;
+            float coord = _StripeMirrorAxis < 0.5 ? lp.x : (_StripeMirrorAxis < 1.5 ? lp.y : lp.z);
+            if (coord * _StripeMirrorSide < 0.0)
+                p = mul(_StripeMirrorMatrix, float4(p, 1.0)).xyz;
+        }
+        float u = dot(p - _StripeStart, _StripeAxis) / max(_StripePeriod, 1e-6) + _StripeOffset;
+        float cell = floor(u);
+        float f = frac(u);
+        // The stripe edge fades over about one texel of pattern coordinate, so stripes thinner
+        // than a texel fade to their average instead of flickering.
+        float fw = fwidth(u);
+        float a = 1.0 - smoothstep(_StripeWidth - fw, _StripeWidth + fw, f);
+        // Stripe colors cycle in order; negative cells wrap the same way as positive ones.
+        float m = fmod(cell, _StripeColorCount);
+        if (m < 0.0) m += _StripeColorCount;
+        float4 c = _StripeColors[(int)m];
+        float4 outC = float4(c.rgb * c.a, c.a) * a;
+        // A little dither so flat colors do not band once stored in an 8-bit layer.
+        outC.rgb += (AP_Hash12(i.pos.xy) - 0.5) / 255.0 * outC.a;
+        return outC;
+    }
+
     // ---------------- coverage (island mask / triangle fills) ----------------
     float _Value;
     float4 frag_coverage(ap_v2f_uv i) : SV_Target
@@ -798,6 +840,29 @@ Shader "Hidden/AviCreatorEssentials/Paint"
             #pragma target 4.5
             #pragma vertex vert_img
             #pragma fragment frag_stars_flat
+            ENDCG
+        }
+
+        // 20 - 3D stripes
+        Pass
+        {
+            Blend Off
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex ap_vert_uv
+            #pragma fragment frag_stripes
+            ENDCG
+        }
+
+        // 21 - 3D stripes, conservative
+        Pass
+        {
+            Blend Off
+            Conservative True
+            CGPROGRAM
+            #pragma target 4.5
+            #pragma vertex ap_vert_uv
+            #pragma fragment frag_stripes
             ENDCG
         }
     }
