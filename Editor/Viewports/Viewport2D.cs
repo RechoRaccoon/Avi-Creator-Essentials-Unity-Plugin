@@ -174,7 +174,7 @@ namespace AviCreatorEssentials
                 {
                     case PaintTool.Brush:
                     case PaintTool.Eraser:
-                        BeginStroke(PressureOf(evt));
+                        BeginStroke(PressureOf(evt), ctrl, shift);
                         break;
                     case PaintTool.Fill:
                         FillAt(LocalToUV(m_Mouse), shift);
@@ -317,7 +317,7 @@ namespace AviCreatorEssentials
 
         // ================================================================== painting
 
-        void BeginStroke(float pressure)
+        void BeginStroke(float pressure, bool ctrl = false, bool shift = false)
         {
             var s = ctx.session;
             var set = Set;
@@ -330,6 +330,10 @@ namespace AviCreatorEssentials
             if (!set.initialized) s.InitializeSet(set);
             if (set.islandDirty) s.engine.BuildIsland(set);
             var tool = ctx.Tool == PaintTool.Eraser ? StrokeTool.Erase : StrokeTool.Paint;
+            // While a Major mask is being edited, Ctrl/Cmd erases and Shift paints — the Color
+            // Recolor tool's convention — whatever tool is in hand.
+            if (ctx.majorMaskEdit != null)
+                tool = ctrl ? StrokeTool.Erase : shift ? StrokeTool.Paint : tool;
             // Other selected textures of the same material share its UV layout, so they take the same strokes.
             var targets = new List<TextureSet> { set };
             foreach (var other in s.SelectedSets)
@@ -455,7 +459,13 @@ namespace AviCreatorEssentials
             m_Taper.Finish(m_Dabs, (d, k) => { d.radiusPx *= k; return d; });
             Flush();
             var entry = ctx.session.engine.EndStroke(m_Stroke);
-            if (entry != null) ctx.session.Push(entry);
+            if (entry != null)
+            {
+                ctx.session.Push(entry);
+                // A committed stroke on the edited row's layer mask counts as a hand edit,
+                // so a later Detect keeps this mask instead of rebuilding it.
+                if (ctx.majorMaskEdit != null) ctx.session.NoteMajorMaskStroke(ctx.majorMaskEdit, m_Stroke);
+            }
             m_Stroke = null;
             ctx.strokeActive = false;
             ctx.session.NotifyStructureChanged();

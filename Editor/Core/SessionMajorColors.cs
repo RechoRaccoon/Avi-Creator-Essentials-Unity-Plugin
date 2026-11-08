@@ -16,6 +16,7 @@ namespace AviCreatorEssentials
         public Color target;             // color the user picked for this cluster (starts as color)
         public string layerId;           // Recolor layer for this cluster, if one was made
         public bool HasLayer => !string.IsNullOrEmpty(layerId);
+        public bool maskEdited;          // the user painted this row's mask by hand — re-Detect keeps the mask as-is instead of rebuilding it
     }
 
     public partial class APSession
@@ -911,6 +912,76 @@ namespace AviCreatorEssentials
                 if (l.id == mc.layerId) { layer = l; break; }
             mc.layerId = null;
             if (layer != null) DeleteLayer(set, layer);
+        }
+
+        /// <summary>
+        /// Adopts the previous Detect's "Major: &lt;name&gt;" Recolor layers onto the new rows, by name.
+        /// Without this, a re-Detect makes fresh rows with no layer, and the next color change stacks a
+        /// NEW layer over the old one — the old mask keeps showing through the new mask's gaps.
+        /// With adoption there is exactly one "Major: &lt;name&gt;" layer per row.
+        /// A row whose mask was hand-edited (maskEdited) keeps its layer's mask exactly as the user left it,
+        /// so manual fixes survive re-Detect. No separate delta store: the layer's mask IS the edited mask,
+        /// and ProjectIO saves it with the project. A delta recorded against the old auto mask would misapply
+        /// once the base changed and the auto mask moved; keeping the edited mask verbatim is exact, and
+        /// Reset is the escape hatch for a fresh mask. A row that was never hand-edited gets a fresh auto
+        /// mask rebuilt into its adopted layer (undoable), so re-Detect after a base change still refreshes it.
+        /// </summary>
+        public void AdoptMajorLayers(TextureSet set, List<MajorColor> fresh, List<MajorColor> previous, bool cleanup)
+        {
+            if (set == null || fresh == null) return;
+            var oldByName = new Dictionary<string, MajorColor>();
+            if (previous != null)
+                foreach (var o in previous)
+                    if (!oldByName.ContainsKey(o.name)) oldByName[o.name] = o;
+            foreach (var mc in fresh)
+            {
+                PaintLayer layer = null;
+                foreach (var l in set.layers)
+                    if (l.name == "Major: " + mc.name) { layer = l; break; }
+                if (layer == null) continue;
+                // Only adopt our own Recolor layers: a user-renamed layer that happens to share the name isn't ours.
+                if (layer.kind != LayerKind.Adjustment || layer.adjMode != AdjustMode.Recolor) continue;
+                mc.layerId = layer.id;
+                mc.target = layer.adjColor;
+                bool edited = oldByName.TryGetValue(mc.name, out var old) && old.maskEdited;
+                mc.maskEdited = edited;
+                if (edited) continue; // keep the hand-fixed mask exactly as the user left it
+                // Fresh auto mask into the adopted layer, so the old mask can't show through the new one.
+                var newMask = MajorColorMask(set, mc, fresh, cleanup);
+                if (newMask == null) continue; // cluster gone from the material: keep the old mask rather than wiping it
+                if (layer.mask == null)
+                {
+                    // The mask was removed from the layer: put the rebuilt one back directly.
+                    layer.mask = newMask;
+                    layer.maskEnabled = true;
+                    MeasureSource(set, layer);
+                    Changed(set);
+                    continue;
+                }
+                var rebuilt = newMask;
+                PixelEdit(set, layer.mask, "Rebuild major mask", () => Graphics.Blit(rebuilt, layer.mask));
+                APUtil.Release(ref newMask);
+                MeasureSource(set, layer);
+            }
+        }
+
+        /// <summary>
+        /// Called when a brush stroke ends while a Major mask is being edited: if the stroke painted
+        /// that row's layer mask, the row counts as hand-edited (so a later Detect keeps its mask
+        /// instead of rebuilding it), and the Recolor stats are re-fit to the edited area — the same
+        /// re-measure ColorRecolorClick does after changing a Recolor mask. One undo entry per stroke
+        /// comes from the stroke itself; this only records that an edit happened.
+        /// </summary>
+        public void NoteMajorMaskStroke(MajorColor mc, StrokeContext stroke)
+        {
+            if (mc == null || stroke == null) return;
+            foreach (var t in stroke.targets)
+            {
+                if (!t.mask || t.layer == null || t.layer.id != mc.layerId) continue;
+                mc.maskEdited = true;
+                if (t.layer.adjMode == AdjustMode.Recolor) MeasureSource(t.set, t.layer);
+                return;
+            }
         }
     }
 }

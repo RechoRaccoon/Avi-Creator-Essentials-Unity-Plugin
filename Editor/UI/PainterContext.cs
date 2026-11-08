@@ -139,6 +139,9 @@ namespace AviCreatorEssentials
         // lines, fills small holes, keeps fringes off neighboring colors). On by
         // default; only affects masks built after changing it.
         public bool majorCleanup = true;
+        // The Major color row whose mask is being painted by hand (null when off): the Brush adds to
+        // its mask, the Eraser takes away, and Ctrl/Cmd erases / Shift paints like the Color Recolor tool.
+        public MajorColor majorMaskEdit;
         // While a Major Colors popup is open, the color wheel must not retarget the active
         // Recolor layer: the popup drives its cluster through ApplyMajorColor itself.
         public bool suppressLayerColorFollow;

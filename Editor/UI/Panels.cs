@@ -472,6 +472,10 @@ namespace AviCreatorEssentials
         MajorColor m_PopupCluster;
         VisualElement m_PopupTargetFill;
         bool m_PopupOpen;
+        // Layer state to restore when mask editing ends: the layer that was active before the
+        // edited row's layer took over, and whether it was being mask-edited.
+        PaintLayer m_PrevMaskEditLayer;
+        bool m_PrevMaskEditMask;
 
         public MajorColorsPanel(PainterContext ctx)
         {
@@ -502,8 +506,14 @@ namespace AviCreatorEssentials
             var s = m_Ctx.session;
             var set = s?.ActiveSet;
             if (set == null) { m_Ctx.ShowHint("Pick a material first."); return; }
+            // New rows replace the old ones, so leave mask editing first — adoption below carries
+            // the layers (and any hand-fixed masks) onto the new rows by name.
+            ExitMajorMaskEdit();
+            var previous = new List<MajorColor>(m_Ctx.majorColors);
             m_Ctx.majorColors.Clear();
-            m_Ctx.majorColors.AddRange(s.DetectMajorColors(set));
+            var found = s.DetectMajorColors(set);
+            s.AdoptMajorLayers(set, found, previous, m_Ctx.majorCleanup);
+            m_Ctx.majorColors.AddRange(found);
             m_Ctx.majorColorSet = set;
             RebuildMajorColors();
             m_Ctx.Render();
@@ -521,6 +531,17 @@ namespace AviCreatorEssentials
             if (m_Ctx.majorColorSet != set)
             {
                 if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
+                // Leaving the material the mask was being edited on: drop the mode and put that
+                // material's layer state back, so it doesn't stay in mask editing.
+                if (m_Ctx.majorMaskEdit != null)
+                {
+                    var oldSet = m_Ctx.majorColorSet;
+                    m_Ctx.majorMaskEdit = null;
+                    if (oldSet != null && m_PrevMaskEditLayer != null && m_Ctx.session != null)
+                        m_Ctx.session.SetActiveLayer(oldSet, m_PrevMaskEditLayer, m_PrevMaskEditMask);
+                    m_PrevMaskEditLayer = null;
+                    m_PrevMaskEditMask = false;
+                }
                 m_Ctx.majorColors.Clear();
             }
             m_MajorColorsList.Clear();
@@ -544,11 +565,17 @@ namespace AviCreatorEssentials
                     OpenMajorColorPopup(cluster, e.position);
                 });
                 row.Add(targetSwatch);
+                bool editingMask = m_Ctx.majorMaskEdit == cluster;
+                var editMaskBtn = W.TextButton(editingMask ? "Done" : "Edit mask", () => ToggleMajorMaskEdit(cluster), "ap-small");
+                editMaskBtn.tooltip = "Paint this color's mask by hand: Brush adds, Eraser removes. Hand fixes survive re-Detect.";
+                W.SetOn(editMaskBtn, editingMask);
+                row.Add(editMaskBtn);
                 row.Add(W.TextButton("Reset", () =>
                 {
                     var ss = m_Ctx.session;
                     var sset = ss?.ActiveSet;
                     if (sset == null) return;
+                    if (m_Ctx.majorMaskEdit == cluster) ExitMajorMaskEdit(false);
                     ss.ResetMajorColor(sset, cluster);
                     RebuildMajorColors();
                     m_Ctx.Render();
@@ -611,6 +638,74 @@ namespace AviCreatorEssentials
                 m_PopupTargetFill = null;
             }
             m_Ctx.Render();
+        }
+
+        void ToggleMajorMaskEdit(MajorColor cluster)
+        {
+            if (m_Ctx.majorMaskEdit == cluster) ExitMajorMaskEdit();
+            else EnterMajorMaskEdit(cluster);
+        }
+
+        /// <summary>
+        /// Paint one row's mask by hand: makes sure its Recolor layer exists, then activates that layer
+        /// with mask editing on, so the Brush (adds) and Eraser (removes) paint the mask — in the 2D view
+        /// the mask shows tinted red, and in the 3D view the recolor changes live as the mask changes.
+        /// Only one row edits at a time. The layer is created on entry when the row has none yet, so
+        /// edits work before the first color change too.
+        /// </summary>
+        void EnterMajorMaskEdit(MajorColor cluster)
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set == null) { m_Ctx.ShowHint("Pick a material first."); return; }
+            if (set.IsMirrored) { m_Ctx.ShowHint("This material live-mirrors another — edit the mask on that material instead."); return; }
+            if (m_Ctx.majorMaskEdit != null && m_Ctx.majorMaskEdit != cluster) ExitMajorMaskEdit(false);
+            PaintLayer layer = null;
+            if (cluster.HasLayer)
+                foreach (var l in set.layers)
+                    if (l.id == cluster.layerId) { layer = l; break; }
+            if (layer == null)
+            {
+                // No layer yet: creating it builds the auto mask, so the first stroke refines the
+                // detected mask instead of starting blank. The target starts as the detected color.
+                s.ApplyMajorColor(set, cluster, cluster.target, m_Ctx.majorColors, m_Ctx.majorCleanup);
+                foreach (var l in set.layers)
+                    if (l.id == cluster.layerId) { layer = l; break; }
+                if (layer == null) { m_Ctx.ShowHint("Couldn't make the recolor layer for " + cluster.name + "."); return; }
+            }
+            if (layer.kind != LayerKind.Adjustment || layer.adjMode != AdjustMode.Recolor)
+            {
+                m_Ctx.ShowHint("That row's layer isn't a Recolor layer anymore — change its color once first.");
+                return;
+            }
+            m_PrevMaskEditLayer = set.ActiveLayer;
+            m_PrevMaskEditMask = set.editingMask;
+            m_Ctx.majorMaskEdit = cluster;
+            s.SetActiveLayer(set, layer, true);
+            // Brush (or Eraser, if that's the tool in hand) paints the mask; anything else would do nothing useful here.
+            if (m_Ctx.Tool != PaintTool.Brush && m_Ctx.Tool != PaintTool.Eraser) m_Ctx.Tool = PaintTool.Brush;
+            m_Ctx.Render();
+            RebuildMajorColors();
+            m_Ctx.ShowHint("Painting " + cluster.name + "'s mask: Brush adds, Eraser removes, Ctrl/Cmd erases and Shift paints. Toggle Edit mask off when done.");
+        }
+
+        /// <summary>Leaves mask editing: the row's layer stays (with the hand-fixed mask), and the
+        /// layer that was active before is active again.</summary>
+        void ExitMajorMaskEdit(bool rebuild = true)
+        {
+            if (m_Ctx.majorMaskEdit == null) return;
+            m_Ctx.majorMaskEdit = null;
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set != null)
+            {
+                if (m_PrevMaskEditLayer != null) s.SetActiveLayer(set, m_PrevMaskEditLayer, m_PrevMaskEditMask);
+                else set.editingMask = false;
+            }
+            m_PrevMaskEditLayer = null;
+            m_PrevMaskEditMask = false;
+            m_Ctx.Render();
+            if (rebuild) RebuildMajorColors();
         }
     }
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.19
+
+- Each Major colors row now has an Edit mask button: it opens that color's mask for painting by hand, so thin lines left behind, fringe bleeding onto a neighboring color, and speckles can be fixed directly. Brush adds to the mask, Eraser removes from it, Ctrl/Cmd erases and Shift paints, and each stroke is one undo. The mask shows tinted red in the texture view, and the recolor updates live on the model in the 3D view. A row's layer is made on the spot if it doesn't have one yet, so editing works before the first color change too.
+- Hand-painted masks survive pressing Detect again: re-Detect now adopts the existing "Major: ..." layers by name, and a row whose mask was painted by hand keeps that mask exactly as left, while rows that were never hand-edited get a fresh mask rebuilt from the new detection. This also fixes old Major layers stacking under new masks after a re-Detect. Existing Major layers keep the mask they were built with — delete the layer or hit Reset and change the color again to rebuild it.
+
 ## 0.14.18
 
 - Fixed the last Major colors edge problems on the hoodie. The shoulder patch no longer splits off from the beige: a gradient band now stays one color because detection looks at which color each shade actually touches, not just which one it is closest to. The dark Japanese text next to the paw box stays readable when the green is recolored bright green — the green blobs that used to stick out of the strokes are gone. New Cleanup toggle in the Major colors panel (on by default): it smooths each color's mask, so the thin pale weave lines and cyan speckles on a recolored body are gone, the paw-box frame edge no longer leaks blue, and there is no red fringe under the pads. Turning Cleanup off gives the old 0.14.17 masks. Existing Major layers keep the mask they were built with — delete the layer or hit Reset and change the color again to rebuild it with cleanup.

@@ -498,7 +498,7 @@ namespace AviCreatorEssentials
             {
                 case PaintTool.Brush:
                 case PaintTool.Eraser:
-                    BeginStroke(pressure);
+                    BeginStroke(pressure, ctrl, shift);
                     break;
                 case PaintTool.Fill:
                     FillAt(m_Mouse, shift);
@@ -533,7 +533,7 @@ namespace AviCreatorEssentials
 
         // ------------------------------------------------------------------ strokes
 
-        void BeginStroke(float pressure)
+        void BeginStroke(float pressure, bool ctrl = false, bool shift = false)
         {
             var s = ctx.session;
             s.UpdateBounds();
@@ -548,6 +548,14 @@ namespace AviCreatorEssentials
             if (active.IsMirrored)
             {
                 ctx.ShowHint("This material live-mirrors " + active.mirrorSource.displayName + " — paint on that material instead.");
+                return;
+            }
+            // A Major mask belongs to one material: auto-select must not carry the stroke
+            // onto another material's layers while a mask is being edited.
+            if (ctx.majorMaskEdit != null && active != ctx.majorColorSet)
+            {
+                ctx.ShowHint("You're editing " + ctx.majorMaskEdit.name + "'s mask on "
+                    + (ctx.majorColorSet != null ? ctx.majorColorSet.displayName : "another material") + " — paint on that material.");
                 return;
             }
             if (!active.initialized) s.InitializeSet(active);
@@ -566,6 +574,13 @@ namespace AviCreatorEssentials
 
             var tool = ctx.Tool == PaintTool.Eraser ? StrokeTool.Erase : StrokeTool.Paint;
             string name = tool == StrokeTool.Erase ? "Erase" : "Paint";
+            // While a Major mask is being edited, Ctrl/Cmd erases and Shift paints — the Color
+            // Recolor tool's convention — whatever tool is in hand.
+            if (ctx.majorMaskEdit != null)
+            {
+                tool = ctrl ? StrokeTool.Erase : shift ? StrokeTool.Paint : tool;
+                name = tool == StrokeTool.Erase ? "Erase" : "Paint";
+            }
             m_Stroke = s.engine.BeginStroke(selected, tool, ctx.primary, ctx.brush.opacity, name, proj * view, occlusion);
             m_Stroke.paintMode = ctx.brush.paintMode;
             if (tool == StrokeTool.Paint && !active.editingMask) ctx.colors.Use(ctx.primary);
@@ -723,7 +738,13 @@ namespace AviCreatorEssentials
             m_Taper.Finish(m_Dabs, (d, k) => { d.radius *= k; return d; });
             FlushDabs();
             var entry = ctx.session.engine.EndStroke(m_Stroke);
-            if (entry != null) ctx.session.Push(entry);
+            if (entry != null)
+            {
+                ctx.session.Push(entry);
+                // A committed stroke on the edited row's layer mask counts as a hand edit,
+                // so a later Detect keeps this mask instead of rebuilding it.
+                if (ctx.majorMaskEdit != null) ctx.session.NoteMajorMaskStroke(ctx.majorMaskEdit, m_Stroke);
+            }
             m_Stroke = null;
             ctx.strokeActive = false;
             ctx.session.NotifyStructureChanged();
