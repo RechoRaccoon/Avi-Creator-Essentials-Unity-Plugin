@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.14
+
+- Fixed the Major colors tool leaving thin lines of the old color behind and bleeding onto neighboring colors: the mask is now rasterized straight from the detected color cluster at full resolution, so it covers exactly what detection found — no more seed sampling that missed the fine weave lines or over-reached onto the beige. The Tolerance slider is gone from the Major colors panel (it never affected this mask; it still works in the Color recolor tool).
+
 ## 0.14.13
 
 - Fixed the Major colors tool not compiling: the color field lives in UnityEditor.UIElements, which Panels.cs was not importing.

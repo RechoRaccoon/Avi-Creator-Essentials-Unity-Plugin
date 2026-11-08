@@ -157,8 +157,6 @@ namespace AviCreatorEssentials
 
             m_MajorColorsBox = W.Column("ap-major-colors-options");
             m_MajorColorsBox.Add(W.Text("Detects the big colors of the selected material — all the shades of the green count as one green, all the beige as one beige. Change a color below and only that color changes; the dark folds stay dark and the lit parts stay light.", "ap-hint"));
-            m_MajorColorsBox.Add(Track(new W.SliderRow("Tolerance", 0f, 1f, () => m_Ctx.colorTolerance, v => m_Ctx.colorTolerance = v, 100f,
-                "How different a pixel may be and still count as the same major color when the mask is built")));
             m_MajorColorsBox.Add(W.TextButton("Detect major colors", DetectMajorColors, "ap-small", "ap-accent"));
             m_MajorColorsList = W.Column("ap-major-colors-list");
             m_MajorColorsBox.Add(m_MajorColorsList);
@@ -384,7 +382,7 @@ namespace AviCreatorEssentials
                     var ss = m_Ctx.session;
                     var sset = ss?.ActiveSet;
                     if (sset == null) return;
-                    ss.ApplyMajorColor(sset, cluster, e.newValue, m_Ctx.colorTolerance);
+                    ss.ApplyMajorColor(sset, cluster, e.newValue);
                     m_Ctx.Render();
                 });
                 row.Add(field);
