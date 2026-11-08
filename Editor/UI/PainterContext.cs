@@ -17,7 +17,6 @@ namespace AviCreatorEssentials
         Gradient,
         LassoRecolor,
         ColorRecolor,
-        MajorColors,
     }
 
     public enum FillMode
@@ -136,6 +135,9 @@ namespace AviCreatorEssentials
         public bool colorSampleLayer = true;
         public readonly List<MajorColor> majorColors = new List<MajorColor>();
         public TextureSet majorColorSet;  // the material the detected major colors belong to
+        // While a Major Colors popup is open, the color wheel must not retarget the active
+        // Recolor layer: the popup drives its cluster through ApplyMajorColor itself.
+        public bool suppressLayerColorFollow;
         public GradientShape gradientShape = GradientShape.Linear;
         public bool gradientToTransparent = true;   // primary color fading out; off: primary to secondary color
         public readonly StarSettings stars = StarSettings.Load();

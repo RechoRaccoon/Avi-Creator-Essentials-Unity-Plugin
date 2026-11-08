@@ -25,6 +25,10 @@ namespace AviCreatorEssentials
         readonly VisualElement m_MajorColorsBox;
         readonly VisualElement m_MajorColorsList;
         readonly VisualElement m_BrushBox;
+        readonly Dictionary<MajorColor, VisualElement> m_MajorTargetFills = new Dictionary<MajorColor, VisualElement>();
+        MajorColor m_PopupCluster;
+        VisualElement m_PopupTargetFill;
+        bool m_PopupOpen;
 
         BrushSettings B => m_Ctx.brush;
 
@@ -34,7 +38,6 @@ namespace AviCreatorEssentials
             AddToClassList("ap-brush-panel");
 
             m_FillBox = W.Column("ap-fill-options");
-            m_FillBox.Add(W.Text("Fill fills one area with the paint color in one click. Shift-click fills with transparency.", "ap-hint"));
             var modes = new List<string> { "UV island", "Connected mesh part", "Whole material", "Entire texture", "Similar color" };
             m_FillBox.Add(Track(new W.DropdownRow("Fill", modes, () => (int)m_Ctx.fillMode, i => m_Ctx.fillMode = (FillMode)i,
                 "What one click fills: a UV island, a connected piece of the mesh, every part using this material, the whole texture, or pixels of a similar color")));
@@ -48,8 +51,6 @@ namespace AviCreatorEssentials
             Add(m_FillBox);
 
             m_SelectBox = W.Column("ap-select-options");
-            m_SelectBox.Add(W.Text("Pick UV islands or polygons on the texture or the model. While anything is selected, brushes, " +
-                                   "erasers and fills only paint inside it. Click to pick, drag for a box or lasso. Shift adds, Ctrl removes.", "ap-hint"));
             m_SelectBox.Add(Track(new W.Segmented(new[] { "UV islands", "Polygons" }, () => m_Ctx.selectIslands ? 0 : 1,
                 i => { m_Ctx.selectIslands = i == 0; Changed(); },
                 new[] { "Each pick selects the whole connected UV island", "Each pick selects single triangles" })));
@@ -76,9 +77,6 @@ namespace AviCreatorEssentials
             Add(m_SelectBox);
 
             m_TransformBox = W.Column("ap-transform-options");
-            m_TransformBox.Add(W.Text("Pick up part of the selected paint layer and move it. In the texture view, draw a shape around " +
-                                      "what to move, or click a color to take every touching pixel of that color (in the 3D view, click). " +
-                                      "Then drag it, pull the corners to scale (Shift: stretch), the edges to stretch, and the top handle to rotate.", "ap-hint"));
             m_TransformBox.Add(Track(new W.Segmented(new[] { "Move / scale / rotate", "Warp" }, () => m_Ctx.transformWarp ? 1 : 0,
                 i => { m_Ctx.transformWarp = i == 1; Changed(); },
                 new[] { "Handles for moving, scaling, stretching and rotating", "A 3 × 3 grid of points: drag them to bend and distort the piece" })));
@@ -107,9 +105,6 @@ namespace AviCreatorEssentials
             Add(m_TransformBox);
 
             m_GradientBox = W.Column("ap-gradient-options");
-            m_GradientBox.Add(W.Text("Drag across the model from where the gradient starts to where it ends. It is laid out in 3D on " +
-                                     "the model itself, so it runs smoothly across UV seams and between body parts. It paints the " +
-                                     "selected layer (or its mask) and stays inside a UV selection.", "ap-hint"));
             m_GradientBox.Add(Track(new W.Segmented(new[] { "Linear", "Radial", "Reflected" }, () => (int)m_Ctx.gradientShape,
                 i => { m_Ctx.gradientShape = (GradientShape)i; Changed(); }, new[]
                 {
@@ -130,19 +125,9 @@ namespace AviCreatorEssentials
             Add(m_GradientBox);
 
             m_LassoRecolorBox = W.Column("ap-lasso-recolor-options");
-            m_LassoRecolorBox.Add(W.Text("Draw a loop around part of the selected layer in the texture (2D) view. Everything inside the loop is " +
-                                         "recoloured to the primary colour (the colour wheel above) — transparent pixels are left alone, shading is kept, " +
-                                         "and black turns into the new colour too, so black text can become any colour. Image layers are rasterized first, " +
-                                         "like painting on them. One Ctrl+Z undoes it.", "ap-hint"));
             Add(m_LassoRecolorBox);
 
             m_ColorRecolorBox = W.Column("ap-color-recolor-options");
-            m_ColorRecolorBox.Add(W.Text("Click a color on the texture or the model. Every pixel of that color on the selected layer (within the " +
-                                         "tolerance) gets a Recolor layer, masked to just those pixels — the texture view tints the selection " +
-                                         "red, so you can see what will change. The layer takes the color wheel's color, and follows it when you " +
-                                         "turn the wheel. Click again to pick a different color for the same layer; Shift-click adds more colors " +
-                                         "to it; Ctrl-click (Cmd on Mac) takes colors away. The Adjust section can switch the layer to Hue/Saturation " +
-                                         "instead. Merge down bakes it into the layer below; deleting the layer undoes it.", "ap-hint"));
             m_ColorRecolorBox.Add(Track(new W.SliderRow("Tolerance", 0f, 1f, () => m_Ctx.colorTolerance, v => m_Ctx.colorTolerance = v, 100f,
                 "How different a pixel may be and still count as the clicked color")));
             m_ColorRecolorBox.Add(Track(new W.ToggleRow("Only touching pixels", () => m_Ctx.colorContiguous, v => m_Ctx.colorContiguous = v,
@@ -156,7 +141,6 @@ namespace AviCreatorEssentials
             Add(m_ColorRecolorBox);
 
             m_MajorColorsBox = W.Column("ap-major-colors-options");
-            m_MajorColorsBox.Add(W.Text("Detects the big colors of the selected material — all the shades of the green count as one green, all the beige as one beige. Change a color below and only that color changes; the dark folds stay dark and the lit parts stay light.", "ap-hint"));
             m_MajorColorsBox.Add(W.TextButton("Detect major colors", DetectMajorColors, "ap-small", "ap-accent"));
             m_MajorColorsList = W.Column("ap-major-colors-list");
             m_MajorColorsBox.Add(m_MajorColorsList);
@@ -267,11 +251,15 @@ namespace AviCreatorEssentials
             BrushLibrary.Changed += RebuildTips;
             m_Ctx.BrushChanged += Refresh;
             m_Ctx.ToolChanged += RefreshMode;
+            if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged += RebuildMajorColors;
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 BrushLibrary.Changed -= RebuildTips;
                 m_Ctx.BrushChanged -= Refresh;
                 m_Ctx.ToolChanged -= RefreshMode;
+                if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged -= RebuildMajorColors;
+                if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
+                if (m_PopupOpen) OnMajorColorPopupClosed();
             });
             RebuildTips();
             RefreshMode();
@@ -363,8 +351,14 @@ namespace AviCreatorEssentials
             var s = m_Ctx.session;
             var set = s?.ActiveSet;
             // The detected colors belong to one material; switching materials clears them.
-            if (m_Ctx.majorColorSet != set) m_Ctx.majorColors.Clear();
+            // Closing the popup first, if one is open, so it can't keep editing the old material.
+            if (m_Ctx.majorColorSet != set)
+            {
+                if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
+                m_Ctx.majorColors.Clear();
+            }
             m_MajorColorsList.Clear();
+            m_MajorTargetFills.Clear();
             foreach (var mc in m_Ctx.majorColors)
             {
                 var cluster = mc;
@@ -375,17 +369,15 @@ namespace AviCreatorEssentials
                 var row = W.Row("ap-row-gap", "ap-wrap");
                 row.Add(W.Swatch(cluster.color, 24, cluster.name + " — " + Mathf.RoundToInt(cluster.coverage * 100) + "% of the material"));
                 row.Add(W.Text(cluster.name + " · " + Mathf.RoundToInt(cluster.coverage * 100) + "%"));
-                var field = new ColorField { value = cluster.target, showAlpha = false, hdr = false, tooltip = "New color for all the " + cluster.name };
-                field.style.width = 64;
-                field.RegisterValueChangedCallback(e =>
+                var targetSwatch = W.Swatch(cluster.target, 24, "New color for all the " + cluster.name);
+                m_MajorTargetFills[cluster] = targetSwatch.Q<VisualElement>(className: "ap-swatch-fill");
+                targetSwatch.RegisterCallback<PointerDownEvent>(e =>
                 {
-                    var ss = m_Ctx.session;
-                    var sset = ss?.ActiveSet;
-                    if (sset == null) return;
-                    ss.ApplyMajorColor(sset, cluster, e.newValue);
-                    m_Ctx.Render();
+                    if (e.button != 0) return;
+                    e.StopPropagation();
+                    OpenMajorColorPopup(cluster, e.position);
                 });
-                row.Add(field);
+                row.Add(targetSwatch);
                 row.Add(W.TextButton("Reset", () =>
                 {
                     var ss = m_Ctx.session;
@@ -399,6 +391,60 @@ namespace AviCreatorEssentials
             }
             if (m_Ctx.majorColors.Count == 0)
                 m_MajorColorsList.Add(W.Text("Press Detect major colors to list the colors of the selected material.", "ap-hint"));
+        }
+
+        /// <summary>Opens the plugin's own color popup for one major color row: seeded with the
+        /// cluster's target color, so the wheel opens on it and the history row is the plugin's.</summary>
+        void OpenMajorColorPopup(MajorColor cluster, Vector2 worldPos)
+        {
+            // Opening a second popup closes the first; its Closed event cleans up that row first.
+            if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
+            m_PopupCluster = cluster;
+            if (!m_MajorTargetFills.TryGetValue(cluster, out var fill)) fill = null;
+            m_PopupTargetFill = fill;
+            m_PopupOpen = true;
+            m_Ctx.suppressLayerColorFollow = true;
+            m_Ctx.SetPrimary(cluster.target);
+            m_Ctx.ColorChanged += OnMajorColorPopupColor;
+            QuickColorPopup.Closed += OnMajorColorPopupClosed;
+            if (m_Ctx.OpenQuickColor != null) m_Ctx.OpenQuickColor(worldPos);
+            else
+            {
+                var root = panel?.visualTree;
+                if (root == null) { OnMajorColorPopupClosed(); return; }
+                QuickColorPopup.Show(root, m_Ctx, worldPos);
+            }
+        }
+
+        /// <summary>While the popup is open, every wheel move recolors the cluster live.</summary>
+        void OnMajorColorPopupColor()
+        {
+            if (m_PopupCluster == null) return;
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set == null) return;
+            s.ApplyMajorColor(set, m_PopupCluster, m_Ctx.primary);
+            if (m_PopupTargetFill != null) m_PopupTargetFill.style.backgroundColor = m_Ctx.primary;
+            m_Ctx.Render();
+        }
+
+        /// <summary>Popup closed however it closed: record the final color in history once (not
+        /// every drag tick), stop following the wheel, and leave the row showing the final color.</summary>
+        void OnMajorColorPopupClosed()
+        {
+            if (!m_PopupOpen) return;
+            m_PopupOpen = false;
+            QuickColorPopup.Closed -= OnMajorColorPopupClosed;
+            m_Ctx.ColorChanged -= OnMajorColorPopupColor;
+            m_Ctx.suppressLayerColorFollow = false;
+            if (m_PopupCluster != null)
+            {
+                m_Ctx.colors.Use(m_Ctx.primary);
+                if (m_PopupTargetFill != null) m_PopupTargetFill.style.backgroundColor = m_Ctx.primary;
+                m_PopupCluster = null;
+                m_PopupTargetFill = null;
+            }
+            m_Ctx.Render();
         }
 
         /// <summary>Runs an action on the floating piece (or the selected image layer) of the active material.</summary>
@@ -489,16 +535,16 @@ namespace AviCreatorEssentials
             bool gradient = m_Ctx.Tool == PaintTool.Gradient;
             bool lassoRecolor = m_Ctx.Tool == PaintTool.LassoRecolor;
             bool colorRecolor = m_Ctx.Tool == PaintTool.ColorRecolor;
-            bool majorColors = m_Ctx.Tool == PaintTool.MajorColors;
             m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
             m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
             m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
             m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
             m_LassoRecolorBox.style.display = lassoRecolor ? DisplayStyle.Flex : DisplayStyle.None;
             m_ColorRecolorBox.style.display = colorRecolor ? DisplayStyle.Flex : DisplayStyle.None;
-            m_MajorColorsBox.style.display = majorColors ? DisplayStyle.Flex : DisplayStyle.None;
-            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor || majorColors ? DisplayStyle.None : DisplayStyle.Flex;
-            if (majorColors) RebuildMajorColors();
+            // Major colors is not a tool: the section is always visible, with or without a tool selected.
+            m_MajorColorsBox.style.display = DisplayStyle.Flex;
+            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor ? DisplayStyle.None : DisplayStyle.Flex;
+            RebuildMajorColors();
         }
 
         void RebuildTips()

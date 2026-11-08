@@ -29,14 +29,35 @@ namespace AviCreatorEssentials
         /// <summary>
         /// The bin a pixel belongs to: hue bin x brightness band, with near-gray rules. Shared by
         /// detection and mask rasterization, so the mask covers exactly what detection found.
+        /// Muted colors use the same 36 hue bins as saturated ones: a color sitting on a hue-sector
+        /// boundary (the beige at ~60 degrees) must not split in two. Muted means S below 0.17,
+        /// not 0.15: darker beige folds reach S 0.15-0.16 and would otherwise flip into the
+        /// saturated space and leave their own cluster.
         /// </summary>
         static int MajorCellKey(Color32 c, out float val)
         {
             Color.RGBToHSV((Color)c, out float hue, out float sat, out val);
             int band = val < 0.35f ? 0 : val < 0.7f ? 1 : 2;
             if (sat < 0.03f) return 1000 + band;
-            if (sat < 0.15f) return 2000 + (int)(hue * 6f) * 3 + band;
+            if (sat < 0.17f) return 2000 + (int)(hue * 36f) * 3 + band;
             return (int)(hue * 36f) * 3 + band;
+        }
+
+        /// <summary>Mean hue of a bin's pixels, from its mean color.</summary>
+        static float MajorCellHue(MajorCell cell)
+        {
+            var mean = new Color((float)(cell.sumR / cell.count), (float)(cell.sumG / cell.count), (float)(cell.sumB / cell.count));
+            Color.RGBToHSV(mean, out float h, out _, out _);
+            return h;
+        }
+
+        /// <summary>Wrapped hue difference in degrees, -180..180.</summary>
+        static float HueDiff(float hue, float anchorHue)
+        {
+            float d = hue - anchorHue;
+            if (d > 0.5f) d -= 1f;
+            if (d < -0.5f) d += 1f;
+            return d * 360f;
         }
 
         /// <summary>The base texture's pixels (everything below the first adjustment layer), or null when there is nothing to read.</summary>
@@ -61,12 +82,15 @@ namespace AviCreatorEssentials
         }
 
         /// <summary>
-        /// Detects the major colors of a material: clusters the base texture (everything below the
-        /// first adjustment layer, so already-recolored layers don't change the answer) by hue, with
-        /// near-gray colors grouped by brightness instead. All the shades of one hue — the dark folds
-        /// and the lit parts of the green — count as one color. Specks under 1% are ignored.
+        /// Detects the different colors of a material: clusters the base texture (everything
+        /// below the first adjustment layer, so already-recolored layers don't change the answer)
+        /// by hue and brightness. Saturated colors merge across their full shade range — the dark
+        /// folds and lit parts of the green count as one color. Muted colors merge only within
+        /// their brightness band and within a 35-degree hue span, so light beige, darker
+        /// brownish-beige, the pale paw-box background and the dark paw pads each get their own
+        /// row. Small but distinct colors are kept: clusters down to 0.1% are listed, up to 12.
         /// </summary>
-        public List<MajorColor> DetectMajorColors(TextureSet set, int maxColors = 8)
+        public List<MajorColor> DetectMajorColors(TextureSet set, int maxColors = 12)
         {
             var found = new List<MajorColor>();
             if (set == null || set.IsMirrored) return found;
@@ -96,10 +120,15 @@ namespace AviCreatorEssentials
             }
             if (opaque == 0) return found;
 
-            // Merge cells into clusters: one hue family across its brightness bands, with a
-            // one-bin gap bridged so a thin hole doesn't split a color in two. Muted colors
-            // only merge within their hue sector, so the dark paw prints stay separate from
-            // the green; neutral bands never merge with each other.
+            // Merge cells into clusters, largest cells first so the biggest colors claim
+            // their cells before the small ones. Saturated cells merge across hue bins and
+            // brightness bands (one hue family = one color). Muted cells merge only with the
+            // hue bins next to them, in the same brightness band, and only while the cluster's
+            // total hue span stays within 35 degrees: that keeps a wide color like the beige
+            // (bins 4-7, about a 30-degree span) whole while the paw pads and the seam blends —
+            // 30-40 degrees away from the beige's center — can never join it. A cell that
+            // would stretch a cluster past the span is left unclaimed, so it seeds its own
+            // cluster instead. Neutral bands never merge.
             var claimed = new HashSet<int>();
             var clusters = new List<List<int>>();
             var keys = new List<int>(cells.Keys);
@@ -107,6 +136,8 @@ namespace AviCreatorEssentials
             foreach (var key in keys)
             {
                 if (claimed.Contains(key)) continue;
+                float seedHue = MajorCellHue(cells[key]);
+                float minOff = 0f, maxOff = 0f;
                 var cluster = new List<int>();
                 var stack = new Stack<int>();
                 stack.Push(key);
@@ -117,11 +148,16 @@ namespace AviCreatorEssentials
                     cluster.Add(k);
                     foreach (var n in MajorNeighbors(k))
                     {
-                        if (cells.ContainsKey(n) && !claimed.Contains(n))
+                        if (!cells.ContainsKey(n) || claimed.Contains(n)) continue;
+                        if (n >= 2000)
                         {
-                            claimed.Add(n);
-                            stack.Push(n);
+                            float off = HueDiff(MajorCellHue(cells[n]), seedHue);
+                            float lo = Mathf.Min(minOff, off), hi = Mathf.Max(maxOff, off);
+                            if (hi - lo > 35f) continue;
+                            minOff = lo; maxOff = hi;
                         }
+                        claimed.Add(n);
+                        stack.Push(n);
                     }
                 }
                 clusters.Add(cluster);
@@ -141,7 +177,7 @@ namespace AviCreatorEssentials
                     if (cell.maxV > maxV) maxV = cell.maxV;
                 }
                 float coverage = (float)count / opaque;
-                if (coverage < 0.01f) continue;
+                if (coverage < 0.001f) continue;
                 float meanV = (float)(sv / count);
                 var mean = new Color((float)(sr / count), (float)(sg / count), (float)(sb / count));
                 Color.RGBToHSV(mean, out float mh, out float ms, out float mv);
@@ -187,9 +223,13 @@ namespace AviCreatorEssentials
             }
             else if (key >= 2000)
             {
-                int sector = (key - 2000) / 3, band = (key - 2000) % 3;
-                if (band > 0) yield return 2000 + sector * 3 + band - 1;
-                if (band < 2) yield return 2000 + sector * 3 + band + 1;
+                // Muted: hue bins next to this one, same brightness band only. Brightness
+                // is most of what makes a muted color look different, so the pale paw-box
+                // background (bright band) never merges with the dark paw pads (dark band),
+                // and light beige never merges with darker brownish-beige.
+                int hueBin = (key - 2000) / 3, band = (key - 2000) % 3;
+                yield return 2000 + ((hueBin + 1) % 36) * 3 + band;
+                yield return 2000 + ((hueBin + 35) % 36) * 3 + band;
             }
             // Neutral bands (1000-1002) never merge: black, grey and white are different colors.
         }
@@ -200,7 +240,7 @@ namespace AviCreatorEssentials
             float deg = h * 360f;
             string hueName = deg < 15f || deg >= 345f ? "Red" : deg < 45f ? "Orange" : deg < 70f ? "Yellow" :
                 deg < 160f ? "Green" : deg < 200f ? "Teal" : deg < 260f ? "Blue" : deg < 300f ? "Purple" : "Pink";
-            if (s < 0.15f)
+            if (s < 0.17f)
             {
                 // Muted warm colors read as brown/beige rather than orange/yellow.
                 if (deg >= 15f && deg < 70f) return v > 0.6f ? "Beige" : v > 0.3f ? "Brown" : "Dark brown";
@@ -213,23 +253,48 @@ namespace AviCreatorEssentials
         /// Builds a mask RenderTexture straight from cluster membership: every pixel of the base
         /// texture whose bin key belongs to the cluster is in, everything else is out. Full
         /// resolution, so fine detail lines are covered exactly as detected — no seed sampling,
-        /// no tolerance bands to fall between or over-reach with. Returns null when the material
-        /// can't be read, or when nothing of the cluster is left in it (base changed since Detect).
+        /// no tolerance bands to fall between or over-reach with. A pixel only counts when at
+        /// least 3 of its 8 neighbours are in the same cluster: a 1px seam fringe (blend pixels
+        /// where two colors meet, which landed in a cluster by hue) has at most 2 same-cluster
+        /// neighbours along its line, so it is not claimed, while real areas — weave lines,
+        /// blobs, solid regions — are surrounded by their own color and stay covered.
+        /// Returns null when the material can't be read, or when nothing of the cluster is left
+        /// in it (base changed since Detect).
         /// </summary>
         RenderTexture MajorColorMask(TextureSet set, MajorColor mc)
         {
             var px = ReadBasePixels(set);
             if (px == null) return null;
             int w = set.width, h = set.height;
-            var bytes = new byte[px.Length];
-            int included = 0;
+            var member = new bool[px.Length];
             for (int i = 0; i < px.Length; i++)
             {
                 var c = px[i];
                 if (c.a >= 128 && mc.cellKeys.Contains(MajorCellKey(c, out _)))
+                    member[i] = true;
+            }
+            var bytes = new byte[px.Length];
+            int included = 0;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
                 {
-                    bytes[i] = 255;
-                    included++;
+                    int i = y * w + x;
+                    if (!member[i]) continue;
+                    int same = 0;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = x + dx, ny = y + dy;
+                            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                            if (member[ny * w + nx]) same++;
+                        }
+                    if (same >= 3)
+                    {
+                        bytes[i] = 255;
+                        included++;
+                    }
                 }
             }
             if (included == 0) return null;

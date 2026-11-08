@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.15
+
+- Major colors is no longer a tool in the rail: the section is always visible in the right panel, with Detect major colors and one row per color. Clicking a row's new-color swatch opens the plugin's own color wheel popup, with the recent-colors history and saved swatches, instead of Unity's built-in picker; dragging the wheel recolors that color live, and the final color is recorded in history when the popup closes. Detection now lists every distinct color instead of only the biggest ones (down to 0.1%, up to 12 rows), and muted colors are separated properly: light beige, darker brownish-beige, the pale paw-box background and the dark paw pads each get their own row, while all the green shades still count as one green and the beige no longer splits across its hue boundary. The mask no longer claims the 1px blend fringe where two colors meet, so recoloring the beige leaves the sleeve/body seam clean.
+- Removed the descriptive paragraphs from the tool option boxes: tool names and their controls speak for themselves, and the hover tooltips still explain each control.
+
 ## 0.14.14
 
 - Fixed the Major colors tool leaving thin lines of the old color behind and bleeding onto neighboring colors: the mask is now rasterized straight from the detected color cluster at full resolution, so it covers exactly what detection found — no more seed sampling that missed the fine weave lines or over-reached onto the beige. The Tolerance slider is gone from the Major colors panel (it never affected this mask; it still works in the Color recolor tool).

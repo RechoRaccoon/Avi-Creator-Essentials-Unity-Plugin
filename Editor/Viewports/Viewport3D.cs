@@ -1662,7 +1662,6 @@ namespace AviCreatorEssentials
                 case PaintTool.Select: hudRight.text = "Select " + (ctx.selectIslands ? "UV islands" : "polygons") + "  ·  Shift add, Ctrl remove"; break;
                 case PaintTool.Gradient: hudRight.text = "Gradient  ·  " + ObjectNames.NicifyVariableName(ctx.gradientShape.ToString()) + "  ·  drag across the model"; break;
                 case PaintTool.ColorRecolor: hudRight.text = "Color recolor  ·  click a color, then shift Hue in Adjust"; break;
-                case PaintTool.MajorColors: hudRight.text = "Major colors  ·  detect, then change each one"; break;
             }
         }
     }

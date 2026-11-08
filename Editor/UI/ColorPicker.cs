@@ -430,8 +430,12 @@ namespace AviCreatorEssentials
         static QuickColorPopup s_Open;
         readonly VisualElement m_Panel;
         readonly Vector2 m_Anchor;
+        bool m_ClosedFired;
 
         public static bool IsOpen => s_Open != null;
+
+        /// <summary>Raised once when the popup closes, however it closed (outside click, Escape, swatch pick, or a new popup opening).</summary>
+        public static event Action Closed;
 
         public static void Show(VisualElement root, PainterContext ctx, Vector2 worldPos)
         {
@@ -444,8 +448,17 @@ namespace AviCreatorEssentials
         public static void Close()
         {
             if (s_Open == null) return;
-            s_Open.RemoveFromHierarchy();
+            var popup = s_Open;
+            popup.RemoveFromHierarchy();
             s_Open = null;
+            popup.FireClosed();
+        }
+
+        void FireClosed()
+        {
+            if (m_ClosedFired) return;
+            m_ClosedFired = true;
+            Closed?.Invoke();
         }
 
         QuickColorPopup(VisualElement root, PainterContext ctx, Vector2 worldPos)
@@ -470,7 +483,11 @@ namespace AviCreatorEssentials
                 e.StopPropagation();
             });
             RegisterCallback<WheelEvent>(e => e.StopPropagation());
-            RegisterCallback<DetachFromPanelEvent>(_ => { if (s_Open == this) s_Open = null; });
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                if (s_Open == this) s_Open = null;
+                FireClosed();
+            });
         }
 
         const float WheelCenter = 8f + 98f;   // panel padding + half the wheel
