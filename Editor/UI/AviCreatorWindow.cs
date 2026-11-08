@@ -67,7 +67,7 @@ namespace AviCreatorEssentials
         string m_LastActiveLayerId;
         bool m_SuppressLayerColor;
         PosePanel m_PosePanel;
-        W.Section m_ColorSection, m_BrushSection, m_LayerSection, m_ImageSection, m_MaterialSection, m_MeshSection, m_ViewSection, m_PoseSection, m_StarsSection;
+        W.Section m_ColorSection, m_BrushSection, m_LayerSection, m_ImageSection, m_MaterialSection, m_MeshSection, m_ViewSection, m_PoseSection, m_StarsSection, m_MajorColorsSection;
 
         readonly Dictionary<PaintTool, Button> m_ToolButtons = new Dictionary<PaintTool, Button>();
         readonly Dictionary<PoseTool, Button> m_PoseButtons = new Dictionary<PoseTool, Button>();
@@ -805,6 +805,10 @@ namespace AviCreatorEssentials
             m_ColorSection.Body.Add(new ColorPicker(m_Ctx));
             m_RightPanel.Add(m_ColorSection);
 
+            m_MajorColorsSection = new W.Section("Major colors", IconKind.Palette, "major-colors");
+            m_MajorColorsSection.Body.Add(new MajorColorsPanel(m_Ctx));
+            m_RightPanel.Add(m_MajorColorsSection);
+
             m_BrushSection = new W.Section("Brush", IconKind.Brush, "brush");
             m_BrushPanel = new BrushPanel(m_Ctx);
             m_BrushSection.Body.Add(m_BrushPanel);
@@ -851,6 +855,7 @@ namespace AviCreatorEssentials
             void Show(VisualElement e, bool on) { if (e != null) e.style.display = on ? DisplayStyle.Flex : DisplayStyle.None; }
             Show(m_PoseSection, pose);
             Show(m_ColorSection, !pose);
+            Show(m_MajorColorsSection, !pose);
             Show(m_BrushSection, !pose);
             Show(m_LayerSection, !pose);
             Show(m_MaterialSection, !pose);

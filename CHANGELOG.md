@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.16
+
+- Major colors is now its own section in the right panel, above Brush, instead of living inside the Brush section. Same Detect button and rows, same popup with history — just in its own menu where it belongs.
+- Fixed the beige splitting in two: the light beige and its darker shading and folds are now one detected color, so changing it recolors the whole hoodie body with no greyish patches left around the pocket, folds, or hem. The paw-box background and the paw-print outlines stay their own separate rows, and the pads are untouched.
+
 ## 0.14.15
 
 - Major colors is no longer a tool in the rail: the section is always visible in the right panel, with Detect major colors and one row per color. Clicking a row's new-color swatch opens the plugin's own color wheel popup, with the recent-colors history and saved swatches, instead of Unity's built-in picker; dragging the wheel recolors that color live, and the final color is recorded in history when the popup closes. Detection now lists every distinct color instead of only the biggest ones (down to 0.1%, up to 12 rows), and muted colors are separated properly: light beige, darker brownish-beige, the pale paw-box background and the dark paw pads each get their own row, while all the green shades still count as one green and the beige no longer splits across its hue boundary. The mask no longer claims the 1px blend fringe where two colors meet, so recoloring the beige leaves the sleeve/body seam clean.

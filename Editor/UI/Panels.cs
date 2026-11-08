@@ -22,13 +22,7 @@ namespace AviCreatorEssentials
         readonly VisualElement m_GradientBox;
         readonly VisualElement m_LassoRecolorBox;
         readonly VisualElement m_ColorRecolorBox;
-        readonly VisualElement m_MajorColorsBox;
-        readonly VisualElement m_MajorColorsList;
         readonly VisualElement m_BrushBox;
-        readonly Dictionary<MajorColor, VisualElement> m_MajorTargetFills = new Dictionary<MajorColor, VisualElement>();
-        MajorColor m_PopupCluster;
-        VisualElement m_PopupTargetFill;
-        bool m_PopupOpen;
 
         BrushSettings B => m_Ctx.brush;
 
@@ -140,12 +134,6 @@ namespace AviCreatorEssentials
             m_ColorRecolorBox.Add(crRow);
             Add(m_ColorRecolorBox);
 
-            m_MajorColorsBox = W.Column("ap-major-colors-options");
-            m_MajorColorsBox.Add(W.TextButton("Detect major colors", DetectMajorColors, "ap-small", "ap-accent"));
-            m_MajorColorsList = W.Column("ap-major-colors-list");
-            m_MajorColorsBox.Add(m_MajorColorsList);
-            Add(m_MajorColorsBox);
-
             m_BrushBox = W.Column();
             Add(m_BrushBox);
 
@@ -251,15 +239,11 @@ namespace AviCreatorEssentials
             BrushLibrary.Changed += RebuildTips;
             m_Ctx.BrushChanged += Refresh;
             m_Ctx.ToolChanged += RefreshMode;
-            if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged += RebuildMajorColors;
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 BrushLibrary.Changed -= RebuildTips;
                 m_Ctx.BrushChanged -= Refresh;
                 m_Ctx.ToolChanged -= RefreshMode;
-                if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged -= RebuildMajorColors;
-                if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
-                if (m_PopupOpen) OnMajorColorPopupClosed();
             });
             RebuildTips();
             RefreshMode();
@@ -328,6 +312,186 @@ namespace AviCreatorEssentials
             }
             action(s, set, layer);
             m_Ctx.Render();
+        }
+
+        /// <summary>Runs an action on the floating piece (or the selected image layer) of the active material.</summary>
+        void WithFloating(Action<APSession, TextureSet, PaintLayer> action, bool floatingOnly = false)
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            var layer = s?.FloatingLayer(set);
+            if (layer == null && !floatingOnly && set?.ActiveLayer != null && set.ActiveLayer.kind == LayerKind.Image) layer = set.ActiveLayer;
+            if (layer == null)
+            {
+                m_Ctx.ShowHint("Nothing is picked up. Draw around part of a paint layer in the texture view, or click a color.");
+                return;
+            }
+            action(s, set, layer);
+            m_Ctx.Render();
+        }
+
+        void LiftWith(Func<TextureSet, byte[]> makeMask, string emptyHint)
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set == null) return;
+            var floating = s.FloatingLayer(set);
+            if (floating != null) s.ApplyFloating(set, floating);
+            var mask = makeMask(set);
+            if (mask == null)
+            {
+                if (emptyHint != null) m_Ctx.ShowHint(emptyHint);
+                return;
+            }
+            var msg = s.Lift(set, set.ActiveLayer, mask, m_Ctx.transformCopy);
+            if (msg != null) m_Ctx.ShowHint(msg);
+            m_Ctx.Tool = PaintTool.Transform;
+            m_Ctx.Render();
+        }
+
+        public void Refresh()
+        {
+            foreach (var e in m_Refreshables)
+            {
+                if (e is W.SliderRow s) s.Refresh();
+                else if (e is W.ToggleRow t) t.Refresh();
+                else if (e is W.DropdownRow d) d.Refresh();
+                else if (e is W.Segmented sg) sg.Refresh();
+            }
+            foreach (var tile in m_Tips.Children())
+                W.SetOn(tile, tile.userData as string == B.tip, "ap-on");
+        }
+
+        /// <summary>
+        /// Copies the current selection's colors onto the same material's emission texture, as a new layer, so
+        /// the selected parts glow. Shared with the Layer panel's selection row (same session method).
+        /// </summary>
+        void SelectionToEmission()
+        {
+            var s = m_Ctx.session;
+            var set = s?.ActiveSet;
+            if (set == null || !set.HasSelection)
+            {
+                m_Ctx.ShowHint("Select something first (Select tool, S).");
+                return;
+            }
+            if (APSession.IsEmission(set))
+            {
+                m_Ctx.ShowHint("That selection is already on the emission texture — it already glows.");
+                return;
+            }
+            var emSet = s.EmissionSibling(set);
+            var layer = s.CopySelectionToEmission(set);
+            if (layer == null || emSet == null)
+            {
+                m_Ctx.ShowHint("This material has no emission texture slot, so there is nowhere for it to glow.");
+                return;
+            }
+            s.ActiveSet = emSet;
+            m_Ctx.Render();
+            m_Ctx.ShowHint("Added \"" + layer.name + "\" to the emission layers for " +
+                           (set.originalMaterial != null ? set.originalMaterial.name : "this material") +
+                           ". Turn on the emission view (sun button in the toolbar) to see it glow.");
+        }
+
+        void RefreshMode()
+        {
+            bool fill = m_Ctx.Tool == PaintTool.Fill;
+            bool select = m_Ctx.Tool == PaintTool.Select;
+            bool transform = m_Ctx.Tool == PaintTool.Transform;
+            bool gradient = m_Ctx.Tool == PaintTool.Gradient;
+            bool lassoRecolor = m_Ctx.Tool == PaintTool.LassoRecolor;
+            bool colorRecolor = m_Ctx.Tool == PaintTool.ColorRecolor;
+            m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
+            m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
+            m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
+            m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
+            m_LassoRecolorBox.style.display = lassoRecolor ? DisplayStyle.Flex : DisplayStyle.None;
+            m_ColorRecolorBox.style.display = colorRecolor ? DisplayStyle.Flex : DisplayStyle.None;
+            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        void RebuildTips()
+        {
+            // Read the list before clearing: the first read loads the library, which raises Changed and calls this
+            // method again. Clearing first let that inner call fill the row and this one add every tip a second time.
+            var tips = BrushLibrary.Tips;
+            m_Tips.Clear();
+            foreach (var tip in tips)
+            {
+                var t = tip;
+                var tile = new VisualElement { tooltip = tip.name + (tip.builtIn ? "" : "  (right-click to delete)"), userData = tip.name };
+                tile.AddToClassList("ap-tip");
+                var img = new Image { image = tip.preview, scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore, tintColor = m_Ctx.view.LightTheme ? new Color(0.1f, 0.1f, 0.1f) : new Color(0.85f, 0.85f, 0.85f) };
+                img.AddToClassList("ap-tip-image");
+                tile.Add(img);
+                tile.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button == 0)
+                    {
+                        B.tip = t.name;
+                        Changed();
+                    }
+                    else if (e.button == 1 && !t.builtIn)
+                    {
+                        if (EditorUtility.DisplayDialog("Delete brush", "Delete the brush '" + t.name + "'? Its image file will be removed.", "Delete", "Cancel"))
+                        {
+                            if (B.tip == t.name) B.tip = "Round";
+                            BrushLibrary.Delete(t);
+                        }
+                    }
+                    e.StopPropagation();
+                });
+                m_Tips.Add(tile);
+            }
+            var add = new VisualElement { tooltip = "Add a custom brush from a PNG or JPG. White (or opaque) areas paint." };
+            add.AddToClassList("ap-tip");
+            add.AddToClassList("ap-tip-add");
+            add.Add(new Icon(IconKind.Plus, 18));
+            add.RegisterCallback<ClickEvent>(_ =>
+            {
+                string path = EditorUtility.OpenFilePanelWithFilters("Add brush", "", new[] { "Images", "png,jpg,jpeg" });
+                if (string.IsNullOrEmpty(path)) return;
+                B.tip = BrushLibrary.Import(path);
+                Changed();
+            });
+            m_Tips.Add(add);
+            Refresh();
+        }
+    }
+
+    // ====================================================================== major colors
+
+    /// <summary>Major colors lives in its own section above Brush, not inside the Brush
+    /// panel: it is not a brush tool. Always visible, no toggle.</summary>
+    public class MajorColorsPanel : VisualElement
+    {
+        readonly PainterContext m_Ctx;
+        readonly VisualElement m_MajorColorsList;
+        readonly Dictionary<MajorColor, VisualElement> m_MajorTargetFills = new Dictionary<MajorColor, VisualElement>();
+        MajorColor m_PopupCluster;
+        VisualElement m_PopupTargetFill;
+        bool m_PopupOpen;
+
+        public MajorColorsPanel(PainterContext ctx)
+        {
+            m_Ctx = ctx;
+            AddToClassList("ap-major-colors-options");
+            Add(W.TextButton("Detect major colors", DetectMajorColors, "ap-small", "ap-accent"));
+            m_MajorColorsList = W.Column("ap-major-colors-list");
+            Add(m_MajorColorsList);
+            // Rebuild when the tool changes (the trigger the Brush panel used to give
+            // this list) and when the active material changes.
+            m_Ctx.ToolChanged += RebuildMajorColors;
+            if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged += RebuildMajorColors;
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                m_Ctx.ToolChanged -= RebuildMajorColors;
+                if (m_Ctx.session != null) m_Ctx.session.ActiveSetChanged -= RebuildMajorColors;
+                if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
+                if (m_PopupOpen) OnMajorColorPopupClosed();
+            });
+            RebuildMajorColors();
         }
 
         /// <summary>Detects the major colors of the active material and lists them below.</summary>
@@ -445,154 +609,6 @@ namespace AviCreatorEssentials
                 m_PopupTargetFill = null;
             }
             m_Ctx.Render();
-        }
-
-        /// <summary>Runs an action on the floating piece (or the selected image layer) of the active material.</summary>
-        void WithFloating(Action<APSession, TextureSet, PaintLayer> action, bool floatingOnly = false)
-        {
-            var s = m_Ctx.session;
-            var set = s?.ActiveSet;
-            var layer = s?.FloatingLayer(set);
-            if (layer == null && !floatingOnly && set?.ActiveLayer != null && set.ActiveLayer.kind == LayerKind.Image) layer = set.ActiveLayer;
-            if (layer == null)
-            {
-                m_Ctx.ShowHint("Nothing is picked up. Draw around part of a paint layer in the texture view, or click a color.");
-                return;
-            }
-            action(s, set, layer);
-            m_Ctx.Render();
-        }
-
-        void LiftWith(Func<TextureSet, byte[]> makeMask, string emptyHint)
-        {
-            var s = m_Ctx.session;
-            var set = s?.ActiveSet;
-            if (set == null) return;
-            var floating = s.FloatingLayer(set);
-            if (floating != null) s.ApplyFloating(set, floating);
-            var mask = makeMask(set);
-            if (mask == null)
-            {
-                if (emptyHint != null) m_Ctx.ShowHint(emptyHint);
-                return;
-            }
-            var msg = s.Lift(set, set.ActiveLayer, mask, m_Ctx.transformCopy);
-            if (msg != null) m_Ctx.ShowHint(msg);
-            m_Ctx.Tool = PaintTool.Transform;
-            m_Ctx.Render();
-        }
-
-        public void Refresh()
-        {
-            foreach (var e in m_Refreshables)
-            {
-                if (e is W.SliderRow s) s.Refresh();
-                else if (e is W.ToggleRow t) t.Refresh();
-                else if (e is W.DropdownRow d) d.Refresh();
-                else if (e is W.Segmented sg) sg.Refresh();
-            }
-            foreach (var tile in m_Tips.Children())
-                W.SetOn(tile, tile.userData as string == B.tip, "ap-on");
-        }
-
-        /// <summary>
-        /// Copies the current selection's colors onto the same material's emission texture, as a new layer, so
-        /// the selected parts glow. Shared with the Layer panel's selection row (same session method).
-        /// </summary>
-        void SelectionToEmission()
-        {
-            var s = m_Ctx.session;
-            var set = s?.ActiveSet;
-            if (set == null || !set.HasSelection)
-            {
-                m_Ctx.ShowHint("Select something first (Select tool, S).");
-                return;
-            }
-            if (APSession.IsEmission(set))
-            {
-                m_Ctx.ShowHint("That selection is already on the emission texture — it already glows.");
-                return;
-            }
-            var emSet = s.EmissionSibling(set);
-            var layer = s.CopySelectionToEmission(set);
-            if (layer == null || emSet == null)
-            {
-                m_Ctx.ShowHint("This material has no emission texture slot, so there is nowhere for it to glow.");
-                return;
-            }
-            s.ActiveSet = emSet;
-            m_Ctx.Render();
-            m_Ctx.ShowHint("Added \"" + layer.name + "\" to the emission layers for " +
-                           (set.originalMaterial != null ? set.originalMaterial.name : "this material") +
-                           ". Turn on the emission view (sun button in the toolbar) to see it glow.");
-        }
-
-        void RefreshMode()
-        {
-            bool fill = m_Ctx.Tool == PaintTool.Fill;
-            bool select = m_Ctx.Tool == PaintTool.Select;
-            bool transform = m_Ctx.Tool == PaintTool.Transform;
-            bool gradient = m_Ctx.Tool == PaintTool.Gradient;
-            bool lassoRecolor = m_Ctx.Tool == PaintTool.LassoRecolor;
-            bool colorRecolor = m_Ctx.Tool == PaintTool.ColorRecolor;
-            m_FillBox.style.display = fill ? DisplayStyle.Flex : DisplayStyle.None;
-            m_SelectBox.style.display = select ? DisplayStyle.Flex : DisplayStyle.None;
-            m_TransformBox.style.display = transform ? DisplayStyle.Flex : DisplayStyle.None;
-            m_GradientBox.style.display = gradient ? DisplayStyle.Flex : DisplayStyle.None;
-            m_LassoRecolorBox.style.display = lassoRecolor ? DisplayStyle.Flex : DisplayStyle.None;
-            m_ColorRecolorBox.style.display = colorRecolor ? DisplayStyle.Flex : DisplayStyle.None;
-            // Major colors is not a tool: the section is always visible, with or without a tool selected.
-            m_MajorColorsBox.style.display = DisplayStyle.Flex;
-            m_BrushBox.style.display = fill || select || transform || gradient || lassoRecolor || colorRecolor ? DisplayStyle.None : DisplayStyle.Flex;
-            RebuildMajorColors();
-        }
-
-        void RebuildTips()
-        {
-            // Read the list before clearing: the first read loads the library, which raises Changed and calls this
-            // method again. Clearing first let that inner call fill the row and this one add every tip a second time.
-            var tips = BrushLibrary.Tips;
-            m_Tips.Clear();
-            foreach (var tip in tips)
-            {
-                var t = tip;
-                var tile = new VisualElement { tooltip = tip.name + (tip.builtIn ? "" : "  (right-click to delete)"), userData = tip.name };
-                tile.AddToClassList("ap-tip");
-                var img = new Image { image = tip.preview, scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore, tintColor = m_Ctx.view.LightTheme ? new Color(0.1f, 0.1f, 0.1f) : new Color(0.85f, 0.85f, 0.85f) };
-                img.AddToClassList("ap-tip-image");
-                tile.Add(img);
-                tile.RegisterCallback<PointerDownEvent>(e =>
-                {
-                    if (e.button == 0)
-                    {
-                        B.tip = t.name;
-                        Changed();
-                    }
-                    else if (e.button == 1 && !t.builtIn)
-                    {
-                        if (EditorUtility.DisplayDialog("Delete brush", "Delete the brush '" + t.name + "'? Its image file will be removed.", "Delete", "Cancel"))
-                        {
-                            if (B.tip == t.name) B.tip = "Round";
-                            BrushLibrary.Delete(t);
-                        }
-                    }
-                    e.StopPropagation();
-                });
-                m_Tips.Add(tile);
-            }
-            var add = new VisualElement { tooltip = "Add a custom brush from a PNG or JPG. White (or opaque) areas paint." };
-            add.AddToClassList("ap-tip");
-            add.AddToClassList("ap-tip-add");
-            add.Add(new Icon(IconKind.Plus, 18));
-            add.RegisterCallback<ClickEvent>(_ =>
-            {
-                string path = EditorUtility.OpenFilePanelWithFilters("Add brush", "", new[] { "Images", "png,jpg,jpeg" });
-                if (string.IsNullOrEmpty(path)) return;
-                B.tip = BrushLibrary.Import(path);
-                Changed();
-            });
-            m_Tips.Add(add);
-            Refresh();
         }
     }
 

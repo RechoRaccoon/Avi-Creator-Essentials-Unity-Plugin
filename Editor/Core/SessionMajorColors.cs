@@ -85,10 +85,11 @@ namespace AviCreatorEssentials
         /// Detects the different colors of a material: clusters the base texture (everything
         /// below the first adjustment layer, so already-recolored layers don't change the answer)
         /// by hue and brightness. Saturated colors merge across their full shade range — the dark
-        /// folds and lit parts of the green count as one color. Muted colors merge only within
-        /// their brightness band and within a 35-degree hue span, so light beige, darker
-        /// brownish-beige, the pale paw-box background and the dark paw pads each get their own
-        /// row. Small but distinct colors are kept: clusters down to 0.1% are listed, up to 12.
+        /// folds and lit parts of the green count as one color. Muted colors merge within their
+        /// brightness band and across bands when the brightness is close, within a 35-degree hue
+        /// span, so the light beige and its darker shading count as one color while the pale
+        /// paw-box background and the dark paw-print outlines stay their own rows. Small but
+        /// distinct colors are kept: clusters down to 0.1% are listed, up to 12.
         /// </summary>
         public List<MajorColor> DetectMajorColors(TextureSet set, int maxColors = 12)
         {
@@ -122,13 +123,15 @@ namespace AviCreatorEssentials
 
             // Merge cells into clusters, largest cells first so the biggest colors claim
             // their cells before the small ones. Saturated cells merge across hue bins and
-            // brightness bands (one hue family = one color). Muted cells merge only with the
-            // hue bins next to them, in the same brightness band, and only while the cluster's
-            // total hue span stays within 35 degrees: that keeps a wide color like the beige
-            // (bins 4-7, about a 30-degree span) whole while the paw pads and the seam blends —
-            // 30-40 degrees away from the beige's center — can never join it. A cell that
-            // would stretch a cluster past the span is left unclaimed, so it seeds its own
-            // cluster instead. Neutral bands never merge.
+            // brightness bands (one hue family = one color). Muted cells merge with the hue
+            // bins next to them in the same brightness band, and with the same hue bin in the
+            // next band up or down when the brightness is close (mean values within 0.15):
+            // that keeps a wide color like the beige (bins 4-7, about a 30-degree span) whole
+            // across its light parts and darker shading, while the pale paw-box background
+            // and the dark paw-print outlines stay apart. Muted merges also stop when the
+            // cluster's total hue span would pass 35 degrees. A cell that would stretch a
+            // cluster past the span is left unclaimed, so it seeds its own cluster instead.
+            // Neutral bands never merge.
             var claimed = new HashSet<int>();
             var clusters = new List<List<int>>();
             var keys = new List<int>(cells.Keys);
@@ -146,7 +149,7 @@ namespace AviCreatorEssentials
                 {
                     int k = stack.Pop();
                     cluster.Add(k);
-                    foreach (var n in MajorNeighbors(k))
+                    foreach (var n in MajorNeighbors(k, cells))
                     {
                         if (!cells.ContainsKey(n) || claimed.Contains(n)) continue;
                         if (n >= 2000)
@@ -208,7 +211,7 @@ namespace AviCreatorEssentials
             return found;
         }
 
-        static IEnumerable<int> MajorNeighbors(int key)
+        static IEnumerable<int> MajorNeighbors(int key, Dictionary<int, MajorCell> cells)
         {
             if (key < 1000)
             {
@@ -223,13 +226,28 @@ namespace AviCreatorEssentials
             }
             else if (key >= 2000)
             {
-                // Muted: hue bins next to this one, same brightness band only. Brightness
-                // is most of what makes a muted color look different, so the pale paw-box
-                // background (bright band) never merges with the dark paw pads (dark band),
-                // and light beige never merges with darker brownish-beige.
+                // Muted: hue bins next to this one, same brightness band — plus the same
+                // hue bin in the next brightness band up or down, but only when the two
+                // cells are close in brightness (mean values within 0.15). A color's light
+                // parts and its darker shading are one color, so the light beige and its
+                // folds join up; the pale paw-box background (bright) and the dark paw-print
+                // outlines (dark) are too far apart in brightness to join, and the pads are
+                // neutral grey, which never merges with anything.
                 int hueBin = (key - 2000) / 3, band = (key - 2000) % 3;
                 yield return 2000 + ((hueBin + 1) % 36) * 3 + band;
                 yield return 2000 + ((hueBin + 35) % 36) * 3 + band;
+                if (cells != null && cells.TryGetValue(key, out var cell))
+                {
+                    float meanV = cell.sumV / cell.count;
+                    for (int nb = band - 1; nb <= band + 1; nb += 2)
+                    {
+                        if (nb < 0 || nb > 2) continue;
+                        int nk = 2000 + hueBin * 3 + nb;
+                        if (cells.TryGetValue(nk, out var ncell)
+                            && Mathf.Abs(ncell.sumV / ncell.count - meanV) <= 0.15f)
+                            yield return nk;
+                    }
+                }
             }
             // Neutral bands (1000-1002) never merge: black, grey and white are different colors.
         }
