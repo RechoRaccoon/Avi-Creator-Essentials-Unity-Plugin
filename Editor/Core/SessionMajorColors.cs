@@ -166,6 +166,14 @@ namespace AviCreatorEssentials
                 clusters.Add(cluster);
             }
 
+            // Dark print unification: pads and their outlines (dark, desaturated) can
+            // split across brightness bands and hue caps into several sub-floor clusters,
+            // so a recolor of one row leaves parts of the print behind. Merge dark
+            // desaturated clusters (mean V < 0.6, mean S < 0.17) that agree in value and,
+            // for muted members, in hue, into one row per print. Runs after the flood,
+            // before the coverage floor, and never touches brighter colors.
+            clusters = MergeDarkPrintClusters(clusters, cells);
+
             foreach (var cluster in clusters)
             {
                 int count = 0;
@@ -198,17 +206,123 @@ namespace AviCreatorEssentials
                 found.Add(mc);
             }
             found.Sort((a, b) => b.coverage.CompareTo(a.coverage));
+            // Name collisions: qualify by the cluster's own brightness, so a pale
+            // cluster is never labelled "Dark ...". A second collision falls back to
+            // a number. Any "Light "/"Dark " prefix the base name already carries is
+            // stripped first, so a re-qualified name never reads "Dark Dark Green".
             var used = new HashSet<string>();
             foreach (var mc in found)
             {
                 string n = mc.name;
-                if (used.Contains(n)) n = "Dark " + n;
-                if (used.Contains(n)) n += " 2";
+                if (used.Contains(n))
+                {
+                    string bare = n;
+                    if (bare.StartsWith("Light ")) bare = bare.Substring(6);
+                    else if (bare.StartsWith("Dark ")) bare = bare.Substring(5);
+                    n = (mc.valMean >= 0.75f ? "Light " : mc.valMean <= 0.45f ? "Dark " : "") + bare;
+                }
+                string baseName = n;
+                int suffix = 2;
+                while (used.Contains(n))
+                    n = baseName + " " + suffix++;
                 mc.name = n;
                 used.Add(n);
             }
             if (found.Count > maxColors) found.RemoveRange(maxColors, found.Count - maxColors);
             return found;
+        }
+
+        // Group dark, desaturated clusters (paw pads + their outlines) into one row
+        // per print, so recoloring it moves the whole print. Candidates are clusters
+        // whose mean is dark (V < 0.6) and desaturated (S < 0.17). Processed biggest
+        // first, each candidate joins the first existing dark-print group it is
+        // compatible with and otherwise starts its own group. A neutral candidate
+        // (S < 0.03) joins on value alone (|mean V difference| <= 0.35 vs any member).
+        // A muted candidate joins when it is hue-compatible (|hue difference| <= 35
+        // degrees) and value-compatible (|mean V difference| <= 0.35) vs at least one
+        // muted member of the group, except that the first muted member of a group
+        // joins on value alone and sets the group's hue anchor. Bright or saturated
+        // clusters pass through unchanged. Tiny warm clusters (far in hue) stay out
+        // and drop below the coverage floor as before.
+        static List<List<int>> MergeDarkPrintClusters(List<List<int>> clusters, Dictionary<int, MajorCell> cells)
+        {
+            var stats = new List<(int count, float hue, float sat, float val, bool neutral)>();
+            foreach (var cluster in clusters)
+            {
+                int count = 0;
+                double sr = 0, sg = 0, sb = 0, sv = 0;
+                foreach (var k in cluster)
+                {
+                    var cell = cells[k];
+                    count += cell.count;
+                    sr += cell.sumR; sg += cell.sumG; sb += cell.sumB; sv += cell.sumV;
+                }
+                float meanV = (float)(sv / count);
+                var mean = new Color((float)(sr / count), (float)(sg / count), (float)(sb / count));
+                Color.RGBToHSV(mean, out float mh, out float ms, out float mv);
+                stats.Add((count, mh, ms, meanV, ms < 0.03f));
+            }
+            var order = new List<int>();
+            for (int i = 0; i < clusters.Count; i++) order.Add(i);
+            order.Sort((a, b) => stats[b].count.CompareTo(stats[a].count));
+            var groups = new List<List<int>>();
+            var groupStats = new List<List<int>>();
+            foreach (var i in order)
+            {
+                var st = stats[i];
+                bool candidate = st.val < 0.6f && st.sat < 0.17f;
+                if (!candidate)
+                {
+                    groups.Add(new List<int>(clusters[i]));
+                    groupStats.Add(new List<int> { i });
+                    continue;
+                }
+                int target = -1;
+                for (int g = 0; g < groups.Count; g++)
+                {
+                    bool dark = true;
+                    foreach (var m in groupStats[g])
+                        if (!(stats[m].val < 0.6f && stats[m].sat < 0.17f)) { dark = false; break; }
+                    if (!dark) continue;
+                    if (st.neutral)
+                    {
+                        foreach (var m in groupStats[g])
+                            if (Mathf.Abs(stats[m].val - st.val) <= 0.35f) { target = g; break; }
+                    }
+                    else
+                    {
+                        bool hasMuted = false;
+                        foreach (var m in groupStats[g])
+                            if (!stats[m].neutral) { hasMuted = true; break; }
+                        if (!hasMuted)
+                        {
+                            foreach (var m in groupStats[g])
+                                if (Mathf.Abs(stats[m].val - st.val) <= 0.35f) { target = g; break; }
+                        }
+                        else
+                        {
+                            foreach (var m in groupStats[g])
+                            {
+                                if (stats[m].neutral) continue;
+                                if (Mathf.Abs(HueDiff(stats[m].hue, st.hue)) <= 35f
+                                    && Mathf.Abs(stats[m].val - st.val) <= 0.35f) { target = g; break; }
+                            }
+                        }
+                    }
+                    if (target >= 0) break;
+                }
+                if (target >= 0)
+                {
+                    groups[target].AddRange(clusters[i]);
+                    groupStats[target].Add(i);
+                }
+                else
+                {
+                    groups.Add(new List<int>(clusters[i]));
+                    groupStats.Add(new List<int> { i });
+                }
+            }
+            return groups;
         }
 
         static IEnumerable<int> MajorNeighbors(int key, Dictionary<int, MajorCell> cells)

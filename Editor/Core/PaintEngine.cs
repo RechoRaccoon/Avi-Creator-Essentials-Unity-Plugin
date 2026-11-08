@@ -735,7 +735,14 @@ namespace AviCreatorEssentials
         public Color SampleComposite(TextureSet set, Vector2 uv)
         {
             if (set == null || !set.initialized) return Color.white;
-            Composite(set);
+            // Force a fresh composite: the picker must read the color actually shown
+            // (base + every layer), and the cached composite can be stale or missing
+            // while dirty is false — a mirrored set whose source was never composited
+            // leaves lastComposite null, so a plain Composite() call would return the
+            // white fallback (or the base alone) instead of the layered color. The
+            // cost is one composite per picker sample; the C tool's mask building
+            // (FloodSelect) is untouched.
+            Composite(set, force: true);
             if (set.lastComposite == null) return Color.white;
             uv.x -= Mathf.Floor(uv.x);
             uv.y -= Mathf.Floor(uv.y);

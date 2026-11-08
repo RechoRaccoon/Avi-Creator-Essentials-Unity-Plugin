@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.17
+
+- Fixed the paw prints splitting across rows: the pads and their outlines are now detected as one color, so recoloring that row moves the whole print instead of leaving dark outlines or pink specks behind. The pale paw-box background is its own row again, and its name is fixed — it reads "Light Green" now instead of "Dark Green", since a pale color should never be named dark. Same fix for any other pale color that used to pick up a dark name when it collided with a bigger color.
+- Fixed the color picker (I) reading white on areas covered by an image or text layer: it now samples the composited color actually shown on screen (base plus every layer on top), so clicking the pink Pancake text sets the current color to that pink instead of the white base underneath. Clicking plain base areas still works the same. The Color recolor tool (C) and its mask are untouched.
+
 ## 0.14.16
 
 - Major colors is now its own section in the right panel, above Brush, instead of living inside the Brush section. Same Detect button and rows, same popup with history — just in its own menu where it belongs.
