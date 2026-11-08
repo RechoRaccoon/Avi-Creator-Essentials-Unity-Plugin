@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.24
+
+- Fixed the Stripes options not showing when the tool is picked: the tool boxes now follow the current tool on every panel rebuild too, instead of only on the tool-change event, so the Stripes options (and the other tools' boxes) always match the tool in hand.
+
 ## 0.14.23
 
 - New stripes tool (P): drag across the model and it lays stripes around it in 3D, so they wrap right no matter how the UVs are laid out — same as gradients, and baked into the layer like any paint. Pick horizontal or vertical, add your own colors (up to 8, click a swatch to change it), and set how many stripes repeat across the drag, how wide each one is, and the offset.

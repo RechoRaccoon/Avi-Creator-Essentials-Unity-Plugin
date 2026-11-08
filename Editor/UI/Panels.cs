@@ -268,6 +268,16 @@ namespace AviCreatorEssentials
             BrushLibrary.Changed += RebuildTips;
             m_Ctx.BrushChanged += Refresh;
             m_Ctx.ToolChanged += RefreshMode;
+            // A detach drops the ToolChanged subscription, and nothing re-established it —
+            // so a panel that was detached and put back could stop following tool switches
+            // while still looking live. Re-subscribe on every attach (deduped, so there is
+            // still exactly one) and refresh the boxes right away.
+            RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                m_Ctx.ToolChanged -= RefreshMode;
+                m_Ctx.ToolChanged += RefreshMode;
+                RefreshMode();
+            });
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 BrushLibrary.Changed -= RebuildTips;
@@ -425,7 +435,11 @@ namespace AviCreatorEssentials
                            ". Turn on the emission view (sun button in the toolbar) to see it glow.");
         }
 
-        void RefreshMode()
+        /// <summary>Shows the options box for the current tool and hides the rest (the brush
+        /// settings only show for tools without their own box). Public so the window can force
+        /// the boxes to match the current tool on a panel rebuild, even if a ToolChanged
+        /// notification was ever missed.</summary>
+        public void RefreshMode()
         {
             bool fill = m_Ctx.Tool == PaintTool.Fill;
             bool select = m_Ctx.Tool == PaintTool.Select;

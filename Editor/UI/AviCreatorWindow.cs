@@ -883,6 +883,10 @@ namespace AviCreatorEssentials
             if (title != null)
                 title.text = m_Ctx.Tool == PaintTool.Fill ? "Fill" : m_Ctx.Tool == PaintTool.Select ? "Select" : m_Ctx.Tool == PaintTool.Transform ? "Transform" :
                     m_Ctx.Tool == PaintTool.Gradient ? "Gradient" : m_Ctx.Tool == PaintTool.Stripes ? "Stripes" : "Brush";
+            // The tool option boxes follow the current tool here too, not only on the
+            // ToolChanged event: switching tools marks the structure dirty, so this runs on
+            // the next editor update after every switch (the title above proves it ran).
+            m_BrushPanel?.RefreshMode();
             foreach (var r in m_TopBarRefresh) r();
             RefreshToolButtons();
             RefreshHistoryButtons();
