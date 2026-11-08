@@ -509,11 +509,18 @@ namespace AviCreatorEssentials
         /// neighbours along its line, so it is not claimed, while real areas — weave lines,
         /// blobs, solid regions — are surrounded by their own color and stay covered.
         /// With cleanup on (the default), the masks are then cleaned up together: thin speck
-        /// lines and fringes join the color that surrounds them, small holes fill, small
-        /// isolated components are dropped, and every mask is eroded away from dark strokes
-        /// and print edges so recoloring one row cannot bleed green blobs out of dark text
-        /// or a blue fringe under the paw pads. Returns null when the material can't be read,
-        /// or when nothing of the cluster is left in it (base changed since Detect).
+        /// lines and fringes join the color that surrounds them, small holes fill, and small
+        /// isolated components are dropped. There used to be a final step here that eroded
+        /// every mask 3px away from dark pixels of other rows, to keep a recolor from
+        /// bleeding onto dark text or print edges — removed in 0.14.20, because it did the
+        /// opposite on real prints: it cut a pale halo around the paw-box frame (the beige
+        /// must touch the dark frame), punched black squares into the paws and frame (the
+        /// print's own dark crease pixels sit in other rows, so the mask was eroded around
+        /// them), and stripped the pale background's mask ringing the pads, leaving a white
+        /// fringe. The other cleanup steps already keep the 0.14.18 wins (readable text,
+        /// no fringe in the box, shoulder band whole) without it, and the Edit mask button
+        /// is the hand fallback for anything left. Returns null when the material can't be
+        /// read, or when nothing of the cluster is left in it (base changed since Detect).
         /// </summary>
         RenderTexture MajorColorMask(TextureSet set, MajorColor mc, List<MajorColor> all, bool cleanup)
         {
@@ -527,14 +534,11 @@ namespace AviCreatorEssentials
             for (int r = 0; r < rows.Count; r++)
                 foreach (var k in rows[r].cellKeys) keyToRow[k] = r;
             // Which cluster each pixel belongs to (-1 when its color is not in any
-            // detected cluster), and whether it is a dark muted pixel.
+            // detected cluster).
             var pixelRow = new int[px.Length];
-            var dark = new bool[px.Length];
             for (int i = 0; i < px.Length; i++)
             {
                 var c = px[i];
-                Color.RGBToHSV((Color)c, out _, out float sat, out float val);
-                dark[i] = sat < 0.17f && val < 0.35f;
                 if (c.a < 128) { pixelRow[i] = -1; continue; }
                 int key = MajorCellKey(c, out _);
                 pixelRow[i] = keyToRow.TryGetValue(key, out int r) ? r : -1;
@@ -556,7 +560,6 @@ namespace AviCreatorEssentials
             for (int r = 0; r < n; r++)
             {
                 if (!cleanup) continue;
-                masks[r] = MajorErodeFromDark(masks[r], dark, pixelRow, r, w, h);
                 masks[r] = RemoveSmallComponents(masks[r], w, h, 25);
             }
             var bytes = new byte[px.Length];
@@ -586,25 +589,6 @@ namespace AviCreatorEssentials
             mask = MorphDilate(MorphErode(mask, w, h), w, h);
             mask = MorphErode(MorphDilate(mask, w, h), w, h);
             return mask;
-        }
-
-        /// <summary>Erodes a mask away from dark pixels that belong to another row: a
-        /// 3px rim around dark strokes and print edges, so a recolor cannot bleed onto
-        /// them. Dark here means muted (S below 0.17) and dark (V below 0.35).</summary>
-        static bool[] MajorErodeFromDark(bool[] mask, bool[] dark, int[] pixelRow, int row, int w, int h)
-        {
-            var nonMemberDark = new bool[w * h];
-            for (int i = 0; i < nonMemberDark.Length; i++)
-                nonMemberDark[i] = dark[i] && pixelRow[i] != row;
-            var ii = IntegralImage(nonMemberDark, w, h);
-            var result = new bool[w * h];
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                {
-                    int i = y * w + x;
-                    if (mask[i] && WindowSum(ii, w, h, x, y, 3) == 0) result[i] = true;
-                }
-            return result;
         }
 
         /// <summary>Drops connected components smaller than minSize from a mask.</summary>

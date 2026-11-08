@@ -844,6 +844,13 @@ namespace AviCreatorEssentials
                     }));
             }
 
+            // Masks are black or white: a Paint stroke adds at full strength and an Erase stroke
+            // removes at full strength, whatever color the brush holds. Before this, a Paint stroke
+            // wrote the brush color's luminance into the mask, so painting a Major mask with a dark
+            // color left a grey mask that barely recolored. Opacity still controls strength.
+            // This is the shared stroke path, so it covers every mask painted by hand, not just Major rows.
+            if (mask) ctx.maskValue = ctx.tool == StrokeTool.Erase ? 0f : 1f;
+
             var target = mask ? layer.mask : layer.content;
             if (target == null)
             {

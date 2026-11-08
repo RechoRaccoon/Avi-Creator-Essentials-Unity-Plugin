@@ -655,6 +655,9 @@ namespace AviCreatorEssentials
         /// </summary>
         void EnterMajorMaskEdit(MajorColor cluster)
         {
+            // A Major color popup open on a row keeps driving that row's color from the wheel
+            // while the mask is being edited; close it first (its Closed handler cleans the row up).
+            if (QuickColorPopup.IsOpen) QuickColorPopup.Close();
             var s = m_Ctx.session;
             var set = s?.ActiveSet;
             if (set == null) { m_Ctx.ShowHint("Pick a material first."); return; }

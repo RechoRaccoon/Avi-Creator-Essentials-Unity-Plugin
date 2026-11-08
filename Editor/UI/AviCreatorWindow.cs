@@ -908,12 +908,14 @@ namespace AviCreatorEssentials
         /// <summary>The color wheel edits the selected fill or recolor layer, like Substance's per-layer color pickers.</summary>
         void OnPaintColorChanged()
         {
-            if (m_SuppressLayerColor || m_Ctx.suppressLayerColorFollow || m_Session == null || !m_View.pickerEditsLayer || m_Ctx.strokeActive || m_Ctx.PoseMode) return;
+            if (m_SuppressLayerColor || m_Ctx.suppressLayerColorFollow || m_Ctx.majorMaskEdit != null || m_Session == null || !m_View.pickerEditsLayer || m_Ctx.strokeActive || m_Ctx.PoseMode) return;
             var set = m_Session.ActiveSet;
             var layer = set?.ActiveLayer;
             if (layer == null || !layer.HasEditableColor) return;
             // A Recolor layer keeps following the wheel even while its mask is being edited, so the
             // Color Recolor tool's layer tracks the wheel color live; other layers stay as they were.
+            // That does not apply while a Major mask is being edited: there the wheel must leave the
+            // row's layer alone (guarded above), so painting the mask never retargets its recolor.
             if (set.editingMask && !(layer.kind == LayerKind.Adjustment && layer.adjMode == AdjustMode.Recolor)) return;
             if (layer.EditableColor == m_Ctx.primary) return;
             var c = m_Ctx.primary;

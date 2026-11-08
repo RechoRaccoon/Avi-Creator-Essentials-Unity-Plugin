@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.20
+
+- Fixed painting a Major mask with the wrong color: the selected color no longer touches the row's recolor at all while its mask is being edited, and the Brush now adds solid white to the mask while the Eraser takes it away, whatever color the wheel holds — before, a dark color painted a grey mask that barely recolored anything.
+- Removed the Cleanup step that eroded every mask 3px away from dark pixels: on the hoodie it cut a pale halo around the paw-box frame when the beige was recolored, punched black squares into the paws and frame when the grey was recolored, and left a white fringe ringing the paws. The rest of Cleanup still runs, and the text stays readable, the box stays free of red and blue fringe, and the shoulder band stays one beige. Existing Major layers keep the mask they were built with — delete the layer or hit Reset and change the color again to rebuild it.
+
 ## 0.14.19
 
 - Each Major colors row now has an Edit mask button: it opens that color's mask for painting by hand, so thin lines left behind, fringe bleeding onto a neighboring color, and speckles can be fixed directly. Brush adds to the mask, Eraser removes from it, Ctrl/Cmd erases and Shift paints, and each stroke is one undo. The mask shows tinted red in the texture view, and the recolor updates live on the model in the 3D view. A row's layer is made on the spot if it doesn't have one yet, so editing works before the first color change too.
