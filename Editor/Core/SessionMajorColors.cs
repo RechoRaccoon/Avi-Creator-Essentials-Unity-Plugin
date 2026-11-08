@@ -24,6 +24,7 @@ namespace AviCreatorEssentials
         {
             public int count;
             public float sumR, sumG, sumB, sumV, minV, maxV;
+            public float sumHue; // linear mean hue of the sampled pixels (0-1)
         }
 
         /// <summary>
@@ -37,6 +38,11 @@ namespace AviCreatorEssentials
         static int MajorCellKey(Color32 c, out float val)
         {
             Color.RGBToHSV((Color)c, out float hue, out float sat, out val);
+            return MajorCellKeyFromHSV(hue, sat, val);
+        }
+
+        static int MajorCellKeyFromHSV(float hue, float sat, float val)
+        {
             int band = val < 0.35f ? 0 : val < 0.7f ? 1 : 2;
             if (sat < 0.03f) return 1000 + band;
             if (sat < 0.17f) return 2000 + (int)(hue * 36f) * 3 + band;
@@ -99,21 +105,28 @@ namespace AviCreatorEssentials
             if (px == null) return found;
             int w = set.width, h = set.height;
             int step = Mathf.Max(1, (int)Mathf.Sqrt(px.Length / 200000f));
+            int sw = (w + step - 1) / step, sh = (h + step - 1) / step;
+            // Cell key of each sampled pixel (-1 when transparent): the
+            // plurality reassignment below reads adjacency off this grid.
+            var sampleKeys = new int[sw * sh];
+            for (int i = 0; i < sampleKeys.Length; i++) sampleKeys[i] = -1;
             var cells = new Dictionary<int, MajorCell>();
             int opaque = 0;
-            for (int y = 0; y < h; y += step)
+            for (int y = 0, sy = 0; y < h; y += step, sy++)
             {
-                for (int x = 0; x < w; x += step)
+                for (int x = 0, sx = 0; x < w; x += step, sx++)
                 {
                     var c = px[y * w + x];
                     if (c.a < 128) continue;
                     opaque++;
-                    int key = MajorCellKey(c, out float val);
+                    Color.RGBToHSV((Color)c, out float hue, out float sat, out float val);
+                    int key = MajorCellKeyFromHSV(hue, sat, val);
+                    sampleKeys[sy * sw + sx] = key;
                     float r = c.r / 255f, g = c.g / 255f, b = c.b / 255f;
                     if (!cells.TryGetValue(key, out var cell))
                         cell = new MajorCell { minV = val, maxV = val };
                     cell.count++;
-                    cell.sumR += r; cell.sumG += g; cell.sumB += b; cell.sumV += val;
+                    cell.sumR += r; cell.sumG += g; cell.sumB += b; cell.sumV += val; cell.sumHue += hue;
                     if (val < cell.minV) cell.minV = val;
                     if (val > cell.maxV) cell.maxV = val;
                     cells[key] = cell;
@@ -165,6 +178,14 @@ namespace AviCreatorEssentials
                 }
                 clusters.Add(cluster);
             }
+
+            // A spatially-connected gradient band can split across two rows when its
+            // palest cells sit within merge distance of a different color's cells:
+            // the band's pale end joins the other row and stays pale while the rest
+            // recolors. Reassign a muted cell to the cluster it touches most, when
+            // that cluster is close in hue and brightness. Runs before the dark-print
+            // merge, so the merge sees the corrected rows.
+            clusters = ReassignPluralityCells(clusters, cells, sampleKeys, sw, sh);
 
             // Dark print unification: pads and their outlines (dark, desaturated) can
             // split across brightness bands and hue caps into several sub-floor clusters,
@@ -230,6 +251,102 @@ namespace AviCreatorEssentials
             }
             if (found.Count > maxColors) found.RemoveRange(maxColors, found.Count - maxColors);
             return found;
+        }
+
+        /// <summary>
+        /// A muted cell joins the cluster it touches most on the sampled grid, when
+        /// that cluster is close in hue (within 35 degrees of the cluster's mean hue)
+        /// and brightness (mean value within 0.35), and both the cell and the winning
+        /// touch count are big enough to trust (at least 100 sampled pixels). A cell
+        /// only moves when it touches the other cluster MORE than its own, so a cell
+        /// embedded in its own color stays put. Decided from the pre-move clusters,
+        /// then applied all at once.
+        /// </summary>
+        static List<List<int>> ReassignPluralityCells(List<List<int>> clusters, Dictionary<int, MajorCell> cells, int[] sampleKeys, int sw, int sh)
+        {
+            int n = clusters.Count;
+            if (n < 2) return clusters;
+            var cellCluster = new Dictionary<int, int>();
+            for (int i = 0; i < n; i++)
+                foreach (var k in clusters[i]) cellCluster[k] = i;
+            var rowHue = new float[n];
+            var rowVal = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                int count = 0;
+                double sh2 = 0, sv = 0;
+                foreach (var k in clusters[i])
+                {
+                    var cell = cells[k];
+                    count += cell.count;
+                    sh2 += cell.sumHue;
+                    sv += cell.sumV;
+                }
+                rowHue[i] = count == 0 ? 0f : (float)(sh2 / count);
+                rowVal[i] = count == 0 ? 0f : (float)(sv / count);
+            }
+            // Touch counts: for each sampled adjacent pair with different cell keys,
+            // each cell records a touch with the other cell's cluster.
+            var touch = new Dictionary<int, int[]>();
+            for (int sy = 0; sy < sh; sy++)
+            {
+                for (int sx = 0; sx < sw; sx++)
+                {
+                    int ka = sampleKeys[sy * sw + sx];
+                    if (ka < 0) continue;
+                    if (sx + 1 < sw)
+                    {
+                        int kb = sampleKeys[sy * sw + sx + 1];
+                        if (kb >= 0 && kb != ka) RecordTouch(touch, cellCluster, ka, kb, n);
+                    }
+                    if (sy + 1 < sh)
+                    {
+                        int kb = sampleKeys[(sy + 1) * sw + sx];
+                        if (kb >= 0 && kb != ka) RecordTouch(touch, cellCluster, ka, kb, n);
+                    }
+                }
+            }
+            var moves = new List<(int cell, int to)>();
+            foreach (var kv in cells)
+            {
+                int cell = kv.Key;
+                if (cell < 2000) continue; // muted cells only
+                var c = kv.Value;
+                if (c.count < 100) continue;
+                if (!cellCluster.TryGetValue(cell, out int own)) continue;
+                if (!touch.TryGetValue(cell, out var t)) continue;
+                int ownT = t[own];
+                int best = -1, bestN = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    if (i == own) continue;
+                    if (t[i] > bestN) { bestN = t[i]; best = i; }
+                }
+                if (best < 0 || bestN <= ownT || bestN < 100) continue;
+                float cellHue = c.sumHue / c.count;
+                float cellVal = c.sumV / c.count;
+                if (Mathf.Abs(HueDiff(cellHue, rowHue[best])) > 35f) continue;
+                if (Mathf.Abs(cellVal - rowVal[best]) > 0.35f) continue;
+                moves.Add((cell, best));
+            }
+            foreach (var m in moves)
+            {
+                int from = cellCluster[m.cell];
+                clusters[from].Remove(m.cell);
+                clusters[m.to].Add(m.cell);
+                cellCluster[m.cell] = m.to;
+            }
+            clusters.RemoveAll(c => c.Count == 0);
+            return clusters;
+        }
+
+        static void RecordTouch(Dictionary<int, int[]> touch, Dictionary<int, int> cellCluster, int ka, int kb, int n)
+        {
+            if (!cellCluster.TryGetValue(ka, out int ra) || !cellCluster.TryGetValue(kb, out int rb)) return;
+            if (!touch.TryGetValue(ka, out var ta)) { ta = new int[n]; touch[ka] = ta; }
+            if (!touch.TryGetValue(kb, out var tb)) { tb = new int[n]; touch[kb] = tb; }
+            ta[rb]++;
+            tb[ra]++;
         }
 
         // Group dark, desaturated clusters (paw pads + their outlines) into one row
@@ -390,45 +507,61 @@ namespace AviCreatorEssentials
         /// where two colors meet, which landed in a cluster by hue) has at most 2 same-cluster
         /// neighbours along its line, so it is not claimed, while real areas — weave lines,
         /// blobs, solid regions — are surrounded by their own color and stay covered.
-        /// Returns null when the material can't be read, or when nothing of the cluster is left
-        /// in it (base changed since Detect).
+        /// With cleanup on (the default), the masks are then cleaned up together: thin speck
+        /// lines and fringes join the color that surrounds them, small holes fill, small
+        /// isolated components are dropped, and every mask is eroded away from dark strokes
+        /// and print edges so recoloring one row cannot bleed green blobs out of dark text
+        /// or a blue fringe under the paw pads. Returns null when the material can't be read,
+        /// or when nothing of the cluster is left in it (base changed since Detect).
         /// </summary>
-        RenderTexture MajorColorMask(TextureSet set, MajorColor mc)
+        RenderTexture MajorColorMask(TextureSet set, MajorColor mc, List<MajorColor> all, bool cleanup)
         {
             var px = ReadBasePixels(set);
             if (px == null) return null;
             int w = set.width, h = set.height;
-            var member = new bool[px.Length];
+            var rows = all != null && all.Count > 0 ? all : new List<MajorColor> { mc };
+            int targetRow = rows.IndexOf(mc);
+            if (targetRow < 0) targetRow = 0;
+            var keyToRow = new Dictionary<int, int>();
+            for (int r = 0; r < rows.Count; r++)
+                foreach (var k in rows[r].cellKeys) keyToRow[k] = r;
+            // Which cluster each pixel belongs to (-1 when its color is not in any
+            // detected cluster), and whether it is a dark muted pixel.
+            var pixelRow = new int[px.Length];
+            var dark = new bool[px.Length];
             for (int i = 0; i < px.Length; i++)
             {
                 var c = px[i];
-                if (c.a >= 128 && mc.cellKeys.Contains(MajorCellKey(c, out _)))
-                    member[i] = true;
+                Color.RGBToHSV((Color)c, out _, out float sat, out float val);
+                dark[i] = sat < 0.17f && val < 0.35f;
+                if (c.a < 128) { pixelRow[i] = -1; continue; }
+                int key = MajorCellKey(c, out _);
+                pixelRow[i] = keyToRow.TryGetValue(key, out int r) ? r : -1;
+            }
+            int n = rows.Count;
+            var masks = new bool[n][];
+            for (int r = 0; r < n; r++)
+            {
+                var member = new bool[px.Length];
+                for (int i = 0; i < px.Length; i++) member[i] = pixelRow[i] == r;
+                masks[r] = MajorMaskSeed(member, w, h, cleanup);
+            }
+            if (cleanup)
+            {
+                masks = ReassignMasks(masks, w, h, 2, 3, 1);
+                masks = ReassignMasks(masks, w, h, 1, 10, 2);
+                ReassignSmallComponents(masks, pixelRow, w, h, 400, 0.40f);
+            }
+            for (int r = 0; r < n; r++)
+            {
+                if (!cleanup) continue;
+                masks[r] = MajorErodeFromDark(masks[r], dark, pixelRow, r, w, h);
+                masks[r] = RemoveSmallComponents(masks[r], w, h, 25);
             }
             var bytes = new byte[px.Length];
             int included = 0;
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    int i = y * w + x;
-                    if (!member[i]) continue;
-                    int same = 0;
-                    for (int dy = -1; dy <= 1; dy++)
-                        for (int dx = -1; dx <= 1; dx++)
-                        {
-                            if (dx == 0 && dy == 0) continue;
-                            int nx = x + dx, ny = y + dy;
-                            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-                            if (member[ny * w + nx]) same++;
-                        }
-                    if (same >= 3)
-                    {
-                        bytes[i] = 255;
-                        included++;
-                    }
-                }
-            }
+            for (int i = 0; i < px.Length; i++)
+                if (masks[targetRow][i]) { bytes[i] = 255; included++; }
             if (included == 0) return null;
             var tex = new Texture2D(w, h, TextureFormat.R8, false, true) { hideFlags = HideFlags.HideAndDontSave };
             tex.LoadRawTextureData(bytes);
@@ -439,6 +572,280 @@ namespace AviCreatorEssentials
             return maskRT;
         }
 
+        /// <summary>Seed mask for one row: members with at least 3 same-row neighbours,
+        /// then (cleanup only) a morphological open and close to drop thin speck lines
+        /// and fill small holes.</summary>
+        static bool[] MajorMaskSeed(bool[] member, int w, int h, bool cleanup)
+        {
+            var counts = NeighborCount(member, w, h, 1);
+            var mask = new bool[w * h];
+            for (int i = 0; i < mask.Length; i++)
+                if (member[i] && counts[i] >= 3) mask[i] = true;
+            if (!cleanup) return mask;
+            mask = MorphDilate(MorphErode(mask, w, h), w, h);
+            mask = MorphErode(MorphDilate(mask, w, h), w, h);
+            return mask;
+        }
+
+        /// <summary>Erodes a mask away from dark pixels that belong to another row: a
+        /// 3px rim around dark strokes and print edges, so a recolor cannot bleed onto
+        /// them. Dark here means muted (S below 0.17) and dark (V below 0.35).</summary>
+        static bool[] MajorErodeFromDark(bool[] mask, bool[] dark, int[] pixelRow, int row, int w, int h)
+        {
+            var nonMemberDark = new bool[w * h];
+            for (int i = 0; i < nonMemberDark.Length; i++)
+                nonMemberDark[i] = dark[i] && pixelRow[i] != row;
+            var ii = IntegralImage(nonMemberDark, w, h);
+            var result = new bool[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = y * w + x;
+                    if (mask[i] && WindowSum(ii, w, h, x, y, 3) == 0) result[i] = true;
+                }
+            return result;
+        }
+
+        /// <summary>Drops connected components smaller than minSize from a mask.</summary>
+        static bool[] RemoveSmallComponents(bool[] mask, int w, int h, int minSize)
+        {
+            var labels = LabelComponents(mask, w, h, out int compCount);
+            if (compCount == 0) return mask;
+            var sizes = new int[compCount + 1];
+            for (int p = 0; p < labels.Length; p++)
+                if (labels[p] != 0) sizes[labels[p]]++;
+            var result = new bool[w * h];
+            for (int p = 0; p < labels.Length; p++)
+            {
+                int c = labels[p];
+                if (c != 0 && sizes[c] >= minSize) result[p] = true;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Reassigns each pixel to the row that owns a strict plurality of its
+        /// neighbours (ties stay put): thin lines and fringes join the color that
+        /// surrounds them instead of the one their own hue landed them in, and
+        /// unmasked gaps fill with the surrounding color. Runs on all rows at once
+        /// so a pixel can move between any two rows.
+        /// </summary>
+        static bool[][] ReassignMasks(bool[][] masks, int w, int h, int iters, int thresh, int radius)
+        {
+            int n = masks.Length;
+            var cur = new bool[n][];
+            for (int i = 0; i < n; i++) cur[i] = (bool[])masks[i].Clone();
+            for (int it = 0; it < iters; it++)
+            {
+                var counts = new int[n][];
+                for (int i = 0; i < n; i++) counts[i] = NeighborCount(cur[i], w, h, radius);
+                var next = new bool[n][];
+                for (int i = 0; i < n; i++) next[i] = new bool[w * h];
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int p = y * w + x;
+                        int bestN = 0;
+                        for (int i = 0; i < n; i++)
+                            if (counts[i][p] > bestN) bestN = counts[i][p];
+                        int best = -1, nMax = 0;
+                        for (int i = 0; i < n; i++)
+                            if (counts[i][p] == bestN) { nMax++; if (best < 0) best = i; }
+                        int row = -1;
+                        if (bestN >= thresh && nMax == 1) row = best;
+                        else
+                        {
+                            // Stay: last mask wins when a pixel is in more than one.
+                            for (int i = n - 1; i >= 0; i--)
+                                if (cur[i][p]) { row = i; break; }
+                        }
+                        if (row >= 0) next[row][p] = true;
+                    }
+                }
+                cur = next;
+            }
+            return cur;
+        }
+
+        /// <summary>
+        /// Small mask components that sit inside a different color's area join that
+        /// color: a thin pale line inside the paw-box background (beige by hue, but
+        /// surrounded by the pale background) recolors with the background instead of
+        /// showing up as a blue stripe. Only components under maxSize move, and only
+        /// when one other row owns at least minFrac of their boundary.
+        /// </summary>
+        static void ReassignSmallComponents(bool[][] masks, int[] pixelRow, int w, int h, int maxSize, float minFrac)
+        {
+            int n = masks.Length;
+            for (int i = 0; i < n; i++)
+            {
+                var labels = LabelComponents(masks[i], w, h, out int compCount);
+                if (compCount == 0) continue;
+                var sizes = new int[compCount + 1];
+                for (int p = 0; p < labels.Length; p++)
+                    if (labels[p] != 0) sizes[labels[p]]++;
+                // Boundary row counts per small component: each boundary pixel votes
+                // once per component it touches, with its own cluster row.
+                var boundary = new int[compCount + 1][];
+                for (int c = 1; c <= compCount; c++)
+                    if (sizes[c] < maxSize) boundary[c] = new int[n];
+                var seen = new int[8];
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int p = y * w + x;
+                        int row = pixelRow[p];
+                        if (row < 0) continue;
+                        // Distinct neighbour labels of this pixel.
+                        int found = 0;
+                        for (int dy = -1; dy <= 1; dy++)
+                        {
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                if (dx == 0 && dy == 0) continue;
+                                int nx = x + dx, ny = y + dy;
+                                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                                int c = labels[ny * w + nx];
+                                if (c == 0 || sizes[c] >= maxSize || boundary[c] == null) continue;
+                                if (labels[p] == c) continue;
+                                bool dup = false;
+                                for (int k = 0; k < found; k++)
+                                    if (seen[k] == c) { dup = true; break; }
+                                if (dup) continue;
+                                seen[found++] = c;
+                                boundary[c][row]++;
+                            }
+                        }
+                    }
+                }
+                var moveTo = new int[compCount + 1];
+                for (int c = 1; c <= compCount; c++)
+                {
+                    moveTo[c] = -1;
+                    if (sizes[c] >= maxSize || boundary[c] == null) continue;
+                    int best = -1, bestN = 0, total = 0;
+                    for (int r = 0; r < n; r++)
+                    {
+                        total += boundary[c][r];
+                        if (boundary[c][r] > bestN) { bestN = boundary[c][r]; best = r; }
+                    }
+                    if (best < 0 || best == i || total == 0) continue;
+                    if ((float)bestN / total < minFrac) continue;
+                    moveTo[c] = best;
+                }
+                for (int p = 0; p < labels.Length; p++)
+                {
+                    int c = labels[p];
+                    if (c != 0 && moveTo[c] >= 0) { masks[i][p] = false; masks[moveTo[c]][p] = true; }
+                }
+            }
+        }
+
+        /// <summary>8-connected component labels for a bool mask (0 = background).</summary>
+        static int[] LabelComponents(bool[] m, int w, int h, out int compCount)
+        {
+            var labels = new int[w * h];
+            compCount = 0;
+            var stack = new Stack<int>();
+            for (int p = 0; p < m.Length; p++)
+            {
+                if (!m[p] || labels[p] != 0) continue;
+                compCount++;
+                labels[p] = compCount;
+                stack.Push(p);
+                while (stack.Count > 0)
+                {
+                    int q = stack.Pop();
+                    int qx = q % w, qy = q / w;
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = qx + dx, ny = qy + dy;
+                            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                            int r = ny * w + nx;
+                            if (m[r] && labels[r] == 0) { labels[r] = compCount; stack.Push(r); }
+                        }
+                    }
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>Integral image (summed-area table) of a bool mask, (w+1)x(h+1),
+        /// so a window sum is four lookups whatever the radius.</summary>
+        static int[] IntegralImage(bool[] m, int w, int h)
+        {
+            var ii = new int[(w + 1) * (h + 1)];
+            for (int y = 0; y < h; y++)
+            {
+                int rowSum = 0;
+                for (int x = 0; x < w; x++)
+                {
+                    if (m[y * w + x]) rowSum++;
+                    ii[(y + 1) * (w + 1) + x + 1] = ii[y * (w + 1) + x + 1] + rowSum;
+                }
+            }
+            return ii;
+        }
+
+        /// <summary>Sum of m over the (2r+1)x(2r+1) window centred at (x,y), clamped to the image.</summary>
+        static int WindowSum(int[] ii, int w, int h, int x, int y, int r)
+        {
+            int x0 = Mathf.Max(0, x - r), x1 = Mathf.Min(w - 1, x + r);
+            int y0 = Mathf.Max(0, y - r), y1 = Mathf.Min(h - 1, y + r);
+            int stride = w + 1;
+            return ii[(y1 + 1) * stride + x1 + 1] - ii[y0 * stride + x1 + 1]
+                 - ii[(y1 + 1) * stride + x0] + ii[y0 * stride + x0];
+        }
+
+        /// <summary>For each pixel, how many of its neighbours (within radius, excluding
+        /// itself) are set in m.</summary>
+        static int[] NeighborCount(bool[] m, int w, int h, int radius)
+        {
+            var ii = IntegralImage(m, w, h);
+            var counts = new int[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = y * w + x;
+                    counts[i] = WindowSum(ii, w, h, x, y, radius) - (m[i] ? 1 : 0);
+                }
+            return counts;
+        }
+
+        /// <summary>3x3 erosion: a pixel stays only when all 8 neighbours are set
+        /// (out-of-bounds counts as unset, so edge pixels are cleared).</summary>
+        static bool[] MorphErode(bool[] m, int w, int h)
+        {
+            var ii = IntegralImage(m, w, h);
+            var result = new bool[w * h];
+            for (int y = 1; y < h - 1; y++)
+                for (int x = 1; x < w - 1; x++)
+                {
+                    int i = y * w + x;
+                    if (WindowSum(ii, w, h, x, y, 1) == 9) result[i] = true;
+                }
+            return result;
+        }
+
+        /// <summary>3x3 dilation: a pixel is set when any neighbour (or itself) is set.</summary>
+        static bool[] MorphDilate(bool[] m, int w, int h)
+        {
+            var ii = IntegralImage(m, w, h);
+            var result = new bool[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = y * w + x;
+                    if (WindowSum(ii, w, h, x, y, 1) > 0) result[i] = true;
+                }
+            return result;
+        }
+
         /// <summary>
         /// Recolors one major color cluster: the first change makes a Recolor layer for the
         /// cluster (masked by rasterizing the cluster's bins at full resolution, so the mask is
@@ -446,7 +853,7 @@ namespace AviCreatorEssentials
         /// The layer sits on top of the stack and is not clipped to one layer below, so it
         /// covers the whole material.
         /// </summary>
-        public string ApplyMajorColor(TextureSet set, MajorColor mc, Color target)
+        public string ApplyMajorColor(TextureSet set, MajorColor mc, Color target, List<MajorColor> all, bool cleanup)
         {
             if (set == null) return "Pick a material first.";
             if (set.IsMirrored) return "This material live-mirrors another — recolor on that material instead.";
@@ -461,7 +868,9 @@ namespace AviCreatorEssentials
                 // Mask is rasterized straight from the cluster's bins: every pixel whose bin
                 // belongs to the cluster is in. No seed sampling, so fine lines can't fall
                 // between seeds and the mask can't bleed onto neighboring colors.
-                var maskRT = MajorColorMask(set, mc);
+                // Cleanup (when on) smooths all rows' masks together before this one is
+                // used, so speckles and fringes are fixed the first time a color changes.
+                var maskRT = MajorColorMask(set, mc, all, cleanup);
                 if (maskRT == null) return "That color isn't in the material anymore — press Detect major colors again.";
                 layer = AddAdjustmentLayer(set, AdjustMode.Recolor, target, maskRT, false, true);
                 layer.name = UniqueMajorName(set, mc.name);

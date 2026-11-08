@@ -135,6 +135,10 @@ namespace AviCreatorEssentials
         public bool colorSampleLayer = true;
         public readonly List<MajorColor> majorColors = new List<MajorColor>();
         public TextureSet majorColorSet;  // the material the detected major colors belong to
+        // Cleanup for Major Colors masks: smooths each row's mask (removes thin speck
+        // lines, fills small holes, keeps fringes off neighboring colors). On by
+        // default; only affects masks built after changing it.
+        public bool majorCleanup = true;
         // While a Major Colors popup is open, the color wheel must not retarget the active
         // Recolor layer: the popup drives its cluster through ApplyMajorColor itself.
         public bool suppressLayerColorFollow;

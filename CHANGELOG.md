@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.18
+
+- Fixed the last Major colors edge problems on the hoodie. The shoulder patch no longer splits off from the beige: a gradient band now stays one color because detection looks at which color each shade actually touches, not just which one it is closest to. The dark Japanese text next to the paw box stays readable when the green is recolored bright green — the green blobs that used to stick out of the strokes are gone. New Cleanup toggle in the Major colors panel (on by default): it smooths each color's mask, so the thin pale weave lines and cyan speckles on a recolored body are gone, the paw-box frame edge no longer leaks blue, and there is no red fringe under the pads. Turning Cleanup off gives the old 0.14.17 masks. Existing Major layers keep the mask they were built with — delete the layer or hit Reset and change the color again to rebuild it with cleanup.
+
 ## 0.14.17
 
 - Fixed the paw prints splitting across rows: the pads and their outlines are now detected as one color, so recoloring that row moves the whole print instead of leaving dark outlines or pink specks behind. The pale paw-box background is its own row again, and its name is fixed — it reads "Light Green" now instead of "Dark Green", since a pale color should never be named dark. Same fix for any other pale color that used to pick up a dark name when it collided with a bigger color.

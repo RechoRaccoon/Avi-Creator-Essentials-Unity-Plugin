@@ -478,6 +478,8 @@ namespace AviCreatorEssentials
             m_Ctx = ctx;
             AddToClassList("ap-major-colors-options");
             Add(W.TextButton("Detect major colors", DetectMajorColors, "ap-small", "ap-accent"));
+            Add(new W.ToggleRow("Cleanup", () => m_Ctx.majorCleanup, v => m_Ctx.majorCleanup = v,
+                "Smooths each major color's mask: removes thin speck lines, fills small holes, and keeps fringes off neighboring colors. Only affects masks built after changing it."));
             m_MajorColorsList = W.Column("ap-major-colors-list");
             Add(m_MajorColorsList);
             // Rebuild when the tool changes (the trigger the Brush panel used to give
@@ -587,7 +589,7 @@ namespace AviCreatorEssentials
             var s = m_Ctx.session;
             var set = s?.ActiveSet;
             if (set == null) return;
-            s.ApplyMajorColor(set, m_PopupCluster, m_Ctx.primary);
+            s.ApplyMajorColor(set, m_PopupCluster, m_Ctx.primary, m_Ctx.majorColors, m_Ctx.majorCleanup);
             if (m_PopupTargetFill != null) m_PopupTargetFill.style.backgroundColor = m_Ctx.primary;
             m_Ctx.Render();
         }
