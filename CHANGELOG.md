@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.26
+
+- Fixed the 2D texture view going blank with a -2147483648% zoom readout: the view fitted itself before it was laid out, the zoom went bad, and it never re-fitted. It now waits for a real layout, and re-fits if the zoom ever goes bad, so the texture view comes back.
+- Fixed stripes showing a third color: the pattern left half of every stripe as a gap showing the sweater underneath, which read as a third color. Stripes now cover fully by default, so a pattern only shows the colors in the Stripes menu — lower Stripe width if you want the gaps back. Stripes already painted keep their gaps until you repaint them.
+- Fixed the color wheel opening in the wrong place when clicking a stripe or Major color swatch: it now opens on the swatch you clicked.
+
 ## 0.14.25
 
 - Fixed the color popup opening in the wrong place and freezing the editor: clicking a stripe color or a Major color swatch used to open the wheel at the top-left of the window, around the material name, and the editor stopped responding to clicks. The swatches were passing the click position in their own space and the popup reads it as a screen position. It now opens with the wheel centered on the swatch you clicked, and closes when you click outside it or press Escape.

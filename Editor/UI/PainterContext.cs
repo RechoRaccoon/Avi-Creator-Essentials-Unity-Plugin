@@ -154,7 +154,7 @@ namespace AviCreatorEssentials
         public bool gradientToTransparent = true;   // primary color fading out; off: primary to secondary color
         public StripeOrientation stripeOrientation = StripeOrientation.Horizontal;
         public int stripeCount = 6;               // stripes across the dragged span
-        public float stripeWidth = 0.5f;          // 0..1 fraction of each stripe cycle that is colored (the rest is a gap)
+        public float stripeWidth = 1f;          // 0..1 fraction of each stripe cycle that is colored (the rest is a gap showing what is underneath); full by default so a pattern only shows the menu colors
         public float stripeOffset;                // 0..1 phase shift along the stripes, in cycles
         // Stripe colors, cycled in order (at least two, at most StripesParams.MaxColors).
         public readonly List<Color> stripeColors = new List<Color> { Color.white, Color.black };

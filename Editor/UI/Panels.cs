@@ -473,9 +473,11 @@ namespace AviCreatorEssentials
                 {
                     if (e.button != 0) return;
                     e.StopPropagation();
-                    // e.position is in the swatch's own space; the popup reads it as a screen
-                    // position, so pass the world position or the wheel lands at the top-left.
-                    OpenStripeColorPopup(index, swatch.LocalToWorld(e.position));
+                    // The popup takes a panel (world) position. e.localPosition is the click
+                    // in the swatch's own space — the same value the viewports pass to
+                    // OpenQuickColor — so convert it; passing e.position lands the wheel at
+                    // the top-left, and converting e.position pushes it off the window.
+                    OpenStripeColorPopup(index, swatch.LocalToWorld(e.localPosition));
                 });
                 m_StripeColorsRow.Add(swatch);
             }
@@ -690,9 +692,11 @@ namespace AviCreatorEssentials
                 {
                     if (e.button != 0) return;
                     e.StopPropagation();
-                    // e.position is in the swatch's own space; the popup reads it as a screen
-                    // position, so pass the world position or the wheel lands at the top-left.
-                    OpenMajorColorPopup(cluster, targetSwatch.LocalToWorld(e.position));
+                    // The popup takes a panel (world) position. e.localPosition is the click
+                    // in the swatch's own space — the same value the viewports pass to
+                    // OpenQuickColor — so convert it; passing e.position lands the wheel at
+                    // the top-left, and converting e.position pushes it off the window.
+                    OpenMajorColorPopup(cluster, targetSwatch.LocalToWorld(e.localPosition));
                 });
                 row.Add(targetSwatch);
                 bool editingMask = m_Ctx.majorMaskEdit == cluster;

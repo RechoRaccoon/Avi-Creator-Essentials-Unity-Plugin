@@ -243,7 +243,9 @@ namespace AviCreatorEssentials
         public void RenderIfNeeded()
         {
             if (!m_RenderRequested || panel == null || ctx.session == null) return;
-            if (resolvedStyle.display == DisplayStyle.None || W < 4 || H < 4) return;
+            // NaN-proof: a not-yet-laid-out rect can be NaN, and NaN < 4 is false, so the
+            // plain comparison would let a render through with a NaN size.
+            if (resolvedStyle.display == DisplayStyle.None || !(W >= 4f) || !(H >= 4f)) return;
             m_RenderRequested = false;
             try
             {

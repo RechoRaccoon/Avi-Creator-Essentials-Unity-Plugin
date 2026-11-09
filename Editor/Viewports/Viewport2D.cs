@@ -100,9 +100,14 @@ namespace AviCreatorEssentials
 
         public void Fit()
         {
-            if (W < 4 || H < 4) return;
+            // NaN-proof: a not-yet-laid-out rect can be NaN, and NaN < 4 is false, so the
+            // plain comparison would let a NaN height through and poison m_Scale (the HUD
+            // then reads -2147483648% and the view stays blank, because m_Fitted sticks).
+            if (!(W >= 4f) || !(H >= 4f)) return;
             float aspect = TexH / Mathf.Max(1f, TexW);
-            m_Scale = Mathf.Min(W, H / aspect) * 0.92f;
+            float scale = Mathf.Min(W, H / aspect) * 0.92f;
+            if (!float.IsFinite(scale)) return;
+            m_Scale = scale;
             m_Center = new Vector2(0.5f, 0.5f);
             m_Fitted = true;
             m_FittedSet = Set;
@@ -122,6 +127,9 @@ namespace AviCreatorEssentials
         protected override void DoRender(RenderTexture target)
         {
             var s = ctx.session;
+            // A scale poisoned by an earlier bad fit (NaN/inf) never re-fits on its own,
+            // because m_Fitted sticks — drop it so the fit runs again now the layout is real.
+            if (!float.IsFinite(m_Scale)) m_Fitted = false;
             if (!m_Fitted || m_FittedSet != Set) Fit();
             s.UpdateComposites();
             var set = Set;
@@ -1136,7 +1144,10 @@ namespace AviCreatorEssentials
         {
             var set = Set;
             if (set == null) { hudLeft.text = hudRight.text = hudCenter.text = ""; return; }
-            hudLeft.text = set.width + " × " + set.height + "   ·   " + Mathf.RoundToInt(m_Scale * PPP / Mathf.Max(1f, set.width) * 100f) + "%" +
+            hudLeft.text = set.width + " × " + set.height + "   ·   " +
+                           (float.IsFinite(m_Scale)
+                               ? Mathf.RoundToInt(m_Scale * PPP / Mathf.Max(1f, set.width) * 100f) + "%"
+                               : "—") +
                            (set.HasSelection ? "   ·   " + set.SelectedCount + " polygons selected" : "");
             if (m_Inside)
             {
