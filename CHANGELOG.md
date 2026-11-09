@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.27
+
+- Fixed the color wheel still not opening on the swatch you clicked: it now opens centered on the swatch itself instead of landing in the wrong place, so the editor doesn't freeze with a wheel you can't see.
+
 ## 0.14.26
 
 - Fixed the 2D texture view going blank with a -2147483648% zoom readout: the view fitted itself before it was laid out, the zoom went bad, and it never re-fitted. It now waits for a real layout, and re-fits if the zoom ever goes bad, so the texture view comes back.

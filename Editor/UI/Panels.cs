@@ -473,11 +473,12 @@ namespace AviCreatorEssentials
                 {
                     if (e.button != 0) return;
                     e.StopPropagation();
-                    // The popup takes a panel (world) position. e.localPosition is the click
-                    // in the swatch's own space — the same value the viewports pass to
-                    // OpenQuickColor — so convert it; passing e.position lands the wheel at
-                    // the top-left, and converting e.position pushes it off the window.
-                    OpenStripeColorPopup(index, swatch.LocalToWorld(e.localPosition));
+                    // Anchor on the swatch itself, not the click: the swatch's laid-out
+                    // rect in panel space (worldBound) is the same anchor the layer menus
+                    // use, and it does not depend on which position the click event
+                    // reports. The two earlier tries (e.position, then e.localPosition
+                    // converted) both landed the wheel in the wrong place.
+                    OpenStripeColorPopup(index, swatch.worldBound.center);
                 });
                 m_StripeColorsRow.Add(swatch);
             }
@@ -692,11 +693,10 @@ namespace AviCreatorEssentials
                 {
                     if (e.button != 0) return;
                     e.StopPropagation();
-                    // The popup takes a panel (world) position. e.localPosition is the click
-                    // in the swatch's own space — the same value the viewports pass to
-                    // OpenQuickColor — so convert it; passing e.position lands the wheel at
-                    // the top-left, and converting e.position pushes it off the window.
-                    OpenMajorColorPopup(cluster, targetSwatch.LocalToWorld(e.localPosition));
+                    // Anchor on the swatch itself, not the click — same as the stripe
+                    // swatch above: the swatch's laid-out rect (worldBound) is the anchor,
+                    // so the wheel opens on the swatch you clicked.
+                    OpenMajorColorPopup(cluster, targetSwatch.worldBound.center);
                 });
                 row.Add(targetSwatch);
                 bool editingMask = m_Ctx.majorMaskEdit == cluster;
