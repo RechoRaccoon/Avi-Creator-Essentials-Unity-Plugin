@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.28
+
+- Temporary diagnostic logging for the color wheel popup: clicking a stripe or Major color swatch now writes the real positions and sizes to the Unity console (swatch rect, popup anchor, placement, wheel and square sizes, and how many times the placement runs), so the next test shows exactly where the wheel goes wrong instead of another guess. This logging is temporary and comes out once the cause is found.
+
 ## 0.14.27
 
 - Fixed the color wheel still not opening on the swatch you clicked: it now opens centered on the swatch itself instead of landing in the wrong place, so the editor doesn't freeze with a wheel you can't see.

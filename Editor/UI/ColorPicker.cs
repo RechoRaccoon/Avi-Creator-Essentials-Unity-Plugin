@@ -40,6 +40,12 @@ namespace AviCreatorEssentials
         const float WheelSize = 196f;
         const float RingWidth = 18f;
 
+        // TEMPORARY diagnostics (0.14.28): resolved sizes for the wheel popup investigation.
+        // Remove with the rest of the diagnostic logging once the cause is proven.
+        internal Vector2 WheelResolved => new Vector2(m_Wheel.resolvedStyle.width, m_Wheel.resolvedStyle.height);
+        internal Vector2 RingResolved => new Vector2(m_Ring.resolvedStyle.width, m_Ring.resolvedStyle.height);
+        internal Vector2 SquareResolved => new Vector2(m_Square.resolvedStyle.width, m_Square.resolvedStyle.height);
+
         /// <summary>Raised when a recent color or swatch is clicked (the quick popup closes on it).</summary>
         public event Action SwatchPicked;
 
@@ -434,8 +440,14 @@ namespace AviCreatorEssentials
     {
         static QuickColorPopup s_Open;
         readonly VisualElement m_Panel;
+        readonly ColorPicker m_Picker;
         readonly Vector2 m_Anchor;
         bool m_ClosedFired;
+        // TEMPORARY diagnostic logging (0.14.28): the wheel keeps opening in the wrong place
+        // after three placement fixes, so the popup reports its real runtime values to the
+        // Unity console on every open. Remove once the cause is proven.
+        static int s_ShowCalls;
+        static int s_PlaceCalls;
 
         public static bool IsOpen => s_Open != null;
 
@@ -445,14 +457,20 @@ namespace AviCreatorEssentials
         public static void Show(VisualElement root, PainterContext ctx, Vector2 worldPos)
         {
             Close();
-            if (root == null) return;
+            if (root == null) { Debug.Log("[ACE wheel] Show called with null root"); return; }
+            s_ShowCalls++;
+            Debug.Log("[ACE wheel] Show #" + s_ShowCalls + " worldPos=" + worldPos +
+                " root=" + root.GetType().Name + " name='" + root.name + "' hash=" + root.GetHashCode() +
+                " childCount=" + root.childCount);
             s_Open = new QuickColorPopup(root, ctx, worldPos);
             root.Add(s_Open);
+            Debug.Log("[ACE wheel] popup parent=" + (s_Open.parent != null ? s_Open.parent.GetType().Name + " '" + s_Open.parent.name + "'" : "null"));
         }
 
         public static void Close()
         {
             if (s_Open == null) return;
+            Debug.Log("[ACE wheel] Close");
             var popup = s_Open;
             popup.RemoveFromHierarchy();
             s_Open = null;
@@ -471,11 +489,14 @@ namespace AviCreatorEssentials
             AddToClassList("ap-quick-color-backdrop");
             pickingMode = PickingMode.Position;
             m_Anchor = root.WorldToLocal(worldPos);
+            Debug.Log("[ACE wheel] ctor worldPos=" + worldPos + " anchor=" + m_Anchor +
+                " root=" + root.GetType().Name + " hash=" + root.GetHashCode());
 
             m_Panel = new VisualElement();
             m_Panel.AddToClassList("ap-quick-color");
             m_Panel.style.visibility = Visibility.Hidden;   // shown once its size is known and it can be placed
             var picker = new ColorPicker(ctx, true);
+            m_Picker = picker;
             picker.SwatchPicked += Close;
             m_Panel.Add(picker);
             Add(m_Panel);
@@ -500,14 +521,30 @@ namespace AviCreatorEssentials
         /// <summary>Centers the wheel on the click, kept inside the window.</summary>
         void Place()
         {
+            s_PlaceCalls++;
             float w = m_Panel.resolvedStyle.width, h = m_Panel.resolvedStyle.height;
             var area = contentRect;
-            if (float.IsNaN(w) || float.IsNaN(h) || w < 1f || area.width < 1f) return;
+            // Log the first 10 placements in full, then a summary every 100th call: if
+            // Place() is looping, the counter keeps climbing and the console proves it.
+            bool verbose = s_PlaceCalls <= 10 || s_PlaceCalls % 100 == 0;
+            if (verbose)
+                Debug.Log("[ACE wheel] Place #" + s_PlaceCalls + " anchor=" + m_Anchor +
+                    " panel=" + w + "x" + h + " area=" + area.width + "x" + area.height +
+                    " wheel=" + m_Picker.WheelResolved + " ring=" + m_Picker.RingResolved +
+                    " square=" + m_Picker.SquareResolved +
+                    " backdrop=" + resolvedStyle.width + "x" + resolvedStyle.height);
+            if (float.IsNaN(w) || float.IsNaN(h) || w < 1f || area.width < 1f)
+            {
+                if (verbose) Debug.Log("[ACE wheel] Place #" + s_PlaceCalls + " early return (no size yet)");
+                return;
+            }
             float x = Mathf.Clamp(m_Anchor.x - WheelCenter, 4f, Mathf.Max(4f, area.width - w - 4f));
             float y = Mathf.Clamp(m_Anchor.y - WheelCenter, 4f, Mathf.Max(4f, area.height - h - 4f));
             m_Panel.style.left = x;
             m_Panel.style.top = y;
             m_Panel.style.visibility = Visibility.Visible;
+            if (verbose)
+                Debug.Log("[ACE wheel] Place #" + s_PlaceCalls + " positioned left=" + x + " top=" + y);
         }
     }
 }
