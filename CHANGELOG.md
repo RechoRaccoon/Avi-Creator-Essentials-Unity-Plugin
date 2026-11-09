@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.25
+
+- Fixed the color popup opening in the wrong place and freezing the editor: clicking a stripe color or a Major color swatch used to open the wheel at the top-left of the window, around the material name, and the editor stopped responding to clicks. The swatches were passing the click position in their own space and the popup reads it as a screen position. It now opens with the wheel centered on the swatch you clicked, and closes when you click outside it or press Escape.
+- Fixed stripes showing a third color: while a stripe color popup was open, changing the selected color anywhere else also rewrote that stripe's color, so a pattern made with just black and white could pick up the selected color as a third stripe. The popup no longer stays open unnoticed, so the stripe colors only change when you change them in the Stripes menu — a pattern only ever shows the colors listed there.
+
 ## 0.14.24
 
 - Fixed the Stripes options not showing when the tool is picked: the tool boxes now follow the current tool on every panel rebuild too, instead of only on the tool-change event, so the Stripes options (and the other tools' boxes) always match the tool in hand.

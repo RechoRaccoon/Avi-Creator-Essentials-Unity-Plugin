@@ -473,7 +473,9 @@ namespace AviCreatorEssentials
                 {
                     if (e.button != 0) return;
                     e.StopPropagation();
-                    OpenStripeColorPopup(index, e.position);
+                    // e.position is in the swatch's own space; the popup reads it as a screen
+                    // position, so pass the world position or the wheel lands at the top-left.
+                    OpenStripeColorPopup(index, swatch.LocalToWorld(e.position));
                 });
                 m_StripeColorsRow.Add(swatch);
             }
@@ -688,7 +690,9 @@ namespace AviCreatorEssentials
                 {
                     if (e.button != 0) return;
                     e.StopPropagation();
-                    OpenMajorColorPopup(cluster, e.position);
+                    // e.position is in the swatch's own space; the popup reads it as a screen
+                    // position, so pass the world position or the wheel lands at the top-left.
+                    OpenMajorColorPopup(cluster, targetSwatch.LocalToWorld(e.position));
                 });
                 row.Add(targetSwatch);
                 bool editingMask = m_Ctx.majorMaskEdit == cluster;
