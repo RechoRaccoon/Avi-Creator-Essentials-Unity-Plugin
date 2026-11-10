@@ -16,6 +16,15 @@ namespace AviCreatorEssentials
         const string StyleGuid = "a3e1c7d94b2f4e6a8c0d1f3b5e7a9c21";
         const string LastAvatarKey = "AviCreatorEssentials.LastAvatar";
         const string RecoveryKey = "AviCreatorEssentials.Recovery";
+        const string PlayPoseKey = "AviCreatorEssentials.PlayModePose";
+
+        /// <summary>A pose captured from the scene avatar while in Play mode, kept in EditorPrefs so it survives leaving Play mode.</summary>
+        [Serializable]
+        class CapturedPlayPose
+        {
+            public string avatarName;
+            public List<PoseBone> bones = new List<PoseBone>();
+        }
 
         [MenuItem("Tools/Avi Creator Essentials/Avatar Painter", false, 100)]
         public static void Open()
@@ -78,6 +87,7 @@ namespace AviCreatorEssentials
         double m_LastThumbs;
         double m_HintUntil;
         GameObject m_PendingAvatar;
+        bool m_ApplyPlayPosePending;
 
         // ================================================================== lifecycle
 
@@ -174,6 +184,54 @@ namespace AviCreatorEssentials
             string id = EditorPrefs.GetString(LastAvatarKey, "");
             if (string.IsNullOrEmpty(id) || !GlobalObjectId.TryParse(id, out var gid)) return null;
             return GlobalObjectId.GlobalObjectIdentifierToObjectSlow(gid) as GameObject;
+        }
+
+        /// <summary>Reads the scene avatar's current bone transforms — the pose Gesture Manager put it in — and keeps them in EditorPrefs, so they survive leaving Play mode.</summary>
+        void CapturePlayModePose()
+        {
+            var go = m_PendingAvatar;
+            if (go == null) go = Selection.activeGameObject;
+            if (go == null)
+            {
+                ShowNotification(new GUIContent("Pick your avatar in the Avatar field first"));
+                return;
+            }
+            if (go.GetComponentInChildren<SkinnedMeshRenderer>(true) == null)
+            {
+                ShowNotification(new GUIContent("'" + go.name + "' has no meshes to pose. Pick the avatar's root object."));
+                return;
+            }
+            var data = new CapturedPlayPose { avatarName = go.name };
+            var root = go.transform;
+            foreach (var t in go.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == root) continue;
+                data.bones.Add(new PoseBone
+                {
+                    path = APUtil.GetPath(t, root),
+                    name = t.name,
+                    rotation = t.localRotation,
+                    hasPosition = true,
+                    position = t.localPosition
+                });
+            }
+            EditorPrefs.SetString(PlayPoseKey, JsonUtility.ToJson(data));
+            ShowNotification(new GUIContent("Pose captured for '" + go.name + "'. Stop Play mode and open the painter to paint it."));
+            ShowStart();
+        }
+
+        /// <summary>Applies a captured Play-mode pose to the painter's clone, once. Only for the avatar it was captured from.</summary>
+        void ApplyCapturedPlayPose()
+        {
+            if (m_Session == null || m_Session.pose == null) return;
+            string json = EditorPrefs.GetString(PlayPoseKey, "");
+            if (string.IsNullOrEmpty(json)) return;
+            CapturedPlayPose data = null;
+            try { data = JsonUtility.FromJson<CapturedPlayPose>(json); } catch (Exception) { /* ignore */ }
+            if (data == null || data.bones == null || data.bones.Count == 0 || data.avatarName != m_Session.avatarName) return;
+            EditorPrefs.DeleteKey(PlayPoseKey);
+            m_Session.pose.Restore(m_Session.pose.SnapshotFrom(data.bones));
+            ShowHint("Play-mode pose applied.");
         }
 
         public override void SaveChanges()
@@ -296,6 +354,22 @@ namespace AviCreatorEssentials
                 StartSession(m_PendingAvatar);
             }, "ap-accent", "ap-large"));
             card.Add(row);
+
+            if (EditorApplication.isPlaying)
+            {
+                card.Add(W.Text("Play mode", "ap-subtle-heading"));
+                card.Add(W.Text("Pose the avatar with Gesture Manager, then capture the pose here. Stop Play mode and open the painter — it opens in that pose.", "ap-hint"));
+                var capRow = W.Row("ap-row-gap");
+                capRow.Add(W.TextButton("Capture Play-mode pose", CapturePlayModePose, "ap-accent"));
+                card.Add(capRow);
+                string captured = EditorPrefs.GetString(PlayPoseKey, "");
+                if (!string.IsNullOrEmpty(captured))
+                {
+                    string capName = "";
+                    try { capName = JsonUtility.FromJson<CapturedPlayPose>(captured)?.avatarName ?? ""; } catch (Exception) { /* ignore */ }
+                    if (!string.IsNullOrEmpty(capName)) card.Add(W.Text("Pose captured for '" + capName + "'.", "ap-hint"));
+                }
+            }
 
             string recovery = EditorPrefs.GetString(RecoveryKey, "");
             if (!string.IsNullOrEmpty(recovery) && File.Exists(Path.Combine(recovery, ProjectIO.FileName)))
@@ -458,6 +532,7 @@ namespace AviCreatorEssentials
                     else m_Session.projectFolder = null;
                 }
             }
+            m_ApplyPlayPosePending = true;
             return true;
         }
 
@@ -1061,6 +1136,11 @@ namespace AviCreatorEssentials
             {
                 m_Session.Tick();
                 m_V3?.RequestRender();
+            }
+            if (m_ApplyPlayPosePending)
+            {
+                m_ApplyPlayPosePending = false;
+                ApplyCapturedPlayPose();
             }
             if (m_StructureDirty && !m_Ctx.strokeActive)
             {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.30
+
+- Fixed the painter always opening in a T-pose: pose the avatar in Play mode with Gesture Manager, hit "Capture Play-mode pose" on the painter's start screen, then stop Play mode and open the painter — it opens in that pose, so stripes and paint land right with the arms down. The captured pose is used once, then forgotten.
+
 ## 0.14.29
 
 - Fixed the Stripes color popup breaking the tool: clicking a stripe color swatch opened the wheel without its background, misaligned, and froze the editor. The popup was being attached to the panel's top-level tree, outside the window root that carries the stylesheet and theme colors, so it had no background or absolute positioning and its full-window backdrop took part in layout. It now opens through the window's own root (like Major colors) and always attaches inside the styled root.
