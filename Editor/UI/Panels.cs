@@ -478,8 +478,6 @@ namespace AviCreatorEssentials
                     // use, and it does not depend on which position the click event
                     // reports. The two earlier tries (e.position, then e.localPosition
                     // converted) both landed the wheel in the wrong place.
-                    // TEMPORARY diagnostics (0.14.28): report the swatch rect to the console.
-                    Debug.Log("[ACE wheel] stripe swatch click worldBound=" + swatch.worldBound + " center=" + swatch.worldBound.center);
                     OpenStripeColorPopup(index, swatch.worldBound.center);
                 });
                 m_StripeColorsRow.Add(swatch);
@@ -513,9 +511,13 @@ namespace AviCreatorEssentials
             m_Ctx.SetPrimary(m_Ctx.stripeColors[index]);
             m_Ctx.ColorChanged += OnStripeColorPopupColor;
             QuickColorPopup.Closed += OnStripeColorPopupClosed;
-            var root = panel?.visualTree;
-            if (root == null) { OnStripeColorPopupClosed(); return; }
-            QuickColorPopup.Show(root, m_Ctx, worldPos);
+            if (m_Ctx.OpenQuickColor != null) m_Ctx.OpenQuickColor(worldPos);
+            else
+            {
+                var root = panel?.visualTree;
+                if (root == null) { OnStripeColorPopupClosed(); return; }
+                QuickColorPopup.Show(root, m_Ctx, worldPos);
+            }
         }
 
         /// <summary>While the popup is open, every wheel move recolors the stripe swatch live.</summary>
@@ -698,8 +700,6 @@ namespace AviCreatorEssentials
                     // Anchor on the swatch itself, not the click — same as the stripe
                     // swatch above: the swatch's laid-out rect (worldBound) is the anchor,
                     // so the wheel opens on the swatch you clicked.
-                    // TEMPORARY diagnostics (0.14.28): report the swatch rect to the console.
-                    Debug.Log("[ACE wheel] major swatch click worldBound=" + targetSwatch.worldBound + " center=" + targetSwatch.worldBound.center);
                     OpenMajorColorPopup(cluster, targetSwatch.worldBound.center);
                 });
                 row.Add(targetSwatch);

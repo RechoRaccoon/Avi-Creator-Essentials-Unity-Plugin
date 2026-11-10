@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.29
+
+- Fixed the Stripes color popup breaking the tool: clicking a stripe color swatch opened the wheel without its background, misaligned, and froze the editor. The popup was being attached to the panel's top-level tree, outside the window root that carries the stylesheet and theme colors, so it had no background or absolute positioning and its full-window backdrop took part in layout. It now opens through the window's own root (like Major colors) and always attaches inside the styled root.
+- Removed the temporary diagnostic logging added in 0.14.28.
+
 ## 0.14.28
 
 - Temporary diagnostic logging for the color wheel popup: clicking a stripe or Major color swatch now writes the real positions and sizes to the Unity console (swatch rect, popup anchor, placement, wheel and square sizes, and how many times the placement runs), so the next test shows exactly where the wheel goes wrong instead of another guess. This logging is temporary and comes out once the cause is found.
