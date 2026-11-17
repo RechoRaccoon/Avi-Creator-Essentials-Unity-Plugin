@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.31
+
+- Fixed the brush not painting objects parented to the avatar (accessories, props) that aren't skinned to its bones: their hit-test and paint data used to be refreshed only when the pose was marked dirty, so the brush kept aiming at where the object was at the last pose change and missed it even though it renders in its new place. Non-skinned meshes now refresh from their live transform every time, so the brush always hits where the accessory actually is. Only meshes whose transform actually moved rebuild the picking tree.
+
 ## 0.14.30
 
 - Fixed the painter always opening in a T-pose: pose the avatar in Play mode with Gesture Manager, hit "Capture Play-mode pose" on the painter's start screen, then stop Play mode and open the painter — it opens in that pose, so stripes and paint land right with the arms down. The captured pose is used once, then forgotten.

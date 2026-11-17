@@ -192,7 +192,11 @@ namespace AviCreatorEssentials
 
         public void EnsurePosed()
         {
-            if (!m_PoseDirty) return;
+            if (!m_PoseDirty)
+            {
+                RefreshUnskinned();
+                return;
+            }
             m_PoseDirty = false;
             Version++;
             foreach (var e in entries)
@@ -221,25 +225,55 @@ namespace AviCreatorEssentials
                     e.matrix = e.renderer.transform.localToWorldMatrix;
                 }
 
-                int n = local.Length;
-                if (e.worldVerts.Length != n) e.worldVerts = new Vector3[n];
-                if (e.worldNormals.Length != n) e.worldNormals = new Vector3[n];
-                var m = e.matrix;
-                var nm = m.inverse.transpose;
-                bool hasN = localN != null && localN.Length == n;
-                Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-                Vector3 max = -min;
-                for (int i = 0; i < n; i++)
-                {
-                    var w = m.MultiplyPoint3x4(local[i]);
-                    e.worldVerts[i] = w;
-                    min = Vector3.Min(min, w);
-                    max = Vector3.Max(max, w);
-                    e.worldNormals[i] = hasN ? nm.MultiplyVector(localN[i]).normalized : Vector3.up;
-                }
-                e.worldBounds = new Bounds();
-                e.worldBounds.SetMinMax(min, max);
+                UpdateWorld(e, local, localN);
             }
+        }
+
+        /// <summary>
+        /// Non-skinned meshes (MeshRenderer accessories parented to the avatar) follow their transform, which can
+        /// change without the pose system knowing: re-parenting, moving the object in the scene, or a bone moved
+        /// outside the painter. Their posed data used to be refreshed only when the pose was marked dirty, so the
+        /// brush's hit test and the paint pass kept using the transform from the last pose change and missed the
+        /// accessory even though it renders in its new place. Refresh them from the live transform every time, so
+        /// the brush always hits where the mesh actually is. Skinned meshes still go through the pose-dirty gate
+        /// (BakeMesh is expensive); only entries whose matrix actually moved rebuild the picking BVH.
+        /// </summary>
+        void RefreshUnskinned()
+        {
+            bool moved = false;
+            foreach (var e in entries)
+            {
+                if (e.renderer == null || e.skinned != null) continue;
+                var m = e.renderer.transform.localToWorldMatrix;
+                if (m == e.matrix && e.worldVerts.Length == e.paintMesh.vertexCount) continue;
+                e.matrix = m;
+                UpdateWorld(e, e.paintMesh.vertices, e.paintMesh.normals);
+                moved = true;
+            }
+            if (moved) m_BvhDirty = true;
+        }
+
+        /// <summary>World-space vertices, normals and bounds for one entry, from its posed local data and matrix.</summary>
+        static void UpdateWorld(RendererEntry e, Vector3[] local, Vector3[] localN)
+        {
+            int n = local.Length;
+            if (e.worldVerts.Length != n) e.worldVerts = new Vector3[n];
+            if (e.worldNormals.Length != n) e.worldNormals = new Vector3[n];
+            var m = e.matrix;
+            var nm = m.inverse.transpose;
+            bool hasN = localN != null && localN.Length == n;
+            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 max = -min;
+            for (int i = 0; i < n; i++)
+            {
+                var w = m.MultiplyPoint3x4(local[i]);
+                e.worldVerts[i] = w;
+                min = Vector3.Min(min, w);
+                max = Vector3.Max(max, w);
+                e.worldNormals[i] = hasN ? nm.MultiplyVector(localN[i]).normalized : Vector3.up;
+            }
+            e.worldBounds = new Bounds();
+            e.worldBounds.SetMinMax(min, max);
         }
 
         public void EnsureBvh()
