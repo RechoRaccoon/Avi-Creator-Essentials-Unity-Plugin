@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.32
+
+- Fixed the brush missing a mesh whose GameObject is scaled: the hit-test used a matrix that dropped the scale, so for a scaled mesh (including a scaled skinned accessory) the brush aimed at the unscaled position and clicked through it even though it renders in the right place. Skinned meshes now use their full local-to-world matrix (position, rotation, and scale) for hit-testing and painting, same as non-skinned meshes already do.
+
 ## 0.14.31
 
 - Fixed the brush not painting objects parented to the avatar (accessories, props) that aren't skinned to its bones: their hit-test and paint data used to be refreshed only when the pose was marked dirty, so the brush kept aiming at where the object was at the last pose change and missed it even though it renders in its new place. Non-skinned meshes now refresh from their live transform every time, so the brush always hits where the accessory actually is. Only meshes whose transform actually moved rebuild the picking tree.

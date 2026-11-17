@@ -209,8 +209,10 @@ namespace AviCreatorEssentials
                     e.skinned.BakeMesh(e.bakeTemp, true);
                     local = e.bakeTemp.vertices;
                     localN = e.bakeTemp.normals;
-                    var t = e.skinned.transform;
-                    e.matrix = Matrix4x4.TRS(t.position, t.rotation, Vector3.one);
+                    // The baked vertices are in the skinned mesh's local space, so the matrix must be the full
+                    // local-to-world (including scale): TRS with scale 1 misplaces any mesh whose GameObject is
+                    // scaled, and the brush then misses it even though it renders in the right place.
+                    e.matrix = e.skinned.transform.localToWorldMatrix;
                     if (local.Length == e.paintMesh.vertexCount)
                     {
                         e.paintMesh.vertices = local;
@@ -393,8 +395,9 @@ namespace AviCreatorEssentials
                         v = e.bakeTemp.vertices;
                         n = e.bakeTemp.normals;
                         t = e.bakeTemp.tangents;
-                        var tr = e.skinned.transform;
-                        m = Matrix4x4.TRS(tr.position, tr.rotation, Vector3.one);
+                        // Full local-to-world (including scale), same reason as EnsurePosed: TRS with scale 1
+                        // misplaces any mesh whose GameObject is scaled.
+                        m = e.skinned.transform.localToWorldMatrix;
                     }
                     else
                     {
