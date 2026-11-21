@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.33
+
+- New Audio Link layer: materials whose shader has an Audio Link texture (lilToon's `_AudioLinkMask`, Poiyomi's Audio Link mask or emission texture, and similar) now get a third position in the Base color / Emission switch above the layers, **Audio Link**, and their own row in the Materials list. It has its own layer stack like the emission texture, so you can paint, fill, mask and bake it the same way, and Bake puts it back on the material's Audio Link slot. Other Audio Link textures of a material are still reachable from the Texture slot dropdown in the Materials section.
+- An Audio Link texture is no longer mistaken for an emission texture when its name mentions emission, so it is never switched on as a glow map or painted as the emission kind by Whole model.
+
 ## 0.14.32
 
 - Fixed the brush missing a mesh whose GameObject is scaled: the hit-test used a matrix that dropped the scale, so for a scaled mesh (including a scaled skinned accessory) the brush aimed at the unscaled position and clicked through it even though it renders in the right place. Skinned meshes now use their full local-to-world matrix (position, rotation, and scale) for hit-testing and painting, same as non-skinned meshes already do.

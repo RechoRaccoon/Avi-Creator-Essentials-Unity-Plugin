@@ -394,8 +394,10 @@ namespace AviCreatorEssentials
             foreach (var b in bases)
             {
                 string emission = EmissionProperty(b.cloneMaterial);
-                if (emission == null || emission == b.property) continue;
-                CreateSiblingSet(b, emission);
+                if (emission != null && emission != b.property) CreateSiblingSet(b, emission);
+                // ...and the same for an Audio Link texture (lilToon / Poiyomi Audio Link mask and friends).
+                string audioLink = AudioLinkProperty(b.cloneMaterial);
+                if (audioLink != null && audioLink != b.property && audioLink != emission) CreateSiblingSet(b, audioLink);
             }
         }
 
@@ -408,9 +410,36 @@ namespace AviCreatorEssentials
             foreach (var p in props)
                 if (p.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0 &&
                     p.IndexOf("Mask", StringComparison.OrdinalIgnoreCase) < 0 &&
-                    p.IndexOf("Scroll", StringComparison.OrdinalIgnoreCase) < 0)
+                    p.IndexOf("Scroll", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    !IsAudioLinkName(p))
                     return p;
             return null;
+        }
+
+        /// <summary>True for a texture property that belongs to the shader's Audio Link feature (_AudioLinkMask, _AudioLinkLocalMap...).</summary>
+        public static bool IsAudioLinkName(string property) =>
+            !string.IsNullOrEmpty(property) && property.Replace("_", "").IndexOf("AudioLink", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>
+        /// The material's main Audio Link texture, if its shader has one: the Audio Link mask first (it decides where the
+        /// audio-reactive effect shows), then an Audio Link emission texture, then any other Audio Link texture.
+        /// The other Audio Link textures stay reachable from the Materials section's Texture slot list.
+        /// </summary>
+        public static string AudioLinkProperty(Material m)
+        {
+            string best = null;
+            int bestScore = -1;
+            foreach (var p in TextureProperties(m))
+            {
+                if (!IsAudioLinkName(p)) continue;
+                string n = p.ToLowerInvariant();
+                int score = n.Contains("scroll") ? 0 : 1;
+                if (n.Contains("emission")) score = 2;
+                if (n.Contains("mask")) score = 3;
+                if (n.Replace("_", "") == "audiolinkmask") score = 4;
+                if (score > bestScore) { best = p; bestScore = score; }
+            }
+            return best;
         }
 
         /// <summary>The material's normal map property, if its shader has one.</summary>
@@ -457,19 +486,40 @@ namespace AviCreatorEssentials
                     m.SetFloat(toggle, 1f);
         }
 
-        public static bool IsEmission(TextureSet set) =>
-            set != null && set.property.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0;
+        // The three kinds of texture the Layers panel switches between for one material.
+        public const int ChannelBase = 0, ChannelEmission = 1, ChannelAudioLink = 2;
 
-        /// <summary>The base-color set and emission set of the same material.</summary>
-        public TextureSet Sibling(TextureSet set, bool emission)
+        /// <summary>True for an emission texture. An Audio Link texture is never one, even if its name mentions emission.</summary>
+        public static bool IsEmission(TextureSet set) =>
+            set != null && !IsAudioLinkName(set.property) &&
+            set.property.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>True for one of the material's Audio Link textures (the Audio Link mask and so on).</summary>
+        public static bool IsAudioLink(TextureSet set) => set != null && IsAudioLinkName(set.property);
+
+        /// <summary>Which switch position a texture belongs to: base color, emission or Audio Link.</summary>
+        public static int ChannelOf(TextureSet set) =>
+            IsAudioLink(set) ? ChannelAudioLink : IsEmission(set) ? ChannelEmission : ChannelBase;
+
+        /// <summary>The set of the same material for the given channel (this one if it already is), or null.</summary>
+        public TextureSet ChannelSet(TextureSet set, int channel)
         {
             if (set == null) return null;
-            if (IsEmission(set) == emission) return set;
+            if (ChannelOf(set) == channel) return set;
+            TextureSet fallback = null;
+            string preferred = channel == ChannelAudioLink && set.cloneMaterial != null ? AudioLinkProperty(set.cloneMaterial) : null;
             foreach (var s in sets)
-                if (s.originalMaterial == set.originalMaterial && s != set && IsEmission(s) == emission)
-                    return s;
-            return null;
+            {
+                if (s.originalMaterial != set.originalMaterial || s == set || ChannelOf(s) != channel) continue;
+                if (preferred == null || s.property == preferred) return s;
+                if (fallback == null) fallback = s;
+            }
+            return fallback;
         }
+
+        /// <summary>The base-color set and emission set of the same material.</summary>
+        public TextureSet Sibling(TextureSet set, bool emission) =>
+            ChannelSet(set, emission ? ChannelEmission : ChannelBase);
 
         TextureSet CreateSiblingSet(TextureSet from, string property)
         {
@@ -482,6 +532,7 @@ namespace AviCreatorEssentials
                 set.height = from.height;
             }
             if (IsEmission(set)) set.displayName = from.originalMaterial.name + "  ·  Emission";
+            else if (IsAudioLink(set)) set.displayName = from.originalMaterial.name + "  ·  Audio Link";
             sets.Remove(set);
             int idx = sets.IndexOf(from);
             int insert = idx + 1;
@@ -790,8 +841,11 @@ namespace AviCreatorEssentials
         public void SetEmissionView(bool on)
         {
             view.emissionOnly = on;
-            var sibling = Sibling(ActiveSet, on);
-            if (sibling != null) ActiveSet = sibling;
+            if (on || !IsAudioLink(ActiveSet))
+            {
+                var sibling = Sibling(ActiveSet, on);
+                if (sibling != null) ActiveSet = sibling;
+            }
             if (on) ApplyEmissionMaterials();
             else RestoreMaterials();
         }

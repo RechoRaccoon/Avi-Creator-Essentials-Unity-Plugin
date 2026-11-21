@@ -882,7 +882,7 @@ namespace AviCreatorEssentials
                     painted[orig] = pm;
                 }
                 pm.SetTexture(set.property, kv.Value);
-                if (set.createdProperty && set.property.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (set.createdProperty && APSession.IsEmission(set))
                     APSession.EnableEmission(pm);
                 if (APSession.IsNormalMap(set)) APSession.EnableNormalMap(pm);
                 EditorUtility.SetDirty(pm);

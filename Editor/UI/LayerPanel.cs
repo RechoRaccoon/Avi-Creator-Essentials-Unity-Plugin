@@ -212,19 +212,38 @@ namespace AviCreatorEssentials
                 m_Channel.Add(W.Text("Live mirror of " + set.mirrorSource.displayName +
                     (set.mirrorFlip ? ", flipped horizontally" : ", not flipped") +
                     ". The layers below are " + set.mirrorSource.displayName + "'s; edit that material to change both. This material's own layers are ignored while linked.", "ap-hint"));
-            var baseSet = s.Sibling(set, false);
-            var emSet = s.Sibling(set, true);
-            if (baseSet != null && emSet != null)
+            var baseSet = s.ChannelSet(set, APSession.ChannelBase);
+            var emSet = s.ChannelSet(set, APSession.ChannelEmission);
+            var alSet = s.ChannelSet(set, APSession.ChannelAudioLink);
+            var channels = new List<int>();
+            var labels = new List<string>();
+            var tips = new List<string>();
+            if (baseSet != null) { channels.Add(APSession.ChannelBase); labels.Add("Base color"); tips.Add("Paint the color texture (" + baseSet.property + ")"); }
+            if (emSet != null) { channels.Add(APSession.ChannelEmission); labels.Add("Emission"); tips.Add("Paint the glow texture (" + emSet.property + ")"); }
+            if (alSet != null) { channels.Add(APSession.ChannelAudioLink); labels.Add("Audio Link"); tips.Add("Paint the Audio Link texture (" + alSet.property + ")"); }
+            if (baseSet != null && channels.Count >= 2)
             {
-                m_Channel.Add(new W.Segmented(new[] { "Base color", "Emission" }, () => APSession.IsEmission(set) ? 1 : 0,
-                    i => { s.ActiveSet = i == 1 ? emSet : baseSet; m_Ctx.Render(); },
-                    new[] { "Paint the color texture (" + baseSet.property + ")", "Paint the glow texture (" + emSet.property + ")" }));
+                m_Channel.Add(new W.Segmented(labels.ToArray(), () => Mathf.Max(0, channels.IndexOf(APSession.ChannelOf(s.ActiveSet))),
+                    i =>
+                    {
+                        if (i < 0 || i >= channels.Count) return;
+                        var target = channels[i] == APSession.ChannelEmission ? emSet : channels[i] == APSession.ChannelAudioLink ? alSet : baseSet;
+                        if (target != null) s.ActiveSet = target;
+                        m_Ctx.Render();
+                    }, tips.ToArray()));
             }
             if (APSession.IsEmission(set))
             {
                 m_Channel.Add(W.Text(m_Ctx.view.emissionOnly
                     ? "Painting the emission map. Black doesn't glow; brighter colors glow more."
                     : "Painting the emission map. Turn on the emission view (sun button in the toolbar) to see only what glows.", "ap-hint"));
+            }
+            if (APSession.IsAudioLink(set))
+            {
+                bool isMask = set.property.IndexOf("mask", StringComparison.OrdinalIgnoreCase) >= 0;
+                m_Channel.Add(W.Text(isMask
+                    ? "Painting the Audio Link mask (" + set.property + "). White lets the audio-reactive effect show, black hides it. Other Audio Link textures are in the Materials section's Texture slot list."
+                    : "Painting an Audio Link texture (" + set.property + "). Other Audio Link textures are in the Materials section's Texture slot list.", "ap-hint"));
             }
             if (set.HasSelection)
             {

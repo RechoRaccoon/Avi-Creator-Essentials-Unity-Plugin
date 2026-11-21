@@ -893,7 +893,7 @@ namespace AviCreatorEssentials
             {
                 var row = W.Row("ap-material-row");
                 W.SetOn(row, set == s.ActiveSet, "ap-active");
-                W.SetOn(row, APSession.IsEmission(set) && s.Sibling(set, false) != null, "ap-material-child");
+                W.SetOn(row, APSession.ChannelOf(set) != APSession.ChannelBase && s.ChannelSet(set, APSession.ChannelBase) != null, "ap-material-child");
                 W.SetOn(row, set.hidden, "ap-hidden");
                 var captured = set;
                 // Hide this material's polygons in the 3D view, like hiding a
