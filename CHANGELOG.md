@@ -2,8 +2,8 @@
 
 ## 0.14.33
 
-- New Audio Link layer: materials whose shader has an Audio Link texture (lilToon's `_AudioLinkMask`, Poiyomi's Audio Link mask or emission texture, and similar) now get a third position in the Base color / Emission switch above the layers, **Audio Link**, and their own row in the Materials list. It has its own layer stack like the emission texture, so you can paint, fill, mask and bake it the same way, and Bake puts it back on the material's Audio Link slot. Other Audio Link textures of a material are still reachable from the Texture slot dropdown in the Materials section.
-- An Audio Link texture is no longer mistaken for an emission texture when its name mentions emission, so it is never switched on as a glow map or painted as the emission kind by Whole model.
+- New Audio Link layers: the switch above the layers is now Base color / Emission / **Audio Link**. Audio Link holds every texture a material uses for Audio Link, so you can paint, fill, mask and bake them like any other layer. They are found from the material itself: textures named for Audio Link (such as an Audio Link mask), plus the emission map and mask of every emission slot that has its Audio Link section switched on (Poiyomi's Emission 0-3). When a material has several, a Texture dropdown under the switch picks which one you are editing, and each also has its own row in the Materials list. The Unity console lists what was found for each material when the painter opens.
+- Audio Link textures are no longer treated as emission textures, so they are not switched on as a glow map or painted as the emission kind by Whole model.
 
 ## 0.14.32
 

@@ -240,10 +240,19 @@ namespace AviCreatorEssentials
             }
             if (APSession.IsAudioLink(set))
             {
-                bool isMask = set.property.IndexOf("mask", StringComparison.OrdinalIgnoreCase) >= 0;
-                m_Channel.Add(W.Text(isMask
-                    ? "Painting the Audio Link mask (" + set.property + "). White lets the audio-reactive effect show, black hides it. Other Audio Link textures are in the Materials section's Texture slot list."
-                    : "Painting an Audio Link texture (" + set.property + "). Other Audio Link textures are in the Materials section's Texture slot list.", "ap-hint"));
+                var alSets = s.AudioLinkSets(set);
+                if (alSets.Count > 1)
+                {
+                    var alLabels = new List<string>();
+                    foreach (var a in alSets) alLabels.Add(a.displayName.Substring(a.displayName.IndexOf("Audio Link: ", StringComparison.Ordinal) >= 0 ? a.displayName.IndexOf("Audio Link: ", StringComparison.Ordinal) + 12 : 0));
+                    m_Channel.Add(new W.DropdownRow("Texture", alLabels, () => Mathf.Max(0, alSets.IndexOf(s.ActiveSet)), i =>
+                    {
+                        if (i < 0 || i >= alSets.Count) return;
+                        s.ActiveSet = alSets[i];
+                        m_Ctx.Render();
+                    }, "Every texture this material uses for Audio Link, each with its own layers"));
+                }
+                m_Channel.Add(W.Text("Painting an Audio Link texture (" + set.property + "). These are the masks and maps the audio-reactive effects use: color and shape both count.", "ap-hint"));
             }
             if (set.HasSelection)
             {

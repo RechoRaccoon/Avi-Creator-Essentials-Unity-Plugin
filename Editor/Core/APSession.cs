@@ -395,9 +395,12 @@ namespace AviCreatorEssentials
             {
                 string emission = EmissionProperty(b.cloneMaterial);
                 if (emission != null && emission != b.property) CreateSiblingSet(b, emission);
-                // ...and the same for an Audio Link texture (lilToon / Poiyomi Audio Link mask and friends).
-                string audioLink = AudioLinkProperty(b.cloneMaterial);
-                if (audioLink != null && audioLink != b.property && audioLink != emission) CreateSiblingSet(b, audioLink);
+                // ...and one for every Audio Link texture of the material.
+                var audioLinks = AudioLinkProperties(b.cloneMaterial);
+                foreach (var audioLink in audioLinks)
+                    if (audioLink != b.property && audioLink != emission) CreateSiblingSet(b, audioLink);
+                if (audioLinks.Count > 0)
+                    Debug.Log("[Avi Creator Essentials] Audio Link textures of " + b.originalMaterial.name + ": " + string.Join(", ", audioLinks));
             }
         }
 
@@ -416,30 +419,97 @@ namespace AviCreatorEssentials
             return null;
         }
 
-        /// <summary>True for a texture property that belongs to the shader's Audio Link feature (_AudioLinkMask, _AudioLinkLocalMap...).</summary>
+        /// <summary>True for a texture property whose own name says it belongs to Audio Link (_AudioLinkMask, _AudioLinkLocalMap...).</summary>
         public static bool IsAudioLinkName(string property) =>
             !string.IsNullOrEmpty(property) && property.Replace("_", "").IndexOf("AudioLink", StringComparison.OrdinalIgnoreCase) >= 0;
 
-        /// <summary>
-        /// The material's main Audio Link texture, if its shader has one: the Audio Link mask first (it decides where the
-        /// audio-reactive effect shows), then an Audio Link emission texture, then any other Audio Link texture.
-        /// The other Audio Link textures stay reachable from the Materials section's Texture slot list.
-        /// </summary>
-        public static string AudioLinkProperty(Material m)
+        static string Norm(string s) => s.Replace("_", "").Replace(" ", "").ToLowerInvariant();
+
+        /// <summary>The number in a property name ("_EmissionMask2" and "_Emission2Mask" are both 2); 0 when it has none.</summary>
+        static int SlotIndex(string property)
         {
-            string best = null;
-            int bestScore = -1;
-            foreach (var p in TextureProperties(m))
+            int end = -1;
+            string n = Norm(property);
+            for (int i = n.Length - 1; i >= 0; i--)
+            {
+                if (char.IsDigit(n[i]) && end < 0) end = i;
+                else if (!char.IsDigit(n[i]) && end >= 0) return int.Parse(n.Substring(i + 1, end - i));
+            }
+            return end >= 0 ? int.Parse(n.Substring(0, end + 1)) : 0;
+        }
+
+        /// <summary>
+        /// Which emission slots (Poiyomi's Emission 0-3) have their own Audio Link section switched on, found from the
+        /// shader's Audio Link emission properties: a slot counts when its "enabled" switch is on, and, for shaders without
+        /// such a switch, whenever it has Audio Link properties at all.
+        /// </summary>
+        static HashSet<int> AudioLinkEmissionSlots(Material m)
+        {
+            var enabledProps = new Dictionary<int, bool>();   // slot -> has an enable switch, and it is on
+            var anyProps = new HashSet<int>();
+            var sh = m.shader;
+            for (int i = 0; i < sh.GetPropertyCount(); i++)
+            {
+                var type = sh.GetPropertyType(i);
+                if (type != ShaderPropertyType.Float && type != ShaderPropertyType.Range && type != ShaderPropertyType.Int) continue;
+                string name = sh.GetPropertyName(i);
+                string n = Norm(name);
+                if (!n.Contains("audiolink") || !n.Contains("emission")) continue;
+                int slot = SlotIndex(name);
+                anyProps.Add(slot);
+                if (n.Contains("enable"))
+                    enabledProps[slot] = (enabledProps.TryGetValue(slot, out bool on) && on) || m.GetFloat(name) > 0.5f;
+            }
+            var result = new HashSet<int>();
+            foreach (int slot in anyProps)
+                if (!enabledProps.TryGetValue(slot, out bool on) || on) result.Add(slot);
+            return result;
+        }
+
+        /// <summary>
+        /// Every texture of the material that is used for Audio Link: textures whose name says so (the Audio Link mask),
+        /// and the emission map and mask of each emission slot that has Audio Link switched on. The material's main
+        /// emission map stays on the Emission switch. The Audio Link mask comes first.
+        /// </summary>
+        public static List<string> AudioLinkProperties(Material m)
+        {
+            var result = new List<string>();
+            if (m == null || m.shader == null) return result;
+            var props = TextureProperties(m);
+            string mainEmission = EmissionProperty(m);
+            var named = new List<(string p, int score)>();
+            foreach (var p in props)
             {
                 if (!IsAudioLinkName(p)) continue;
-                string n = p.ToLowerInvariant();
-                int score = n.Contains("scroll") ? 0 : 1;
-                if (n.Contains("emission")) score = 2;
-                if (n.Contains("mask")) score = 3;
-                if (n.Replace("_", "") == "audiolinkmask") score = 4;
-                if (score > bestScore) { best = p; bestScore = score; }
+                string n = Norm(p);
+                named.Add((p, n == "audiolinkmask" ? 3 : n.Contains("mask") ? 2 : 1));
             }
-            return best;
+            named.Sort((x, y) => y.score.CompareTo(x.score));
+            foreach (var (p, _) in named) result.Add(p);
+
+            var slots = AudioLinkEmissionSlots(m);
+            if (slots.Count > 0)
+            {
+                var bySlot = new SortedDictionary<int, List<string>>();
+                foreach (var p in props)
+                {
+                    string n = Norm(p);
+                    if (IsAudioLinkName(p) || p == mainEmission || !n.Contains("emission") || n.Contains("scroll") || n.Contains("noise")) continue;
+                    int slot = SlotIndex(p);
+                    if (!slots.Contains(slot)) continue;
+                    if (!bySlot.TryGetValue(slot, out var list)) bySlot[slot] = list = new List<string>();
+                    list.Add(p);
+                }
+                foreach (var kv in bySlot)
+                {
+                    // Skip an empty glow map when there is a mask to paint; keep every texture that has content.
+                    var assigned = kv.Value.FindAll(p => m.GetTexture(p) != null);
+                    var pick = assigned.Count > 0 ? assigned : kv.Value.FindAll(p => Norm(p).Contains("mask"));
+                    if (pick.Count == 0) pick = new List<string> { kv.Value[0] };
+                    foreach (var p in pick) if (!result.Contains(p)) result.Add(p);
+                }
+            }
+            return result;
         }
 
         /// <summary>The material's normal map property, if its shader has one.</summary>
@@ -489,13 +559,20 @@ namespace AviCreatorEssentials
         // The three kinds of texture the Layers panel switches between for one material.
         public const int ChannelBase = 0, ChannelEmission = 1, ChannelAudioLink = 2;
 
-        /// <summary>True for an emission texture. An Audio Link texture is never one, even if its name mentions emission.</summary>
+        /// <summary>True for an emission texture. An Audio Link texture is never one, even if it is an emission mask.</summary>
         public static bool IsEmission(TextureSet set) =>
-            set != null && !IsAudioLinkName(set.property) &&
+            set != null && !IsAudioLink(set) &&
             set.property.IndexOf("Emission", StringComparison.OrdinalIgnoreCase) >= 0;
 
-        /// <summary>True for one of the material's Audio Link textures (the Audio Link mask and so on).</summary>
-        public static bool IsAudioLink(TextureSet set) => set != null && IsAudioLinkName(set.property);
+        /// <summary>True for one of the material's Audio Link textures.</summary>
+        public static bool IsAudioLink(TextureSet set)
+        {
+            if (set == null) return false;
+            if (set.audioLinkState == 0)
+                set.audioLinkState = IsAudioLinkName(set.property) ||
+                    AudioLinkProperties(set.cloneMaterial).Contains(set.property) ? 2 : 1;
+            return set.audioLinkState == 2;
+        }
 
         /// <summary>Which switch position a texture belongs to: base color, emission or Audio Link.</summary>
         public static int ChannelOf(TextureSet set) =>
@@ -506,15 +583,20 @@ namespace AviCreatorEssentials
         {
             if (set == null) return null;
             if (ChannelOf(set) == channel) return set;
-            TextureSet fallback = null;
-            string preferred = channel == ChannelAudioLink && set.cloneMaterial != null ? AudioLinkProperty(set.cloneMaterial) : null;
             foreach (var s in sets)
-            {
-                if (s.originalMaterial != set.originalMaterial || s == set || ChannelOf(s) != channel) continue;
-                if (preferred == null || s.property == preferred) return s;
-                if (fallback == null) fallback = s;
-            }
-            return fallback;
+                if (s.originalMaterial == set.originalMaterial && s != set && ChannelOf(s) == channel)
+                    return s;
+            return null;
+        }
+
+        /// <summary>All the Audio Link textures of the set's material, in list order.</summary>
+        public List<TextureSet> AudioLinkSets(TextureSet set)
+        {
+            var list = new List<TextureSet>();
+            if (set == null) return list;
+            foreach (var s in sets)
+                if (s.originalMaterial == set.originalMaterial && IsAudioLink(s)) list.Add(s);
+            return list;
         }
 
         /// <summary>The base-color set and emission set of the same material.</summary>
@@ -532,7 +614,8 @@ namespace AviCreatorEssentials
                 set.height = from.height;
             }
             if (IsEmission(set)) set.displayName = from.originalMaterial.name + "  ·  Emission";
-            else if (IsAudioLink(set)) set.displayName = from.originalMaterial.name + "  ·  Audio Link";
+            else if (IsAudioLink(set))
+                set.displayName = from.originalMaterial.name + "  ·  Audio Link: " + PropertyDescription(from.cloneMaterial, property) + " (" + property + ")";
             sets.Remove(set);
             int idx = sets.IndexOf(from);
             int insert = idx + 1;

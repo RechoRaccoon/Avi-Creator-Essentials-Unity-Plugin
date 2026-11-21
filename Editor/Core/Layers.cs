@@ -224,6 +224,7 @@ namespace AviCreatorEssentials
         public string property = "_MainTex";
         public Texture originalTexture;            // value of the property at session start
         public bool createdProperty;               // texture slot was empty (e.g. new emission map)
+        public int audioLinkState;                 // 0 not worked out yet, 1 no, 2 yes: is this an Audio Link texture
         public readonly List<SetUser> users = new List<SetUser>();
 
         public int width = 2048;
