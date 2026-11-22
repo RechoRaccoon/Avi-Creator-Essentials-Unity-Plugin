@@ -135,6 +135,28 @@ Open it from **Tools › Avi Creator Essentials › Outline & Optimize…**, or 
 
 **Textures tab.** Lists every texture the avatar uses, with size and memory. Cap sizes, turn on Crunch compression, mipmap streaming, turn off Read/Write, and add a Quest (Android ASTC 6x6) override, then **Apply**. Only the textures' import settings change; your image files are never edited, so you can set a size back at any time. Textures inside packages can't be changed.
 
+## Bake Shaders for Quest
+
+Turns a PC avatar into a Quest avatar that looks closer to the PC one. Open it from **Tools › Avi Creator Essentials › Bake Shaders for Quest…**, or right-click your avatar in the Hierarchy, and drop your avatar in the Avatar field.
+
+For each material it renders the mesh in UV space with the real PC shader, so the baked texture holds the albedo, decals, toon shading, matcap, rim light and emission exactly as that shader draws them, for one fixed light and one fixed view direction. Emission is baked into its own texture so the Quest shader can still glow it. It then builds a Quest material (VRChat/Mobile/Toon Standard by default, or Toon Lit / Standard Lite) from the baked texture, carries the normal map through, and can duplicate the avatar as `<Avatar>_Quest` with the baked materials swapped in. Your PC avatar is never changed. Textures and materials land in `Assets/Avi Creator Essentials Data/ShaderBake/<AvatarName>/`.
+
+**Settings:** bake resolution (512 / 1024 / 2048), Quest shader, brightness (try 0.83 if the Quest copy looks washed out on Toon Lit), bake light and ambient strength, emission on/off, edge dilation on/off, Quest copy on/off, Android ASTC 6x6 override on/off.
+
+**Honest limits:** view-dependent effects (matcap, rim light, specular) and animated effects (hue shift, scrolling emission, AudioLink) bake frozen at their current values and will not move afterwards. The baked lighting is fixed, and the Quest shader still adds its own lighting on top, so the result is closer to the PC look, not identical. Blend shapes bake at the base pose, overlapping UVs smear, and transparent materials keep their alpha but Quest has no real transparency. The Quest copy still needs a manual pass: remove or replace Quest-rejected components (PhysBones, constraints, PC-only scripts) and switch the build target to Android before uploading.
+
+## Mute Toggle
+
+Show or hide objects on your avatar depending on whether you are muted in VRChat. Open it from **Tools › Avi Creator Essentials › Mute Toggle…**, or right-click your avatar in the Hierarchy.
+
+Pick the avatar, add the objects you want to toggle (select them in the Hierarchy and press **Add selected objects**), and tick **Show when muted** and **Show when unmuted** for each one. The default is a mute indicator: the object shows while you are muted and hides while you are not.
+
+It adds a layer called "ACE Mute Toggle" to the avatar's FX controller, driven by VRChat's built-in MuteSelf parameter. MuteSelf is sent to other players, so they see the objects change too (it can take a moment to show up for them). Nothing is added to your Expression Parameters asset and it uses none of your sync budget.
+
+If your avatar already has a custom FX controller, the layer is added to it and nothing else changes. If it still uses VRChat's default FX layer, the tool makes a copy of the SDK sample FX controller for the avatar and uses that instead, so the default face expressions keep working. If the sample controller is not in your project, the new controller only has the mute layer, and the window will warn you about it.
+
+Applying again replaces the previous mute setup, so you can change the objects or settings and re-apply. **Remove mute setup** takes the layer out again, and if the FX controller was made by this tool and is now empty, the avatar goes back to VRChat's default FX layer.
+
 ## Bone Posing (Scene view)
 
 1. Select your avatar in the Hierarchy.

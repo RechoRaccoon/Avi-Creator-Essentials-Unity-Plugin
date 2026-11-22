@@ -1,8 +1,8 @@
 {
   "name": "com.rechoraccoon.avi-creator-essentials",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "displayName": "Avi Creator Essentials",
-  "description": "Editor tools for VRChat avatar creators: a seam-free 3D/2D texture painter with layers, masks, emission painting, wet paint brushes, 3D gradients and stars, Blender-style bone posing in the Scene view for making animations, and an outline generator with texture optimizing.",
+  "description": "Editor tools for VRChat avatar creators: a seam-free 3D/2D texture painter with layers, masks, emission painting, wet paint brushes, 3D gradients and stars, Blender-style bone posing in the Scene view for making animations, an outline generator with texture optimizing, PC-shader baking for Quest, and a mute toggle.",
   "unity": "2022.3",
   "author": {
     "name": "RechoRaccoon",
@@ -16,7 +16,9 @@
     "posing",
     "animation",
     "outline",
-    "optimization"
+    "optimization",
+    "quest",
+    "baking"
   ],
   "repository": {
     "type": "git",
