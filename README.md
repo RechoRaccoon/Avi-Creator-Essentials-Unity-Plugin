@@ -4,6 +4,7 @@ Unity editor tools for VRChat avatar creators:
 
 - **Avatar Painter**: paint textures directly on your avatar in 3D or on the flat texture in 2D, with layers, masks, emission painting and no visible seams.
 - **Bone Posing**: Blender-style bones drawn over your avatar in the Scene view. Click a bone, rotate it, and record it with Unity's Animation window.
+- **Outline & Optimize**: add a toon outline to any avatar (any shader, Quest included) and shrink its textures.
 
 Made for the VRChat Creator Companion's Unity version (2022.3) with the Built-in Render Pipeline. It works with Poiyomi, lilToon, Standard and most other avatar shaders.
 
@@ -117,6 +118,22 @@ Each adjustment layer remembers its area, so you can stack one per eye, hide the
 **Custom brushes.** Click **+** after the brush tips and pick a PNG or JPG. White (or opaque) areas paint.
 
 **Saving and baking.** **Save** keeps your layers in an `AviCreatorEssentialsProjects` folder next to `Assets`. **Bake** writes finished PNGs to `Assets/Avi Creator Essentials Data/Baked` and can put them on your avatar using copies of your materials.
+
+## Outline & Optimize
+
+Open it from **Tools › Avi Creator Essentials › Outline & Optimize…**, or right-click your avatar in the Hierarchy › **Avi Creator Essentials › Add Outline To This Avatar…**, and drop your avatar in the Avatar field.
+
+**Outline tab.** It makes a slightly bigger copy of each mesh, pushed out along smoothed normals with its faces flipped (an inverted hull), with its own material and color. The flip is part of the mesh, so the outline works whatever shader your avatar uses (Poiyomi, lilToon, Standard, VRChat Mobile…) and on Quest.
+
+- **Look:** width in centimetres, color, and the outline shader. VRChat Mobile Toon Lit / Standard Lite work on Quest and PC. *Custom shader* and *My own outline material* are for PC.
+- **What gets an outline:** tick meshes and individual material slots (expand a mesh with the arrow). Eyes, lashes, brows, mouth, cutout and transparent materials start unticked. Each mesh has its own width multiplier and optional color.
+- **Keep it off areas:** add bones to leave out (for example **Add head bone**); vertices weighted to them fade out of the outline. Or paint vertex colors in Blender (red = width) and turn on *Use the mesh's vertex color*.
+- **Placement:** *Separate object* adds an `…_Outline` object next to each mesh (easy to remove). *Merge into the mesh* adds the outline as one more submesh of the same mesh, so there are no extra renderers, which is better for Quest.
+- **Blend shapes:** the outline follows them, so it stays on the face during visemes. Shapes that barely move it are skipped.
+- **Optimize:** *Weld duplicate vertices* (safe), *Simplify* (merges vertices within a few mm) and a *Triangle budget* that simplifies automatically until the outline fits. The estimate shows the outline's triangles and the avatar's Quest rank with it.
+- **Run it again** to tweak: earlier outlines are replaced. **Remove outlines** takes them away; Ctrl+Z also works. Files are saved in `Assets/Avi Creator Essentials Data/Outlines/<avatar name>`.
+
+**Textures tab.** Lists every texture the avatar uses, with size and memory. Cap sizes, turn on Crunch compression, mipmap streaming, turn off Read/Write, and add a Quest (Android ASTC 6x6) override, then **Apply**. Only the textures' import settings change; your image files are never edited, so you can set a size back at any time. Textures inside packages can't be changed.
 
 ## Bone Posing (Scene view)
 
