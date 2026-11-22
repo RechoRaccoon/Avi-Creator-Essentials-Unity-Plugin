@@ -50,6 +50,7 @@ namespace AviCreatorEssentials
         public class Settings
         {
             public float widthCm = 0.15f;
+            public bool exactWorldWidth = true;
             public Color color = new Color(0.05f, 0.05f, 0.05f, 1f);
             public Placement placement = Placement.SeparateObject;
             public ShaderChoice shader = ShaderChoice.MobileToonLit;
@@ -59,6 +60,7 @@ namespace AviCreatorEssentials
             public bool smoothNormals = true;
             public bool useVertexColorWidth;
             public bool copyBlendShapes = true;
+            public bool linkBlendShapes = true;
             public float blendShapeMinMoveMm = 0.5f;
             public List<Transform> excludedBones = new List<Transform>();
             public bool excludedBonesIncludeChildren = true;
@@ -166,6 +168,7 @@ namespace AviCreatorEssentials
             int group = Undo.GetCurrentGroup();
 
             int done = 0;
+            bool linkWarned = false;
             foreach (var info in infos)
             {
                 done++;
@@ -194,9 +197,14 @@ namespace AviCreatorEssentials
                     string path = folder + "/" + baseName + Suffix + ".asset";
                     hull.name = baseName + Suffix;
                     var saved = SaveMesh(hull, path);
-                    PlaceSeparate(info, saved, mat);
+                    var outlineGo = PlaceSeparate(info, saved, mat);
                     WriteSidecar(path, root, info, s, included);
                     result.bytes += FileSize(path);
+                    if (s.linkBlendShapes && hull.blendShapeCount > 0)
+                    {
+                        string linkNote = AddBlendShapeLink(outlineGo, info.renderer.gameObject);
+                        if (linkNote != null && !linkWarned) { result.warnings.Add(linkNote); linkWarned = true; }
+                    }
                 }
                 else
                 {
@@ -264,6 +272,7 @@ namespace AviCreatorEssentials
         public class OutlineSidecar
         {
             public int version = 1;
+            public bool exactWorldWidth = true;
             public string avatarName;
             public string sourcePath;
             public float widthCm;
@@ -374,6 +383,18 @@ namespace AviCreatorEssentials
                 factor[i] = f;
             }
 
+            // Push scale: how many mesh-space units make one world-space metre at each vertex.
+            // With exactWorldWidth, the push is recomputed per vertex as the local-space vector that
+            // moves it by the exact width along its world-space normal, so the outline stays even
+            // when the object or its bones are scaled unevenly. Without it, the width is divided by
+            // the average of the scale components, which is only even for uniform scale.
+            var pushScale = scale;
+            if (s.exactWorldWidth)
+            {
+                pushScale = (float[])scale.Clone();
+                ExactPush(info.renderer, mesh, weights, skinned, smooth, factor, alive, dir, factor, pushScale);
+            }
+
             // Which vertices are used, and how wide each is. Positions stay unpushed here; the caller pushes them.
             var map = new int[verts.Length];
             for (int i = 0; i < map.Length; i++) map[i] = -1;
@@ -381,14 +402,14 @@ namespace AviCreatorEssentials
             var srcOfHull = new List<int>();
             var pushDir = new List<Vector3>();
             var pushFactor = new List<float>();
-            var pushScale = new List<float>();
+            var pushScaleList = new List<float>();
             for (int t = 0; t + 2 < srcTris.Count; t += 3)
             {
                 int a = srcTris[t], b = srcTris[t + 1], c = srcTris[t + 2];
                 if (!alive[a] && !alive[b] && !alive[c]) continue;
-                int na = UseBase(a, map, hull, srcOfHull, pushDir, pushFactor, pushScale, verts, smooth, dir, factor, scale, weights, skinned);
-                int nb = UseBase(b, map, hull, srcOfHull, pushDir, pushFactor, pushScale, verts, smooth, dir, factor, scale, weights, skinned);
-                int nc = UseBase(c, map, hull, srcOfHull, pushDir, pushFactor, pushScale, verts, smooth, dir, factor, scale, weights, skinned);
+                int na = UseBase(a, map, hull, srcOfHull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
+                int nb = UseBase(b, map, hull, srcOfHull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
+                int nc = UseBase(c, map, hull, srcOfHull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
                 // Flipped winding: this is what turns the copy into an outline.
                 hull.tris.Add(na); hull.tris.Add(nc); hull.tris.Add(nb);
             }
@@ -402,7 +423,7 @@ namespace AviCreatorEssentials
                 skinned = skinned,
                 pushDir = pushDir.ToArray(),
                 pushFactor = pushFactor.ToArray(),
-                pushScale = pushScale.ToArray(),
+                pushScale = pushScaleList.ToArray(),
             };
         }
 
@@ -489,6 +510,77 @@ namespace AviCreatorEssentials
             if (weight <= 0f || bone < 0 || bone >= boneScale.Length) return;
             acc += boneScale[bone] * weight;
             sum += weight;
+        }
+
+        /// <summary>Rewrites the per-vertex push so the outline is exactly the requested width in world space: for each live vertex, the local-space vector that moves it by width * f along its world-space normal. Vertices whose skinning matrix can't be inverted keep the average-scale push. The scale array is only used for the blend-shape min-move check, so it is left alone; the push scale is rewritten in place.</summary>
+        static void ExactPush(Renderer r, Mesh mesh, BoneWeight[] weights, bool skinned, Vector3[] smooth, float[] factor, bool[] alive, Vector3[] dir, float[] outFactor, float[] outScale)
+        {
+            int count = smooth.Length;
+            Matrix4x4 single = new Matrix4x4();
+            Matrix4x4[] boneMatrices = null;
+            if (!skinned)
+            {
+                single = r.transform.localToWorldMatrix;
+            }
+            else
+            {
+                var smr = (SkinnedMeshRenderer)r;
+                var bones = smr.bones;
+                var bind = mesh.bindposes;
+                boneMatrices = new Matrix4x4[bones.Length];
+                for (int j = 0; j < bones.Length; j++)
+                {
+                    if (bones[j] == null || j >= bind.Length) boneMatrices[j] = Matrix4x4.identity;
+                    else boneMatrices[j] = bones[j].localToWorldMatrix * bind[j];
+                }
+            }
+            for (int i = 0; i < count; i++)
+            {
+                if (!alive[i]) continue;
+                Matrix4x4 m;
+                if (!skinned)
+                {
+                    m = single;
+                }
+                else
+                {
+                    var w = weights[i];
+                    m = new Matrix4x4();
+                    AddBone(ref m, boneMatrices, w.boneIndex0, w.weight0);
+                    AddBone(ref m, boneMatrices, w.boneIndex1, w.weight1);
+                    AddBone(ref m, boneMatrices, w.boneIndex2, w.weight2);
+                    AddBone(ref m, boneMatrices, w.boneIndex3, w.weight3);
+                }
+                Vector3 eDir; float eFactor; float eScale;
+                if (!ExactPushVector(m, smooth[i].normalized, factor[i], out eDir, out eFactor, out eScale)) continue;
+                dir[i] = eDir;
+                outFactor[i] = eFactor;
+                outScale[i] = eScale;
+            }
+        }
+
+        static void AddBone(ref Matrix4x4 m, Matrix4x4[] boneMatrices, int bone, float weight)
+        {
+            if (weight <= 0f || bone < 0 || bone >= boneMatrices.Length) return;
+            m += boneMatrices[bone] * weight;
+        }
+
+        /// <summary>The local-space push for one vertex at the exact world-space width: direction, factor and scale such that dir * (width * factor / scale) moves the vertex by width * f along its world-space normal. Returns false when the vertex's matrix can't be inverted, so the caller keeps the average-scale push.</summary>
+        static bool ExactPushVector(Matrix4x4 m, Vector3 nLocal, float f, out Vector3 dir, out float factor, out float scale)
+        {
+            dir = Vector3.zero; factor = 0f; scale = 1f;
+            if (Mathf.Abs(m.determinant) < 1e-12f) return false;
+            var inv = m.inverse;
+            var nWorld = inv.transpose.MultiplyVector(nLocal);
+            if (nWorld.sqrMagnitude < 1e-12f) return false;
+            nWorld.Normalize();
+            var v = inv.MultiplyVector(nWorld);
+            if (v.sqrMagnitude < 1e-12f) return false;
+            if (float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z)) return false;
+            dir = v.normalized;
+            factor = f * v.magnitude;
+            scale = 1f;
+            return true;
         }
 
         static float[] BoneFactor(SkinnedMeshRenderer smr, Mesh mesh, BoneWeight[] bw, bool skinned, Settings s, int count)
@@ -756,7 +848,8 @@ namespace AviCreatorEssentials
             foreach (var sl in included) slots.Add(sl.index);
             var sidecar = new OutlineSidecar
             {
-                version = 1,
+                version = 2,
+                exactWorldWidth = s.exactWorldWidth,
                 avatarName = root != null ? root.name : "",
                 sourcePath = root != null ? RelativePath(root.transform, info.renderer.transform) : info.renderer.name,
                 widthCm = s.widthCm,
@@ -822,7 +915,7 @@ namespace AviCreatorEssentials
             return hullPath.Substring(0, hullPath.Length - ".asset".Length) + ".json";
         }
 
-        static void PlaceSeparate(RendererInfo info, Mesh hull, Material mat)
+        static GameObject PlaceSeparate(RendererInfo info, Mesh hull, Material mat)
         {
             var src = info.renderer;
             var go = new GameObject(Sanitize(src.name) + Suffix);
@@ -854,7 +947,9 @@ namespace AviCreatorEssentials
                 r.probeAnchor = smr.probeAnchor;
                 r.lightProbeUsage = smr.lightProbeUsage;
                 r.reflectionProbeUsage = smr.reflectionProbeUsage;
-                // Follow the original's blend shape weights while editing. (VRChat drives both with the same parameters.)
+                // Copy the source's blend shape weights so the outline matches in the editor.
+                // At runtime VRChat animates the source's weights only, so the outline follows
+                // toggles through the VRCFury BlendShape Link added at Generate time (or merged placement).
                 for (int i = 0; i < hull.blendShapeCount; i++)
                 {
                     int idx = smr.sharedMesh.GetBlendShapeIndex(hull.GetBlendShapeName(i));
@@ -870,6 +965,89 @@ namespace AviCreatorEssentials
                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 r.receiveShadows = false;
             }
+            return go;
+        }
+
+        // ------------------------------------------------------------------ VRCFury blend shape link
+
+        /// <summary>Finds a type by its full name in any loaded assembly, or null. Used for VRCFury types so this tool has no compile-time dependency on VRCFury.</summary>
+        static Type FindType(string fullName)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type t = null;
+                try { t = asm.GetType(fullName); } catch { }
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        /// <summary>Adds a VRCFury BlendShape Link to an outline object, so the outline's blend shapes follow the source's at runtime. VRCFury rewrites every animation clip at upload, after its own toggles are baked, to drive the linked mesh's same-named blend shapes. That is the only way to follow toggles: the toggle clips don't exist in the editor, so no editor-time clip edit could cover them. The link lives on the outline object, so Remove outlines takes it away too. Field names are from VRCFury's BlendShapeLink model (VF.Model.Feature.BlendShapeLink) and its VRCFury component (VF.Model.VRCFury, content field); re-check them if VRCFury changes the model. Returns null on success, or a short reason it was skipped.</summary>
+        public static string AddBlendShapeLink(GameObject outlineObject, GameObject sourceObject)
+        {
+            var outlineSmr = outlineObject != null ? outlineObject.GetComponent<SkinnedMeshRenderer>() : null;
+            if (outlineSmr == null) return null; // not skinned, so no blend shapes to link
+            if (outlineSmr.sharedMesh == null || outlineSmr.sharedMesh.blendShapeCount == 0) return null;
+            var vrcFuryType = FindType("VF.Model.VRCFury");
+            var linkType = FindType("VF.Model.Feature.BlendShapeLink");
+            if (vrcFuryType == null || linkType == null)
+                return "VRCFury is not installed, so the outline's blend shapes won't follow toggles. Install VRCFury and re-run Generate to link them.";
+            // Drop any BlendShape Link already on this outline, so re-running never stacks duplicates.
+            var contentField = vrcFuryType.GetField("content");
+            if (contentField != null)
+            {
+                foreach (var c in outlineObject.GetComponents(vrcFuryType))
+                {
+                    var existing = contentField.GetValue(c);
+                    if (existing != null && existing.GetType() == linkType)
+                        Undo.DestroyObjectImmediate(c);
+                }
+            }
+            var comp = outlineObject.AddComponent(vrcFuryType);
+            Undo.RegisterCreatedObjectUndo(comp, "Add outline");
+            object model;
+            try { model = Activator.CreateInstance(linkType, nonPublic: true); }
+            catch (Exception e)
+            {
+                Undo.DestroyObjectImmediate(comp);
+                return "Couldn't create the VRCFury BlendShape Link: " + e.Message;
+            }
+            var so = new SerializedObject(comp);
+            var content = so.FindProperty("content");
+            if (content == null)
+            {
+                Undo.DestroyObjectImmediate(comp);
+                return "VRCFury's component has no content field, so the blend shape link couldn't be added.";
+            }
+            content.managedReferenceValue = model;
+            so.ApplyModifiedProperties();
+            so.Update();
+            content = so.FindProperty("content");
+            if (content == null)
+            {
+                Undo.DestroyObjectImmediate(comp);
+                return "VRCFury's component has no content field, so the blend shape link couldn't be added.";
+            }
+            var baseProp = content.FindPropertyRelative("baseObj");
+            var skinsProp = content.FindPropertyRelative("linkSkins");
+            var includeProp = content.FindPropertyRelative("includeAll");
+            if (baseProp == null || skinsProp == null || includeProp == null)
+            {
+                Undo.DestroyObjectImmediate(comp);
+                return "VRCFury's BlendShape Link doesn't have the expected fields, so the blend shape link couldn't be added.";
+            }
+            baseProp.stringValue = sourceObject != null ? sourceObject.name : "";
+            includeProp.boolValue = true;
+            skinsProp.arraySize = 1;
+            var skinProp = skinsProp.GetArrayElementAtIndex(0).FindPropertyRelative("renderer");
+            if (skinProp == null)
+            {
+                Undo.DestroyObjectImmediate(comp);
+                return "VRCFury's BlendShape Link doesn't have the expected fields, so the blend shape link couldn't be added.";
+            }
+            skinProp.objectReferenceValue = outlineSmr;
+            so.ApplyModifiedProperties();
+            return null;
         }
 
         /// <summary>Rebuilds one separate-object outline's hull from its sidecar with a new width. Returns null on success, or an error message.</summary>
@@ -1128,6 +1306,7 @@ namespace AviCreatorEssentials
             var s = new Settings
             {
                 widthCm = newWidthCm,
+                exactWorldWidth = sidecar.version < 2 ? true : sidecar.exactWorldWidth,
                 smoothNormals = sidecar.smoothNormals,
                 useVertexColorWidth = sidecar.useVertexColorWidth,
                 copyBlendShapes = sidecar.copyBlendShapes,

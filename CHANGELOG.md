@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.0
+
+- Separate outlines now follow blend-shape toggles: Generate adds a VRCFury BlendShape Link to each outline, so toggles and sliders that animate the source's blend shapes drive the outline's too. It runs at upload, after VRCFury's own toggles are baked, so it covers those as well. Turn it off with *Link blend shapes with VRCFury* in the Outline window; without VRCFury installed the outline is made anyway, with a warning. Outlines made before 0.19.0 need one Generate run to get the link.
+- New *Even width on scaled objects* toggle (on by default): the outline is pushed along the world-space normal by the exact width, so it stays the same thickness everywhere even when an object or its bones are scaled unevenly. The old width divided by the average scale, which made outlines thicker in some directions than others. Turn the toggle off to go back to the older width.
+
 ## 0.18.0
 
 - New **Widths** tab in the Outline & Optimize window: every separate outline on the avatar in one place, each with its own width slider. Drag a slider and the outline changes live in the scene; letting go saves it. Outlines merged into the mesh have no separate object, so they are not listed.

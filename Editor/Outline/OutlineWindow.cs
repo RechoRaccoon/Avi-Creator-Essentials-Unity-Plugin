@@ -126,6 +126,8 @@ namespace AviCreatorEssentials
 
             Section("Look");
             m_S.widthCm = EditorGUILayout.Slider(new GUIContent("Width (cm)", "How thick the outline is, in real centimetres on the avatar"), m_S.widthCm, 0.02f, 1.0f);
+            m_S.exactWorldWidth = EditorGUILayout.ToggleLeft(new GUIContent("Even width on scaled objects",
+                "Keeps the outline the same thickness everywhere, even when an object or its bones are scaled unevenly. Turn it off to go back to the older width if it looks wrong."), m_S.exactWorldWidth);
             m_S.color = EditorGUILayout.ColorField("Color", m_S.color);
             int sc = EditorGUILayout.Popup("Outline shader", (int)m_S.shader, s_Shaders);
             m_S.shader = (OutlineGenerator.ShaderChoice)sc;
@@ -186,7 +188,11 @@ namespace AviCreatorEssentials
             m_S.copyBlendShapes = EditorGUILayout.ToggleLeft(new GUIContent("Make the outline follow blend shapes",
                 "Needed so the outline stays on the face when visemes and expressions move it. Costs mesh size."), m_S.copyBlendShapes);
             using (new EditorGUI.DisabledScope(!m_S.copyBlendShapes))
+            {
                 m_S.blendShapeMinMoveMm = EditorGUILayout.Slider(new GUIContent("Skip shapes moving less than (mm)", "Blend shapes that barely move the outline are left out to save size"), m_S.blendShapeMinMoveMm, 0f, 5f);
+                m_S.linkBlendShapes = EditorGUILayout.ToggleLeft(new GUIContent("Link blend shapes with VRCFury",
+                    "Adds a VRCFury BlendShape Link to each outline, so toggles and sliders that animate the source's blend shapes drive the outline's too. Needs VRCFury installed; without it the outline is made anyway, with a warning."), m_S.linkBlendShapes);
+            }
 
             Section("Optimize the outline (optional)");
             m_S.weldVertices = EditorGUILayout.ToggleLeft(new GUIContent("Weld duplicate vertices", "The outline needs no UVs, so UV seam copies can be merged. Safe, usually saves 30–50% of its vertices."), m_S.weldVertices);
