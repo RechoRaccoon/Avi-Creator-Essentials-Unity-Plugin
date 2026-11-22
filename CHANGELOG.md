@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.1
+
+- Outlines made as separate objects now all sit under one empty `Outlines` object on the avatar, instead of one object per mesh scattered through the hierarchy. Each mesh still gets its own `…_Outline` object, in the same place it renders; only the parenting changed, so uploads and blend shapes are unaffected. Re-running replaces them as before, and **Remove outlines** takes the `Outlines` parent away too once it is empty.
+
 ## 0.16.0
 
 - New **Bake Shaders for Quest** window (Tools › Avi Creator Essentials › Bake Shaders for Quest…, or right-click the avatar in the Hierarchy). It bakes how each PC shader (Poiyomi, lilToon, Standard) makes a material look into a plain texture, builds a Quest material from it (VRChat/Mobile/Toon Standard by default, or Toon Lit / Standard Lite), and can make a `<Avatar>_Quest` copy of the avatar with the baked materials swapped in. Emission bakes into its own texture so the Quest shader can still glow it, and the source normal map carries through. Your PC avatar is never changed. View-dependent effects (matcap, rim light, specular) and animated effects (hue shift, scrolling emission, AudioLink) bake frozen at their current values and will not move afterwards, and the baked lighting is fixed, so the result is closer to the PC look, not identical. The Quest copy still needs a manual pass: remove or replace Quest-rejected components (PhysBones, constraints, PC-only scripts) and switch the build target to Android before uploading.

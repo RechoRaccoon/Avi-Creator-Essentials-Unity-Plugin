@@ -16,6 +16,7 @@ namespace AviCreatorEssentials
     public static class OutlineGenerator
     {
         public const string Suffix = "_Outline";
+        public const string ParentName = "Outlines";
         public const string DataFolder = "Assets/Avi Creator Essentials Data/Outlines";
 
         public enum Placement { SeparateObject, MergeIntoMesh }
@@ -165,6 +166,7 @@ namespace AviCreatorEssentials
             int group = Undo.GetCurrentGroup();
 
             int done = 0;
+            Transform outlinesParent = null;
             foreach (var info in infos)
             {
                 done++;
@@ -193,7 +195,8 @@ namespace AviCreatorEssentials
                     string path = folder + "/" + baseName + Suffix + ".asset";
                     hull.name = baseName + Suffix;
                     var saved = SaveMesh(hull, path);
-                    PlaceSeparate(info, saved, mat);
+                    if (outlinesParent == null) outlinesParent = GetOrCreateOutlinesParent(root);
+                    PlaceSeparate(info, saved, mat, outlinesParent);
                     result.bytes += FileSize(path);
                 }
                 else
@@ -224,6 +227,11 @@ namespace AviCreatorEssentials
                 Undo.DestroyObjectImmediate(go);
                 removed++;
             }
+            // Take the "Outlines" parent away too, once it holds nothing but this tool's outlines.
+            // It is only deleted when empty, so anything the user put in it survives.
+            var outlinesParent = root.transform.Find(ParentName);
+            if (outlinesParent != null && outlinesParent.childCount == 0)
+                Undo.DestroyObjectImmediate(outlinesParent.gameObject);
             foreach (var r in root.GetComponentsInChildren<Renderer>(true))
             {
                 Mesh mesh = MeshOf(r);
@@ -677,7 +685,23 @@ namespace AviCreatorEssentials
             return mesh;
         }
 
-        static void PlaceSeparate(RendererInfo info, Mesh hull, Material mat)
+        /// <summary>Finds the "Outlines" parent under the avatar root, or creates it as an empty object with an identity transform.</summary>
+        static Transform GetOrCreateOutlinesParent(GameObject root)
+        {
+            if (root == null) return null;
+            var parent = root.transform.Find(ParentName);
+            if (parent != null) return parent;
+            var go = new GameObject(ParentName);
+            Undo.RegisterCreatedObjectUndo(go, "Add outline");
+            go.transform.SetParent(root.transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
+            go.layer = root.layer;
+            return go.transform;
+        }
+
+        static void PlaceSeparate(RendererInfo info, Mesh hull, Material mat, Transform outlinesParent)
         {
             var src = info.renderer;
             var go = new GameObject(Sanitize(src.name) + Suffix);
@@ -688,6 +712,8 @@ namespace AviCreatorEssentials
             go.transform.localScale = src.transform.localScale;
             go.layer = src.gameObject.layer;
             go.SetActive(src.gameObject.activeSelf);
+            // All separate outline objects live under one "Outlines" parent on the avatar, so the hierarchy stays tidy.
+            if (outlinesParent != null) go.transform.SetParent(outlinesParent, true);
 
             var smr = src as SkinnedMeshRenderer;
             if (smr != null)
