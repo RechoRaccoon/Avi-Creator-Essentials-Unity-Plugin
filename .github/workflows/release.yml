@@ -80,5 +80,10 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      # The artifact list API is eventually consistent: deploy-pages has failed
+      # three times finding 0 artifacts a fraction of a second after a successful
+      # upload, while the same timing worked before. Give it time to propagate.
+      - name: Wait for the artifact to become visible
+        run: sleep 30
       - id: deploy
         uses: actions/deploy-pages@v4
