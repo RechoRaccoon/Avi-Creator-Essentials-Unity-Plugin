@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0
+
+- Separate outlines are now children of the object they outline, so hiding or disabling a source (for example clothing) hides its outline too, and accessories attached with VRCFury Armature Link carry their outlines with them. This replaces the single "Outlines" parent from 0.16.1, which broke both. Re-running replaces outlines as before, and Remove outlines still cleans up a stale empty "Outlines" parent.
+- New **Resize Outline** menu (right-click an outline or its source in the Hierarchy) to change one object's outline width after adding it, without regenerating the whole avatar. The width info is saved next to each outline mesh, so outlines made before 0.17.0 need one Generate run first.
+- Separate placement still makes one outline object per mesh, and merged placement is unchanged.
+
 ## 0.16.1
 
 - Outlines made as separate objects now all sit under one empty `Outlines` object on the avatar, instead of one object per mesh scattered through the hierarchy. Each mesh still gets its own `…_Outline` object, in the same place it renders; only the parenting changed, so uploads and blend shapes are unaffected. Re-running replaces them as before, and **Remove outlines** takes the `Outlines` parent away too once it is empty.

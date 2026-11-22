@@ -128,10 +128,11 @@ Open it from **Tools › Avi Creator Essentials › Outline & Optimize…**, or 
 - **Look:** width in centimetres, color, and the outline shader. VRChat Mobile Toon Lit / Standard Lite work on Quest and PC. *Custom shader* and *My own outline material* are for PC.
 - **What gets an outline:** tick meshes and individual material slots (expand a mesh with the arrow). Eyes, lashes, brows, mouth, cutout and transparent materials start unticked. Each mesh has its own width multiplier and optional color.
 - **Keep it off areas:** add bones to leave out (for example **Add head bone**); vertices weighted to them fade out of the outline. Or paint vertex colors in Blender (red = width) and turn on *Use the mesh's vertex color*.
-- **Placement:** *Separate object* adds an `…_Outline` object for each mesh, all parented under one `Outlines` object on the avatar (easy to remove). *Merge into the mesh* adds the outline as one more submesh of the same mesh, so there are no extra renderers, which is better for Quest.
+- **Placement:** *Separate object* adds an `…_Outline` object for each mesh, as a child of the mesh it outlines (easy to remove, and hiding the mesh hides its outline too). *Merge into the mesh* adds the outline as one more submesh of the same mesh, so there are no extra renderers, which is better for Quest.
 - **Blend shapes:** the outline follows them, so it stays on the face during visemes. Shapes that barely move it are skipped.
 - **Optimize:** *Weld duplicate vertices* (safe), *Simplify* (merges vertices within a few mm) and a *Triangle budget* that simplifies automatically until the outline fits. The estimate shows the outline's triangles and the avatar's Quest rank with it.
 - **Run it again** to tweak: earlier outlines are replaced. **Remove outlines** takes them away; Ctrl+Z also works. Files are saved in `Assets/Avi Creator Essentials Data/Outlines/<avatar name>`.
+- **Resizing one outline:** right-click an outline object, or the mesh it outlines, in the Hierarchy and pick **Resize Outline…**. Change the width and press **Regenerate Outline** to rebuild just that hull. Outlines made before 0.17.0 need one Generate run first, so their width info is saved.
 
 **Textures tab.** Lists every texture the avatar uses, with size and memory. Cap sizes, turn on Crunch compression, mipmap streaming, turn off Read/Write, and add a Quest (Android ASTC 6x6) override, then **Apply**. Only the textures' import settings change; your image files are never edited, so you can set a size back at any time. Textures inside packages can't be changed.
 

@@ -166,7 +166,6 @@ namespace AviCreatorEssentials
             int group = Undo.GetCurrentGroup();
 
             int done = 0;
-            Transform outlinesParent = null;
             foreach (var info in infos)
             {
                 done++;
@@ -195,8 +194,8 @@ namespace AviCreatorEssentials
                     string path = folder + "/" + baseName + Suffix + ".asset";
                     hull.name = baseName + Suffix;
                     var saved = SaveMesh(hull, path);
-                    if (outlinesParent == null) outlinesParent = GetOrCreateOutlinesParent(root);
-                    PlaceSeparate(info, saved, mat, outlinesParent);
+                    PlaceSeparate(info, saved, mat);
+                    WriteSidecar(path, root, info, s, included);
                     result.bytes += FileSize(path);
                 }
                 else
@@ -259,6 +258,31 @@ namespace AviCreatorEssentials
 
         [Serializable]
         public class Origin { public string meshGuid; public int materialCount; }
+
+        /// <summary>What one separate-object outline was built from, saved next to its hull asset so its width can be rebuilt later.</summary>
+        [Serializable]
+        public class OutlineSidecar
+        {
+            public int version = 1;
+            public string avatarName;
+            public string sourcePath;
+            public float widthCm;
+            public float widthMultiplier;
+            public float colorR;
+            public float colorG;
+            public float colorB;
+            public float colorA;
+            public bool overrideColor;
+            public int[] includedSlots;
+            public bool smoothNormals;
+            public bool useVertexColorWidth;
+            public bool copyBlendShapes;
+            public float blendShapeMinMoveMm;
+            public string[] excludedBones;
+            public bool weldVertices;
+            public float simplifyMm;
+            public int triangleBudget;
+        }
 
         static Mesh MeshOf(Renderer r)
         {
@@ -685,35 +709,95 @@ namespace AviCreatorEssentials
             return mesh;
         }
 
-        /// <summary>Finds the "Outlines" parent under the avatar root, or creates it as an empty object with an identity transform.</summary>
-        static Transform GetOrCreateOutlinesParent(GameObject root)
+        /// <summary>Saves what one separate-object outline was built from, next to its hull asset, so its width can be rebuilt later.</summary>
+        static void WriteSidecar(string hullAssetPath, GameObject root, RendererInfo info, Settings s, List<SlotInfo> included)
         {
-            if (root == null) return null;
-            var parent = root.transform.Find(ParentName);
-            if (parent != null) return parent;
-            var go = new GameObject(ParentName);
-            Undo.RegisterCreatedObjectUndo(go, "Add outline");
-            go.transform.SetParent(root.transform, false);
-            go.transform.localPosition = Vector3.zero;
-            go.transform.localRotation = Quaternion.identity;
-            go.transform.localScale = Vector3.one;
-            go.layer = root.layer;
-            return go.transform;
+            Color col = info.overrideColor ? info.color : s.color;
+            var slots = new List<int>();
+            foreach (var sl in included) slots.Add(sl.index);
+            var sidecar = new OutlineSidecar
+            {
+                version = 1,
+                avatarName = root != null ? root.name : "",
+                sourcePath = root != null ? RelativePath(root.transform, info.renderer.transform) : info.renderer.name,
+                widthCm = s.widthCm,
+                widthMultiplier = info.widthMultiplier,
+                colorR = col.r,
+                colorG = col.g,
+                colorB = col.b,
+                colorA = col.a,
+                overrideColor = info.overrideColor,
+                includedSlots = slots.ToArray(),
+                smoothNormals = s.smoothNormals,
+                useVertexColorWidth = s.useVertexColorWidth,
+                copyBlendShapes = s.copyBlendShapes,
+                blendShapeMinMoveMm = s.blendShapeMinMoveMm,
+                excludedBones = BoneNames(s.excludedBones),
+                weldVertices = s.weldVertices,
+                simplifyMm = s.simplifyMm,
+                triangleBudget = s.triangleBudget,
+            };
+            string sidecarPath = hullAssetPath.Substring(0, hullAssetPath.Length - ".asset".Length) + ".json";
+            File.WriteAllText(sidecarPath, JsonUtility.ToJson(sidecar));
         }
 
-        static void PlaceSeparate(RendererInfo info, Mesh hull, Material mat, Transform outlinesParent)
+        /// <summary>Hierarchy path of a transform relative to the avatar root (empty when it is the root itself).</summary>
+        static string RelativePath(Transform root, Transform t)
+        {
+            if (t == null || t == root) return "";
+            string path = t.name;
+            Transform cur = t.parent;
+            while (cur != null && cur != root)
+            {
+                path = cur.name + "/" + path;
+                cur = cur.parent;
+            }
+            return path;
+        }
+
+        static string[] BoneNames(List<Transform> bones)
+        {
+            if (bones == null) return new string[0];
+            var names = new List<string>();
+            foreach (var b in bones) names.Add(b != null ? b.name : "");
+            return names.ToArray();
+        }
+
+        /// <summary>Loads the width sidecar saved next to an outline's hull asset, or null when there is none.</summary>
+        public static OutlineSidecar LoadSidecar(GameObject outlineObject)
+        {
+            string sidecarPath = SidecarPath(outlineObject);
+            if (sidecarPath == null || !File.Exists(sidecarPath)) return null;
+            return JsonUtility.FromJson<OutlineSidecar>(File.ReadAllText(sidecarPath));
+        }
+
+        static string SidecarPath(GameObject outlineObject)
+        {
+            if (outlineObject == null) return null;
+            var r = outlineObject.GetComponent<Renderer>();
+            if (r == null) return null;
+            Mesh hull = MeshOf(r);
+            if (hull == null) return null;
+            string hullPath = AssetDatabase.GetAssetPath(hull);
+            if (string.IsNullOrEmpty(hullPath) || !hullPath.EndsWith(".asset", StringComparison.Ordinal)) return null;
+            return hullPath.Substring(0, hullPath.Length - ".asset".Length) + ".json";
+        }
+
+        static void PlaceSeparate(RendererInfo info, Mesh hull, Material mat)
         {
             var src = info.renderer;
             var go = new GameObject(Sanitize(src.name) + Suffix);
             Undo.RegisterCreatedObjectUndo(go, "Add outline");
-            go.transform.SetParent(src.transform.parent, false);
-            go.transform.localPosition = src.transform.localPosition;
-            go.transform.localRotation = src.transform.localRotation;
-            go.transform.localScale = src.transform.localScale;
+            // The outline is a child of the object it outlines, so disabling the source hides its outline too,
+            // and accessories that move (for example VRCFury Armature Link) carry their outlines with them.
+            // The hull is in the source mesh's local space, so an identity local transform puts it exactly
+            // where the source is, for skinned and non-skinned meshes alike.
+            go.transform.SetParent(src.transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
             go.layer = src.gameObject.layer;
             go.SetActive(src.gameObject.activeSelf);
-            // All separate outline objects live under one "Outlines" parent on the avatar, so the hierarchy stays tidy.
-            if (outlinesParent != null) go.transform.SetParent(outlinesParent, true);
 
             var smr = src as SkinnedMeshRenderer;
             if (smr != null)
@@ -747,6 +831,138 @@ namespace AviCreatorEssentials
                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 r.receiveShadows = false;
             }
+        }
+
+        /// <summary>Rebuilds one separate-object outline's hull from its sidecar with a new width. Returns null on success, or an error message.</summary>
+        public static string ResizeOutline(GameObject outlineObject, float newWidthCm, float newWidthMultiplier)
+        {
+            if (outlineObject == null) return "No outline selected.";
+            var outlineRenderer = outlineObject.GetComponent<Renderer>();
+            if (outlineRenderer == null) return "That object has no outline renderer.";
+            var sourceObject = outlineObject.transform.parent != null ? outlineObject.transform.parent.gameObject : null;
+            if (sourceObject == null) return "The outline has no parent, so its source can't be found.";
+            var sourceRenderer = sourceObject.GetComponent<Renderer>();
+            if (sourceRenderer == null) return "The outline's parent has no renderer, so its source can't be found.";
+            Mesh hull = MeshOf(outlineRenderer);
+            if (hull == null) return "The outline has no mesh.";
+            string hullPath = AssetDatabase.GetAssetPath(hull);
+            if (string.IsNullOrEmpty(hullPath) || !hullPath.EndsWith(".asset", StringComparison.Ordinal))
+                return "The outline's mesh is not a saved asset, so it can't be rebuilt.";
+            string sidecarPath = hullPath.Substring(0, hullPath.Length - ".asset".Length) + ".json";
+            if (!File.Exists(sidecarPath))
+                return "This outline was made before width info was saved. Re-run Generate in the Outline window once to enable resizing.";
+            var sidecar = JsonUtility.FromJson<OutlineSidecar>(File.ReadAllText(sidecarPath));
+            if (sidecar == null) return "The outline's saved width info can't be read.";
+
+            var info = InfoForResize(sourceRenderer, sidecar);
+            info.widthMultiplier = newWidthMultiplier;
+            if (info.mesh == null) return "The source has no mesh.";
+            var included = new List<SlotInfo>();
+            foreach (var sl in info.slots) if (sl.include) included.Add(sl);
+            if (included.Count == 0) return "No material slots were outlined for this object.";
+            var s = SettingsFromSidecar(sidecar, newWidthCm, sourceRenderer);
+
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName("Resize outline");
+            int group = Undo.GetCurrentGroup();
+
+            var result = new Result();
+            Mesh newHull;
+            try { newHull = BuildHull(info, included, s, result); }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                Undo.CollapseUndoOperations(group);
+                return "Rebuild failed: " + e.Message;
+            }
+            if (newHull == null)
+            {
+                Undo.CollapseUndoOperations(group);
+                return "Nothing left to outline with these settings.";
+            }
+            newHull.name = Path.GetFileNameWithoutExtension(hullPath);
+            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(hullPath);
+            if (existing != null) Undo.RecordObject(existing, "Resize outline");
+            var saved = SaveMesh(newHull, hullPath);
+            Undo.RecordObject(outlineRenderer, "Resize outline");
+            var outlineSmr = outlineRenderer as SkinnedMeshRenderer;
+            if (outlineSmr != null)
+            {
+                outlineSmr.localBounds = saved.bounds;
+                var sourceSmr = sourceRenderer as SkinnedMeshRenderer;
+                if (sourceSmr != null && sourceSmr.sharedMesh != null)
+                {
+                    for (int i = 0; i < saved.blendShapeCount; i++)
+                    {
+                        int idx = sourceSmr.sharedMesh.GetBlendShapeIndex(saved.GetBlendShapeName(i));
+                        if (idx >= 0) outlineSmr.SetBlendShapeWeight(i, sourceSmr.GetBlendShapeWeight(idx));
+                    }
+                }
+            }
+            sidecar.widthCm = newWidthCm;
+            sidecar.widthMultiplier = newWidthMultiplier;
+            File.WriteAllText(sidecarPath, JsonUtility.ToJson(sidecar));
+            Undo.CollapseUndoOperations(group);
+            AssetDatabase.SaveAssets();
+            return null;
+        }
+
+        /// <summary>Builds a RendererInfo for one renderer, with slot includes, width and color taken from its sidecar.</summary>
+        static RendererInfo InfoForResize(Renderer source, OutlineSidecar sidecar)
+        {
+            Mesh mesh = MeshOf(source);
+            var info = new RendererInfo
+            {
+                renderer = source,
+                mesh = mesh,
+                include = true,
+                overrideColor = sidecar.overrideColor,
+                color = new Color(sidecar.colorR, sidecar.colorG, sidecar.colorB, sidecar.colorA),
+                widthMultiplier = sidecar.widthMultiplier,
+            };
+            if (mesh == null) return info;
+            var mats = source.sharedMaterials;
+            for (int i = 0; i < mesh.subMeshCount; i++)
+            {
+                var desc = mesh.GetSubMesh(i);
+                var slot = new SlotInfo
+                {
+                    index = i,
+                    material = i < mats.Length ? mats[i] : null,
+                    triangles = desc.topology == MeshTopology.Triangles ? (int)(desc.indexCount / 3) : 0,
+                };
+                slot.include = slot.triangles > 0 && sidecar.includedSlots != null && Array.IndexOf(sidecar.includedSlots, i) >= 0;
+                info.slots.Add(slot);
+            }
+            return info;
+        }
+
+        /// <summary>Rebuilds the hull settings from a sidecar, with the new width. Excluded bones are matched by name against the source's bones.</summary>
+        static Settings SettingsFromSidecar(OutlineSidecar sidecar, float newWidthCm, Renderer source)
+        {
+            var s = new Settings
+            {
+                widthCm = newWidthCm,
+                smoothNormals = sidecar.smoothNormals,
+                useVertexColorWidth = sidecar.useVertexColorWidth,
+                copyBlendShapes = sidecar.copyBlendShapes,
+                blendShapeMinMoveMm = sidecar.blendShapeMinMoveMm,
+                weldVertices = sidecar.weldVertices,
+                simplifyMm = sidecar.simplifyMm,
+                triangleBudget = sidecar.triangleBudget,
+            };
+            var smr = source as SkinnedMeshRenderer;
+            if (smr != null && sidecar.excludedBones != null && sidecar.excludedBones.Length > 0)
+            {
+                var bones = smr.bones;
+                foreach (string name in sidecar.excludedBones)
+                {
+                    if (string.IsNullOrEmpty(name)) continue;
+                    foreach (var b in bones)
+                        if (b != null && b.name == name) { s.excludedBones.Add(b); break; }
+                }
+            }
+            return s;
         }
 
         /// <summary>Appends the hull to the original mesh as one more submesh, so it costs no extra renderer.</summary>
