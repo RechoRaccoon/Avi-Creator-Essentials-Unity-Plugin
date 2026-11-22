@@ -174,6 +174,8 @@ Shortcuts: **Alt+R** resets the bone's rotation, **Alt+G** resets its position, 
 
 To stop posing, press **Exit posing** in the panel or switch to any other tool (**W**, **E**, **R**...).
 
+If one copy of an avatar is stuck in the wrong pose, **Tools › Avi Creator Essentials › Copy Pose Between Avatars…** copies every bone's position and rotation from a source avatar in the correct pose onto the matching bones of the target avatar.
+
 ### Clothing armatures
 
 Outfits often come with their own copy of the armature (Hoodie › Armature › Hips › ...). Posing finds these automatically and pairs their bones with the body's by name, the same way VRCFury's Armature Link does. It handles names like `Hoodie_Spine` or `Spine.001`, and outfits that skip a bone such as UpperChest. Bones that only exist on the outfit, like hoodie strings or skirt bones, stay attached to their parent and move with it.

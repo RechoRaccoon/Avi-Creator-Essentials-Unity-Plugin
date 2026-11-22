@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.19.2
+
+- New *Copy Pose Between Avatars* tool (Tools › Avi Creator Essentials › Copy Pose Between Avatars…): pick a source avatar in the correct pose and a target avatar stuck in the wrong one, and it copies every bone's local position and rotation across, matched by bone path, in one undo step.
+
 ## 0.19.1
 
 - Fixed a compile error in the outline generator (0.19.0 would not compile at all, so Unity kept running 0.18.0 and the even-width toggle was missing). The fix makes the even-width toggle and the 0.19.0 blend-shape link work as intended.
