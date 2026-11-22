@@ -319,7 +319,18 @@ namespace AviCreatorEssentials
             public List<Vector3[]> deltas = new List<Vector3[]>(); // per frame, per hull vertex
         }
 
-        static Mesh BuildHull(RendererInfo info, List<SlotInfo> included, Settings s, Result result)
+        /// <summary>Front half of a hull build: the hull with UNPUSHED base positions, plus per hull vertex the push direction, factor and scale. Pushing a hull vertex is dir * (width * factor / scale), where width is in metres.</summary>
+        class HullBase
+        {
+            public Hull hull;
+            public Mesh sourceMesh;
+            public bool skinned;
+            public Vector3[] pushDir;
+            public float[] pushFactor;
+            public float[] pushScale;
+        }
+
+        static HullBase BuildHullBase(RendererInfo info, List<SlotInfo> included, Settings s, Result result)
         {
             var mesh = info.mesh;
             var verts = mesh.vertices;
@@ -349,13 +360,9 @@ namespace AviCreatorEssentials
                 ? SmoothNormals(verts, srcTris)
                 : normals;
 
-            float width = s.widthCm * 0.01f * Mathf.Max(0.01f, info.widthMultiplier);
-
-            // Which vertices are used, and how wide each is.
-            var map = new int[verts.Length];
-            for (int i = 0; i < map.Length; i++) map[i] = -1;
-            var hull = new Hull();
-            var srcOfHull = new List<int>();
+            // Per source vertex: push direction and width factor (0 when the vertex gets no outline).
+            var dir = new Vector3[verts.Length];
+            var factor = new float[verts.Length];
             var alive = new bool[verts.Length];
             for (int i = 0; i < verts.Length; i++)
             {
@@ -363,22 +370,50 @@ namespace AviCreatorEssentials
                 if (s.useVertexColorWidth && colors != null && colors.Length == verts.Length) f *= colors[i].r / 255f;
                 alive[i] = f > 0.02f;
                 if (!alive[i]) continue;
-                verts[i] = verts[i] + smooth[i].normalized * (width * f / Mathf.Max(1e-5f, scale[i]));
+                dir[i] = smooth[i].normalized;
+                factor[i] = f;
             }
 
+            // Which vertices are used, and how wide each is. Positions stay unpushed here; the caller pushes them.
+            var map = new int[verts.Length];
+            for (int i = 0; i < map.Length; i++) map[i] = -1;
+            var hull = new Hull();
+            var srcOfHull = new List<int>();
+            var pushDir = new List<Vector3>();
+            var pushFactor = new List<float>();
+            var pushScale = new List<float>();
             for (int t = 0; t + 2 < srcTris.Count; t += 3)
             {
                 int a = srcTris[t], b = srcTris[t + 1], c = srcTris[t + 2];
                 if (!alive[a] && !alive[b] && !alive[c]) continue;
-                int na = Use(a, map, hull, srcOfHull, verts, smooth, weights, skinned);
-                int nb = Use(b, map, hull, srcOfHull, verts, smooth, weights, skinned);
-                int nc = Use(c, map, hull, srcOfHull, verts, smooth, weights, skinned);
+                int na = UseBase(a, map, hull, srcOfHull, pushDir, pushFactor, pushScale, verts, smooth, dir, factor, scale, weights, skinned);
+                int nb = UseBase(b, map, hull, srcOfHull, pushDir, pushFactor, pushScale, verts, smooth, dir, factor, scale, weights, skinned);
+                int nc = UseBase(c, map, hull, srcOfHull, pushDir, pushFactor, pushScale, verts, smooth, dir, factor, scale, weights, skinned);
                 // Flipped winding: this is what turns the copy into an outline.
                 hull.tris.Add(na); hull.tris.Add(nc); hull.tris.Add(nb);
             }
             if (hull.tris.Count == 0) return null;
 
             if (s.copyBlendShapes && mesh.blendShapeCount > 0) CopyShapes(mesh, srcOfHull, scale, s, hull, result);
+            return new HullBase
+            {
+                hull = hull,
+                sourceMesh = mesh,
+                skinned = skinned,
+                pushDir = pushDir.ToArray(),
+                pushFactor = pushFactor.ToArray(),
+                pushScale = pushScale.ToArray(),
+            };
+        }
+
+        static Mesh BuildHull(RendererInfo info, List<SlotInfo> included, Settings s, Result result)
+        {
+            var b = BuildHullBase(info, included, s, result);
+            if (b == null) return null;
+            var hull = b.hull;
+            float width = s.widthCm * 0.01f * Mathf.Max(0.01f, info.widthMultiplier);
+            for (int i = 0; i < hull.pos.Count; i++)
+                hull.pos[i] = hull.pos[i] + b.pushDir[i] * (width * b.pushFactor[i] / b.pushScale[i]);
 
             if (s.weldVertices) Weld(hull);
             float cell = s.simplifyMm * 0.001f;
@@ -398,10 +433,11 @@ namespace AviCreatorEssentials
             if (hull.tris.Count == 0) return null;
             result.triangles += hull.tris.Count / 3;
             result.vertices += hull.pos.Count;
-            return ToMesh(hull, mesh, skinned);
+            return ToMesh(hull, b.sourceMesh, b.skinned);
         }
 
-        static int Use(int v, int[] map, Hull h, List<int> srcOfHull, Vector3[] verts, Vector3[] smooth, BoneWeight[] bw, bool skinned)
+        static int UseBase(int v, int[] map, Hull h, List<int> srcOfHull, List<Vector3> pushDir, List<float> pushFactor, List<float> pushScale,
+            Vector3[] verts, Vector3[] smooth, Vector3[] dir, float[] factor, float[] scale, BoneWeight[] bw, bool skinned)
         {
             if (map[v] >= 0) return map[v];
             map[v] = h.pos.Count;
@@ -409,6 +445,9 @@ namespace AviCreatorEssentials
             h.pos.Add(verts[v]);
             h.nrm.Add(-smooth[v].normalized);
             h.bw.Add(skinned ? bw[v] : default(BoneWeight));
+            pushDir.Add(dir[v]);
+            pushFactor.Add(factor[v]);
+            pushScale.Add(Mathf.Max(1e-5f, scale[v]));
             return map[v];
         }
 
@@ -905,6 +944,152 @@ namespace AviCreatorEssentials
             Undo.CollapseUndoOperations(group);
             AssetDatabase.SaveAssets();
             return null;
+        }
+
+        // ------------------------------------------------------------------ live width preview
+
+        /// <summary>A live width preview: a temp mesh on the outline renderer that follows the slider while dragging. Never written to the hull asset.</summary>
+        public class WidthPreview
+        {
+            public GameObject outlineObject;
+            public Renderer outlineRenderer;
+            public Renderer sourceRenderer;
+            public string sourceName;
+            public Mesh originalMesh;
+            public Bounds originalLocalBounds;
+            public Mesh tempMesh;
+            public Vector3[] basePos;
+            public Vector3[] pushDir;
+            public float[] pushFactor;
+            public float[] pushScale;
+            public Vector3[] scratch;
+            public float widthMultiplier;
+            public float widthCm;
+        }
+
+        /// <summary>Starts a live width preview on one outline: builds a temp mesh from its sidecar and swaps it onto the outline renderer. Returns null on success, or an error message.</summary>
+        public static string BeginWidthPreview(GameObject outlineObject, out WidthPreview preview)
+        {
+            preview = null;
+            if (outlineObject == null) return "No outline selected.";
+            var outlineRenderer = outlineObject.GetComponent<Renderer>();
+            if (outlineRenderer == null) return "That object has no outline renderer.";
+            var sourceObject = outlineObject.transform.parent != null ? outlineObject.transform.parent.gameObject : null;
+            if (sourceObject == null) return "The outline has no parent, so its source can't be found.";
+            var sourceRenderer = sourceObject.GetComponent<Renderer>();
+            if (sourceRenderer == null) return "The outline's parent has no renderer, so its source can't be found.";
+            Mesh hull = MeshOf(outlineRenderer);
+            if (hull == null) return "The outline has no mesh.";
+            string hullPath = AssetDatabase.GetAssetPath(hull);
+            if (string.IsNullOrEmpty(hullPath) || !hullPath.EndsWith(".asset", StringComparison.Ordinal))
+                return "The outline's mesh is not a saved asset, so it can't be rebuilt.";
+            var sidecar = LoadSidecar(outlineObject);
+            if (sidecar == null)
+                return "This outline was made before width info was saved. Re-run Generate in the Outline window once to enable resizing.";
+
+            var info = InfoForResize(sourceRenderer, sidecar);
+            if (info.mesh == null) return "The source has no mesh.";
+            var included = new List<SlotInfo>();
+            foreach (var sl in info.slots) if (sl.include) included.Add(sl);
+            if (included.Count == 0) return "No material slots were outlined for this object.";
+            var s = SettingsFromSidecar(sidecar, sidecar.widthCm, sourceRenderer);
+
+            var result = new Result();
+            HullBase b;
+            try { b = BuildHullBase(info, included, s, result); }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                return "Rebuild failed: " + e.Message;
+            }
+            if (b == null) return "Nothing left to outline with these settings.";
+
+            var p = new WidthPreview
+            {
+                outlineObject = outlineObject,
+                outlineRenderer = outlineRenderer,
+                sourceRenderer = sourceRenderer,
+                sourceName = sourceObject.name,
+                originalMesh = hull,
+                basePos = b.hull.pos.ToArray(),
+                pushDir = b.pushDir,
+                pushFactor = b.pushFactor,
+                pushScale = b.pushScale,
+                widthMultiplier = sidecar.widthMultiplier,
+                widthCm = sidecar.widthCm,
+            };
+            p.scratch = new Vector3[p.basePos.Length];
+
+            float width = sidecar.widthCm * 0.01f * Mathf.Max(0.01f, sidecar.widthMultiplier);
+            for (int i = 0; i < b.hull.pos.Count; i++)
+                b.hull.pos[i] = b.hull.pos[i] + b.pushDir[i] * (width * b.pushFactor[i] / b.pushScale[i]);
+            p.tempMesh = ToMesh(b.hull, b.sourceMesh, b.skinned);
+            p.tempMesh.name = hull.name + " preview";
+
+            var outlineSmr = outlineRenderer as SkinnedMeshRenderer;
+            if (outlineSmr != null) p.originalLocalBounds = outlineSmr.localBounds;
+            if (outlineSmr != null)
+            {
+                outlineSmr.sharedMesh = p.tempMesh;
+                outlineSmr.localBounds = p.tempMesh.bounds;
+                // Follow the original's blend shape weights while previewing, same as the placed outline does.
+                var sourceSmr = sourceRenderer as SkinnedMeshRenderer;
+                if (sourceSmr != null && sourceSmr.sharedMesh != null)
+                {
+                    for (int i = 0; i < p.tempMesh.blendShapeCount; i++)
+                    {
+                        int idx = sourceSmr.sharedMesh.GetBlendShapeIndex(p.tempMesh.GetBlendShapeName(i));
+                        if (idx >= 0) outlineSmr.SetBlendShapeWeight(i, sourceSmr.GetBlendShapeWeight(idx));
+                    }
+                }
+            }
+            else
+            {
+                var mf = outlineRenderer.GetComponent<MeshFilter>();
+                if (mf != null) mf.sharedMesh = p.tempMesh;
+            }
+            preview = p;
+            return null;
+        }
+
+        /// <summary>Re-pushes the preview mesh at a new width, live while dragging. Cheap: only the vertices move.</summary>
+        public static void SetPreviewWidth(WidthPreview p, float widthCm)
+        {
+            if (p == null || p.tempMesh == null) return;
+            p.widthCm = widthCm;
+            float width = widthCm * 0.01f * Mathf.Max(0.01f, p.widthMultiplier);
+            var pos = p.scratch;
+            for (int i = 0; i < pos.Length; i++)
+                pos[i] = p.basePos[i] + p.pushDir[i] * (width * p.pushFactor[i] / p.pushScale[i]);
+            p.tempMesh.SetVertices(pos);
+            p.tempMesh.RecalculateBounds();
+            var smr = p.outlineRenderer as SkinnedMeshRenderer;
+            if (smr != null) smr.localBounds = p.tempMesh.bounds;
+        }
+
+        /// <summary>Ends a live width preview: the original mesh is always put back, and the temp mesh is destroyed. When commit is true, the final width is saved with a full rebuild, like Resize Outline.</summary>
+        public static string EndWidthPreview(WidthPreview p, bool commit)
+        {
+            if (p == null) return null;
+            var outlineRenderer = p.outlineRenderer;
+            if (outlineRenderer != null)
+            {
+                var smr = outlineRenderer as SkinnedMeshRenderer;
+                if (smr != null)
+                {
+                    smr.sharedMesh = p.originalMesh;
+                    smr.localBounds = p.originalLocalBounds;
+                }
+                else
+                {
+                    var mf = outlineRenderer.GetComponent<MeshFilter>();
+                    if (mf != null) mf.sharedMesh = p.originalMesh;
+                }
+            }
+            if (p.tempMesh != null) Object.DestroyImmediate(p.tempMesh);
+            p.tempMesh = null;
+            if (!commit) return null;
+            return ResizeOutline(p.outlineObject, p.widthCm, p.widthMultiplier);
         }
 
         /// <summary>Builds a RendererInfo for one renderer, with slot includes, width and color taken from its sidecar.</summary>

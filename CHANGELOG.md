@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.0
+
+- New **Widths** tab in the Outline & Optimize window: every separate outline on the avatar in one place, each with its own width slider. Drag a slider and the outline changes live in the scene; letting go saves it. Outlines merged into the mesh have no separate object, so they are not listed.
+- The right-click **Resize Outline…** menu still works for changing one outline at a time.
+
 ## 0.17.0
 
 - Separate outlines are now children of the object they outline, so hiding or disabling a source (for example clothing) hides its outline too, and accessories attached with VRCFury Armature Link carry their outlines with them. This replaces the single "Outlines" parent from 0.16.1, which broke both. Re-running replaces outlines as before, and Remove outlines still cleans up a stale empty "Outlines" parent.

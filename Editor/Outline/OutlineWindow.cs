@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -39,7 +40,15 @@ namespace AviCreatorEssentials
         List<TextureOptimizer.Entry> m_Textures = new List<TextureOptimizer.Entry>();
         readonly TextureOptimizer.Options m_TexOpts = new TextureOptimizer.Options();
 
-        static readonly string[] s_Tabs = { "Outline", "Textures" };
+        // widths tab
+        List<WidthRow> m_WidthRows = new List<WidthRow>();
+        bool m_WidthRowsDirty = true;
+        OutlineGenerator.WidthPreview m_Preview;
+        int m_PreviewControl;
+        string m_WidthStatus;
+        int m_LastTab;
+
+        static readonly string[] s_Tabs = { "Outline", "Widths", "Textures" };
         static readonly string[] s_Shaders =
         {
             "VRChat Mobile Toon Lit (Quest + PC)", "VRChat Mobile Standard Lite (Quest + PC)", "Unlit color (PC only)",
@@ -49,10 +58,35 @@ namespace AviCreatorEssentials
 
         void SetRoot(GameObject root)
         {
+            EndActivePreview(true);
             m_Root = root;
             m_Renderers = OutlineGenerator.Scan(root, m_AutoExclude);
             m_Textures = TextureOptimizer.Scan(root);
+            m_WidthRowsDirty = true;
             m_Report = null;
+        }
+
+        void OnEnable()
+        {
+            EditorSceneManager.sceneSaving += OnSceneSaving;
+        }
+
+        // Never save a scene while a live preview mesh is on an outline: commit it first,
+        // so the scene always references the saved hull asset and never the temp mesh.
+        void OnSceneSaving(UnityEngine.SceneManagement.Scene scene, string path)
+        {
+            EndActivePreview(true);
+        }
+
+        void OnDisable()
+        {
+            EditorSceneManager.sceneSaving -= OnSceneSaving;
+            EndActivePreview(true);
+        }
+
+        void OnLostFocus()
+        {
+            EndActivePreview(true);
         }
 
         void OnGUI()
@@ -66,9 +100,17 @@ namespace AviCreatorEssentials
                 return;
             }
             m_Tab = GUILayout.Toolbar(m_Tab, s_Tabs);
+            if (m_Tab != m_LastTab)
+            {
+                m_LastTab = m_Tab;
+                if (m_Tab == 1) m_WidthRowsDirty = true;
+                else if (m_Preview != null) EndActivePreview(true);
+            }
             EditorGUILayout.Space(4);
             m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll);
-            if (m_Tab == 0) OutlineTab(); else TexturesTab();
+            if (m_Tab == 0) OutlineTab();
+            else if (m_Tab == 1) WidthsTab();
+            else TexturesTab();
             EditorGUILayout.EndScrollView();
         }
 
@@ -243,6 +285,7 @@ namespace AviCreatorEssentials
                            (r.warnings.Count > 0 ? "\n\n" + string.Join("\n", r.warnings) : "");
                 m_ReportType = r.warnings.Count > 0 ? MessageType.Warning : MessageType.Info;
                 Rescan();
+                m_WidthRowsDirty = true;
             }
             catch (Exception e)
             {
@@ -259,6 +302,131 @@ namespace AviCreatorEssentials
             m_Report = n > 0 ? "Removed " + n + " outline object(s) / merged mesh(es)." : "No outlines from this tool were found on the avatar.";
             m_ReportType = MessageType.Info;
             Rescan();
+            m_WidthRowsDirty = true;
+        }
+
+        // ------------------------------------------------------------------ widths tab
+
+        class WidthRow
+        {
+            public GameObject outline;
+            public GameObject source;
+            public float widthCm;
+            public float widthMultiplier;
+            public bool hasSidecar;
+        }
+
+        List<WidthRow> ScanWidths(GameObject root)
+        {
+            var rows = new List<WidthRow>();
+            if (root == null) return rows;
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            {
+                if (!r.name.EndsWith(OutlineGenerator.Suffix, StringComparison.Ordinal)) continue;
+                var go = r.gameObject;
+                var sidecar = OutlineGenerator.LoadSidecar(go);
+                rows.Add(new WidthRow
+                {
+                    outline = go,
+                    source = go.transform.parent != null ? go.transform.parent.gameObject : null,
+                    widthCm = sidecar != null ? sidecar.widthCm : 0.15f,
+                    widthMultiplier = sidecar != null ? sidecar.widthMultiplier : 1f,
+                    hasSidecar = sidecar != null,
+                });
+            }
+            return rows;
+        }
+
+        void WidthsTab()
+        {
+            if (m_WidthRowsDirty)
+            {
+                m_WidthRows = ScanWidths(m_Root);
+                m_WidthRowsDirty = false;
+            }
+            EditorGUILayout.LabelField(
+                "Every separate outline on this avatar, in one place. Drag a slider and the outline changes live in the scene; letting go saves it. " +
+                "Outlines merged into the mesh have no separate object, so they are not listed here.",
+                EditorStyles.wordWrappedMiniLabel);
+
+            if (m_WidthRows.Count == 0)
+            {
+                EditorGUILayout.LabelField("No separate outlines on this avatar yet. Generate some on the Outline tab first.", EditorStyles.miniLabel);
+            }
+            for (int i = 0; i < m_WidthRows.Count; i++)
+            {
+                var row = m_WidthRows[i];
+                if (row.outline == null) continue;
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(row.source != null ? row.source.name : row.outline.name, GUILayout.MinWidth(140));
+                    using (new EditorGUI.DisabledScope(!row.hasSidecar))
+                    {
+                        EditorGUI.BeginChangeCheck();
+                        float w = EditorGUILayout.Slider(row.widthCm, 0.02f, 1.0f);
+                        if (EditorGUI.EndChangeCheck()) WidthSliderChanged(row, w);
+                    }
+                    if (GUILayout.Button("Select", EditorStyles.miniButton, GUILayout.Width(50)))
+                    {
+                        Selection.activeGameObject = row.outline;
+                        EditorGUIUtility.PingObject(row.outline);
+                    }
+                }
+                if (!row.hasSidecar)
+                    EditorGUILayout.LabelField("Made before width info was saved. Re-run Generate once to enable resizing.", EditorStyles.miniLabel);
+            }
+
+            EditorGUILayout.Space(8);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Re-scan", GUILayout.Height(28))) m_WidthRowsDirty = true;
+            }
+            if (!string.IsNullOrEmpty(m_WidthStatus)) EditorGUILayout.HelpBox(m_WidthStatus, MessageType.Info);
+
+            // Commit the live preview once the drag ends.
+            if (m_Preview != null && GUIUtility.hotControl != m_PreviewControl)
+                EndActivePreview(true);
+            EditorGUILayout.Space(8);
+        }
+
+        void WidthSliderChanged(WidthRow row, float w)
+        {
+            row.widthCm = w;
+            int hot = GUIUtility.hotControl;
+            if (hot == 0)
+            {
+                // Changed by keyboard, not a drag: nothing to track, save straight away.
+                EndActivePreview(true);
+                string err = OutlineGenerator.ResizeOutline(row.outline, row.widthCm, row.widthMultiplier);
+                m_WidthStatus = err != null ? err : "Saved " + (row.source != null ? row.source.name : row.outline.name) + " at " + row.widthCm.ToString("0.00") + " cm.";
+                return;
+            }
+            if (m_Preview == null || m_Preview.outlineObject != row.outline)
+            {
+                EndActivePreview(true);
+                string err = OutlineGenerator.BeginWidthPreview(row.outline, out m_Preview);
+                if (err != null)
+                {
+                    m_WidthStatus = err;
+                    m_Preview = null;
+                    m_PreviewControl = 0;
+                    return;
+                }
+                m_PreviewControl = hot;
+                m_WidthStatus = "Live preview, let go to save.";
+            }
+            OutlineGenerator.SetPreviewWidth(m_Preview, row.widthCm);
+        }
+
+        void EndActivePreview(bool commit)
+        {
+            if (m_Preview == null) return;
+            var p = m_Preview;
+            m_Preview = null;
+            m_PreviewControl = 0;
+            string err = OutlineGenerator.EndWidthPreview(p, commit);
+            if (err != null) m_WidthStatus = err;
+            else if (commit) m_WidthStatus = "Saved " + p.sourceName + " at " + p.widthCm.ToString("0.00") + " cm.";
         }
 
         // ------------------------------------------------------------------ textures tab

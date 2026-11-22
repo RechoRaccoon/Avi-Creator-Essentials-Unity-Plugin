@@ -132,7 +132,9 @@ Open it from **Tools › Avi Creator Essentials › Outline & Optimize…**, or 
 - **Blend shapes:** the outline follows them, so it stays on the face during visemes. Shapes that barely move it are skipped.
 - **Optimize:** *Weld duplicate vertices* (safe), *Simplify* (merges vertices within a few mm) and a *Triangle budget* that simplifies automatically until the outline fits. The estimate shows the outline's triangles and the avatar's Quest rank with it.
 - **Run it again** to tweak: earlier outlines are replaced. **Remove outlines** takes them away; Ctrl+Z also works. Files are saved in `Assets/Avi Creator Essentials Data/Outlines/<avatar name>`.
-- **Resizing one outline:** right-click an outline object, or the mesh it outlines, in the Hierarchy and pick **Resize Outline…**. Change the width and press **Regenerate Outline** to rebuild just that hull. Outlines made before 0.17.0 need one Generate run first, so their width info is saved.
+- **Resizing outlines:** see the **Widths** tab below, or right-click one outline object, or the mesh it outlines, in the Hierarchy and pick **Resize Outline…** to change just that one. Outlines made before 0.17.0 need one Generate run first, so their width info is saved.
+
+**Widths tab.** Lists every separate outline on the avatar, each with its own width slider. Drag a slider and the outline changes live in the scene; letting go saves it. Outlines merged into the mesh have no separate object, so they are not listed here.
 
 **Textures tab.** Lists every texture the avatar uses, with size and memory. Cap sizes, turn on Crunch compression, mipmap streaming, turn off Read/Write, and add a Quest (Android ASTC 6x6) override, then **Apply**. Only the textures' import settings change; your image files are never edited, so you can set a size back at any time. Textures inside packages can't be changed.
 
