@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.19.3
+
+- Fixed regenerating outlines failing with "The object of type 'Mesh' has been destroyed": when the outline mesh already existed, saving rebuilt it in place and discarded the new mesh, but Generate then still read the discarded mesh to decide whether to add a blend-shape link. It now reads the saved mesh, so regenerating works.
+
 ## 0.19.2
 
 - New *Copy Pose Between Avatars* tool (Tools › Avi Creator Essentials › Copy Pose Between Avatars…): pick a source avatar in the correct pose and a target avatar stuck in the wrong one, and it copies every bone's local position and rotation across, matched by bone path, in one undo step.

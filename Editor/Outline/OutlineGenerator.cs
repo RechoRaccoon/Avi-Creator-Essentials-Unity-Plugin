@@ -201,7 +201,7 @@ namespace AviCreatorEssentials
                     var outlineGo = PlaceSeparate(info, saved, mat);
                     WriteSidecar(path, root, info, s, included);
                     result.bytes += FileSize(path);
-                    if (s.linkBlendShapes && hull.blendShapeCount > 0)
+                    if (s.linkBlendShapes && saved.blendShapeCount > 0)
                     {
                         string linkNote = AddBlendShapeLink(outlineGo, info.renderer.gameObject);
                         if (linkNote != null && !linkWarned) { result.warnings.Add(linkNote); linkWarned = true; }
