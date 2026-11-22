@@ -128,6 +128,8 @@ namespace AviCreatorEssentials
             m_S.widthCm = EditorGUILayout.Slider(new GUIContent("Width (cm)", "How thick the outline is, in real centimetres on the avatar"), m_S.widthCm, 0.02f, 1.0f);
             m_S.exactWorldWidth = EditorGUILayout.ToggleLeft(new GUIContent("Even width on scaled objects",
                 "Keeps the outline the same thickness everywhere, even when an object or its bones are scaled unevenly. Turn it off to go back to the older width if it looks wrong."), m_S.exactWorldWidth);
+            m_S.expandSilhouette = EditorGUILayout.ToggleLeft(new GUIContent("Expand flat silhouettes",
+                "Makes the outline show on flat surfaces viewed straight on, by growing the silhouette outward as well as pushing along the normals. Turn it off to go back to a pure normal push."), m_S.expandSilhouette);
             m_S.color = EditorGUILayout.ColorField("Color", m_S.color);
             int sc = EditorGUILayout.Popup("Outline shader", (int)m_S.shader, s_Shaders);
             m_S.shader = (OutlineGenerator.ShaderChoice)sc;

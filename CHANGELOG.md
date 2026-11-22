@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.1
+
+- Fixed a compile error in the outline generator (0.19.0 would not compile at all, so Unity kept running 0.18.0 and the even-width toggle was missing). The fix makes the even-width toggle and the 0.19.0 blend-shape link work as intended.
+- Fixed regenerated outlines not rendering: saving a regenerated outline could leave stale blend-shape frames sized for the old vertex count, so the SkinnedMeshRenderer refused to draw the mesh. Saving now rebuilds the mesh in place, so the saved data always matches the new mesh.
+- New *Expand flat silhouettes* toggle (on by default): the outline now grows the silhouette outward as well as pushing along the normals, so it shows on flat surfaces viewed straight on instead of disappearing. Turn it off to go back to a pure normal push.
+
 ## 0.19.0
 
 - Separate outlines now follow blend-shape toggles: Generate adds a VRCFury BlendShape Link to each outline, so toggles and sliders that animate the source's blend shapes drive the outline's too. It runs at upload, after VRCFury's own toggles are baked, so it covers those as well. Turn it off with *Link blend shapes with VRCFury* in the Outline window; without VRCFury installed the outline is made anyway, with a warning. Outlines made before 0.19.0 need one Generate run to get the link.

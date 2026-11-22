@@ -51,6 +51,7 @@ namespace AviCreatorEssentials
         {
             public float widthCm = 0.15f;
             public bool exactWorldWidth = true;
+            public bool expandSilhouette = true;
             public Color color = new Color(0.05f, 0.05f, 0.05f, 1f);
             public Placement placement = Placement.SeparateObject;
             public ShaderChoice shader = ShaderChoice.MobileToonLit;
@@ -273,6 +274,7 @@ namespace AviCreatorEssentials
         {
             public int version = 1;
             public bool exactWorldWidth = true;
+            public bool expandSilhouette = true;
             public string avatarName;
             public string sourcePath;
             public float widthCm;
@@ -383,6 +385,26 @@ namespace AviCreatorEssentials
                 factor[i] = f;
             }
 
+            if (s.expandSilhouette)
+            {
+                // A pure normal push never widens the silhouette of a flat surface facing the
+                // camera: the whole surface just moves toward it, so straight on there is no rim
+                // to see, while the side view still shows the hull's edge. Blend each push toward
+                // the surface plane, away from the mesh's centre, so flat surfaces grow outward
+                // as well. The blended direction stays unit length, so the total offset is still
+                // the width. Curved surfaces barely change: there the radial direction is already
+                // along the normal, so the tangent part is near zero.
+                Vector3 centre = mesh.bounds.center;
+                for (int i = 0; i < verts.Length; i++)
+                {
+                    if (!alive[i]) continue;
+                    Vector3 r = verts[i] - centre;
+                    Vector3 t = r - dir[i] * Vector3.Dot(r, dir[i]);
+                    if (t.sqrMagnitude > 1e-10f)
+                        dir[i] = (dir[i] + t.normalized).normalized;
+                }
+            }
+
             // Push scale: how many mesh-space units make one world-space metre at each vertex.
             // With exactWorldWidth, the push is recomputed per vertex as the local-space vector that
             // moves it by the exact width along its world-space normal, so the outline stays even
@@ -392,7 +414,7 @@ namespace AviCreatorEssentials
             if (s.exactWorldWidth)
             {
                 pushScale = (float[])scale.Clone();
-                ExactPush(info.renderer, mesh, weights, skinned, smooth, factor, alive, dir, factor, pushScale);
+                ExactPush(info.renderer, mesh, weights, skinned, factor, alive, dir, factor, pushScale);
             }
 
             // Which vertices are used, and how wide each is. Positions stay unpushed here; the caller pushes them.
@@ -512,10 +534,10 @@ namespace AviCreatorEssentials
             sum += weight;
         }
 
-        /// <summary>Rewrites the per-vertex push so the outline is exactly the requested width in world space: for each live vertex, the local-space vector that moves it by width * f along its world-space normal. Vertices whose skinning matrix can't be inverted keep the average-scale push. The scale array is only used for the blend-shape min-move check, so it is left alone; the push scale is rewritten in place.</summary>
-        static void ExactPush(Renderer r, Mesh mesh, BoneWeight[] weights, bool skinned, Vector3[] smooth, float[] factor, bool[] alive, Vector3[] dir, float[] outFactor, float[] outScale)
+        /// <summary>Rewrites the per-vertex push so the outline is exactly the requested width in world space: for each live vertex, the local-space vector that moves it by width * f along its world-space push direction. The direction comes in through dir (the smoothed normal, blended toward the silhouette when that is on) and is rewritten in place. Vertices whose skinning matrix can't be inverted keep the average-scale push. The scale array is only used for the blend-shape min-move check, so it is left alone; the push scale is rewritten in place.</summary>
+        static void ExactPush(Renderer r, Mesh mesh, BoneWeight[] weights, bool skinned, float[] factor, bool[] alive, Vector3[] dir, float[] outFactor, float[] outScale)
         {
-            int count = smooth.Length;
+            int count = dir.Length;
             Matrix4x4 single = new Matrix4x4();
             Matrix4x4[] boneMatrices = null;
             if (!skinned)
@@ -552,7 +574,7 @@ namespace AviCreatorEssentials
                     AddBone(ref m, boneMatrices, w.boneIndex3, w.weight3);
                 }
                 Vector3 eDir; float eFactor; float eScale;
-                if (!ExactPushVector(m, smooth[i].normalized, factor[i], out eDir, out eFactor, out eScale)) continue;
+                if (!ExactPushVector(m, dir[i], factor[i], out eDir, out eFactor, out eScale)) continue;
                 dir[i] = eDir;
                 outFactor[i] = eFactor;
                 outScale[i] = eScale;
@@ -562,7 +584,16 @@ namespace AviCreatorEssentials
         static void AddBone(ref Matrix4x4 m, Matrix4x4[] boneMatrices, int bone, float weight)
         {
             if (weight <= 0f || bone < 0 || bone >= boneMatrices.Length) return;
-            m += boneMatrices[bone] * weight;
+            AddScaled(ref m, boneMatrices[bone], weight);
+        }
+
+        /// <summary>Adds a matrix scaled by a float, element by element. Matrix4x4 has no + operator and no *(Matrix4x4, float) operator (only *(Matrix4x4, Matrix4x4), *(Matrix4x4, Vector4), == and !=), so this must stay element-wise.</summary>
+        static void AddScaled(ref Matrix4x4 m, Matrix4x4 a, float s)
+        {
+            m.m00 += a.m00 * s; m.m01 += a.m01 * s; m.m02 += a.m02 * s; m.m03 += a.m03 * s;
+            m.m10 += a.m10 * s; m.m11 += a.m11 * s; m.m12 += a.m12 * s; m.m13 += a.m13 * s;
+            m.m20 += a.m20 * s; m.m21 += a.m21 * s; m.m22 += a.m22 * s; m.m23 += a.m23 * s;
+            m.m30 += a.m30 * s; m.m31 += a.m31 * s; m.m32 += a.m32 * s; m.m33 += a.m33 * s;
         }
 
         /// <summary>The local-space push for one vertex at the exact world-space width: direction, factor and scale such that dir * (width * factor / scale) moves the vertex by width * f along its world-space normal. Returns false when the vertex's matrix can't be inverted, so the caller keeps the average-scale push.</summary>
@@ -830,14 +861,61 @@ namespace AviCreatorEssentials
         static Mesh SaveMesh(Mesh mesh, string path)
         {
             var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
-            if (existing != null)
+            if (existing == null)
             {
-                EditorUtility.CopySerialized(mesh, existing);
-                Object.DestroyImmediate(mesh);
-                return existing;
+                AssetDatabase.CreateAsset(mesh, path);
+                return mesh;
             }
-            AssetDatabase.CreateAsset(mesh, path);
-            return mesh;
+            // Rebuild the existing asset in place (same GUID, every reference survives) instead of
+            // EditorUtility.CopySerialized. CopySerialized does not reliably replace a mesh's
+            // blend-shape frames when the new mesh has a different vertex count or blend shapes
+            // than the old asset, so a regenerated outline could keep stale frames whose delta
+            // arrays were sized for the old vertex count. The SkinnedMeshRenderer then refuses
+            // to render it ("data does not match the expected mesh data size and vertex stride").
+            // Rebuilding through the Mesh API guarantees the saved data exactly matches the new mesh.
+            Undo.RecordObject(existing, "Add outline");
+            CopyMeshInto(mesh, existing);
+            Object.DestroyImmediate(mesh);
+            return existing;
+        }
+
+        /// <summary>Copies every part of a mesh into another mesh object through the Mesh API, so the destination ends up exactly equal to the source with no stale data left over.</summary>
+        static void CopyMeshInto(Mesh src, Mesh dst)
+        {
+            dst.ClearBlendShapes();
+            dst.Clear(false);
+            dst.indexFormat = src.indexFormat;
+            dst.SetVertices(new List<Vector3>(src.vertices));
+            var nrm = src.normals;
+            if (nrm != null && nrm.Length > 0) dst.SetNormals(new List<Vector3>(nrm));
+            dst.subMeshCount = src.subMeshCount;
+            for (int i = 0; i < src.subMeshCount; i++)
+            {
+                var desc = src.GetSubMesh(i);
+                dst.SetIndices(src.GetIndices(i), desc.topology, i);
+            }
+            var bind = src.bindposes;
+            if (bind != null && bind.Length > 0) dst.bindposes = bind;
+            var bw = src.boneWeights;
+            if (bw != null && bw.Length > 0) dst.boneWeights = bw;
+            int count = src.blendShapeCount;
+            if (count > 0)
+            {
+                var dv = new Vector3[src.vertexCount];
+                var dn = new Vector3[src.vertexCount];
+                var dt = new Vector3[src.vertexCount];
+                for (int i = 0; i < count; i++)
+                {
+                    string name = src.GetBlendShapeName(i);
+                    int frames = src.GetBlendShapeFrameCount(i);
+                    for (int f = 0; f < frames; f++)
+                    {
+                        src.GetBlendShapeFrameVertices(i, f, dv, dn, dt);
+                        dst.AddBlendShapeFrame(name, src.GetBlendShapeFrameWeight(i, f), dv, dn, dt);
+                    }
+                }
+            }
+            dst.bounds = src.bounds;
         }
 
         /// <summary>Saves what one separate-object outline was built from, next to its hull asset, so its width can be rebuilt later.</summary>
@@ -848,8 +926,9 @@ namespace AviCreatorEssentials
             foreach (var sl in included) slots.Add(sl.index);
             var sidecar = new OutlineSidecar
             {
-                version = 2,
+                version = 3,
                 exactWorldWidth = s.exactWorldWidth,
+                expandSilhouette = s.expandSilhouette,
                 avatarName = root != null ? root.name : "",
                 sourcePath = root != null ? RelativePath(root.transform, info.renderer.transform) : info.renderer.name,
                 widthCm = s.widthCm,
@@ -1307,6 +1386,7 @@ namespace AviCreatorEssentials
             {
                 widthCm = newWidthCm,
                 exactWorldWidth = sidecar.version < 2 ? true : sidecar.exactWorldWidth,
+                expandSilhouette = sidecar.version < 3 ? true : sidecar.expandSilhouette,
                 smoothNormals = sidecar.smoothNormals,
                 useVertexColorWidth = sidecar.useVertexColorWidth,
                 copyBlendShapes = sidecar.copyBlendShapes,
