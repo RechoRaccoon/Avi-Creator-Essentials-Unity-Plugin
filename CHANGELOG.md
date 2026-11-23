@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.19.5
+
+- Fixed an avatar (seen on a Quest copy) being left in an idle or scrambled pose after leaving Play mode, with its clothing and hair stretched across the scene, and Reset not bringing it back. Two causes in the Pose tool and the clothing sync:
+  - A bone with no prefab to read its rest pose from used whatever pose the avatar was in at that moment as its "rest", so Reset restored the bad pose. It now falls back to the T-pose stored in the avatar's model file.
+  - The clothing sync captured offsets with some bones at rest and others still posed, which later threw the clothing bones far away. It now only uses rest values when every bone has one, and leaves an outfit alone if its captured offsets look wrong (a clothing bone more than 30 cm from its body bone).
+- All remembered pose and clothing data is now thrown away whenever Play mode starts or stops and rebuilt a moment after the scene is restored, and nothing is worked out in Play mode.
+
+## 0.19.4
+
+- Fixed outline generation crawling or hanging on big avatars (usually on the last, biggest mesh, the body). The slow parts were an Undo snapshot of the whole mesh with all its blend shapes on every regenerate and resize, the mesh being built twice, and every blend shape's deltas for every vertex being held in memory and copied several times. Meshes are now built once, straight into the asset, no Undo snapshot is taken of them, and blend shape deltas are read from the original mesh only when the outline is written. Welding and simplifying also use exact lookups now instead of string keys.
+- The progress bar now shows each stage (building, saving, linking, saving assets) and has a **Cancel** button.
+- Rewrote the VRCFury BlendShape Link step. It now runs after all outlines are made, checks the type of VRCFury's fields instead of assuming them, reads the link back, and removes the half-made VRCFury component if anything doesn't match (an empty VRCFury component only causes errors). A problem with the link can no longer stop outlines from being made.
+- Fixed two meshes with the same name (for example two "Body" objects) overwriting each other's outline mesh; they now get separate files.
+- Fixed outline bounds on skinned meshes being taken from the mesh instead of the renderer, which could make an outline vanish when the camera moved. Fixed the outline material being deleted and recreated on every run (it is now updated in place).
+- Generate and Remove now refuse to run in Play mode (the outlines would vanish when you stop, and the Play mode pose would be baked in), and put the avatar's position back if anything moved it during the run.
+- Dragging a width slider no longer rebuilds blend shapes for the preview (the real save when you let go still includes them). New **Match outline blend shapes to the originals now** button on the Widths tab.
+
 ## 0.19.3
 
 - Fixed regenerating outlines failing with "The object of type 'Mesh' has been destroyed": when the outline mesh already existed, saving rebuilt it in place and discarded the new mesh, but Generate then still read the discarded mesh to decide whether to add a blend-shape link. It now reads the saved mesh, so regenerating works.

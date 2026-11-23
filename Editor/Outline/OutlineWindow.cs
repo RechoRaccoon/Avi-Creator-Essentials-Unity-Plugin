@@ -282,12 +282,22 @@ namespace AviCreatorEssentials
             m_Renderers = OutlineGenerator.Scan(m_Root, m_AutoExclude);
         }
 
+        bool BlockedByPlayMode()
+        {
+            if (!EditorApplication.isPlayingOrWillChangePlaymode) return false;
+            m_Report = "Exit Play mode first. Outlines made in Play mode vanish when you stop, and the avatar's Play mode pose would be baked into them.";
+            m_ReportType = MessageType.Warning;
+            return true;
+        }
+
         void DoGenerate()
         {
+            if (BlockedByPlayMode()) return;
+            EndActivePreview(true);
             try
             {
                 var r = OutlineGenerator.Generate(m_Root, m_Renderers, m_S);
-                m_Report = "Made outlines for " + r.renderers + " mesh(es): " + r.triangles.ToString("N0") + " triangles, " +
+                m_Report = (r.cancelled ? "Cancelled part-way. " : "") + "Made outlines for " + r.renderers + " mesh(es): " + r.triangles.ToString("N0") + " triangles, " +
                            r.vertices.ToString("N0") + " vertices, " + r.blendShapes + " blend shapes followed, " +
                            TextureOptimizer.Mb(r.bytes) + " of mesh files in " + OutlineGenerator.DataFolder + "." +
                            (r.warnings.Count > 0 ? "\n\n" + string.Join("\n", r.warnings) : "");
@@ -306,6 +316,8 @@ namespace AviCreatorEssentials
 
         void DoRemove()
         {
+            if (BlockedByPlayMode()) return;
+            EndActivePreview(true);
             int n = OutlineGenerator.RemoveAll(m_Root);
             m_Report = n > 0 ? "Removed " + n + " outline object(s) / merged mesh(es)." : "No outlines from this tool were found on the avatar.";
             m_ReportType = MessageType.Info;
@@ -356,6 +368,13 @@ namespace AviCreatorEssentials
                 "Every separate outline on this avatar, in one place. Drag a slider and the outline changes live in the scene; letting go saves it. " +
                 "Outlines merged into the mesh have no separate object, so they are not listed here.",
                 EditorStyles.wordWrappedMiniLabel);
+
+            if (m_WidthRows.Count > 0 && GUILayout.Button("Match outline blend shapes to the originals now", GUILayout.Height(22)))
+            {
+                int synced = OutlineGenerator.SyncWeights(m_Root);
+                m_Report = "Copied the blend shape weights onto " + synced + " outline(s).";
+                m_ReportType = MessageType.Info;
+            }
 
             if (m_WidthRows.Count == 0)
             {

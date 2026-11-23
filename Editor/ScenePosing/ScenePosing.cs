@@ -24,6 +24,8 @@ namespace AviCreatorEssentials
         static PoseSystem s_Pose;
         static ArmatureLinker s_Linker;
         static bool s_Dirty = true;
+        static double s_SettleUntil;
+        static Dictionary<string, (Quaternion rot, Vector3 pos)> s_ModelRest;
         static readonly HashSet<Transform> s_MergedCloth = new HashSet<Transform>();
 
         /// <summary>Clothing armatures follow the body bones live, without changing the hierarchy.</summary>
@@ -80,6 +82,7 @@ namespace AviCreatorEssentials
             Selection.selectionChanged += OnSelectionChanged;
             Undo.undoRedoPerformed += () => { s_Dirty = true; Changed?.Invoke(); };
             EditorApplication.update += SyncTick;
+            EditorApplication.playModeStateChanged += OnPlayModeChanged;
             EditorApplication.delayCall += () =>
             {
                 int id = SessionState.GetInt(SessionAvatarKey, 0);
@@ -87,10 +90,36 @@ namespace AviCreatorEssentials
             };
         }
 
+        /// <summary>
+        /// Play mode swaps every scene object for a copy and back. Anything remembered about the avatar (its rest pose,
+        /// the clothing offsets) was taken from objects that are about to be replaced, or while the avatar was animated,
+        /// so it is all thrown away at every transition and rebuilt from the restored avatar after a short settle time.
+        /// </summary>
+        static void OnPlayModeChanged(PlayModeStateChange change)
+        {
+            s_Pose = null;
+            s_Linker = null;
+            s_Dirty = true;
+            s_MergedCloth.Clear();
+            s_SettleUntil = EditorApplication.timeSinceStartup + 1.0;
+            if (change == PlayModeStateChange.EnteredEditMode)
+            {
+                EditorApplication.delayCall += () =>
+                {
+                    int id = SessionState.GetInt(SessionAvatarKey, 0);
+                    var t = id != 0 ? EditorUtility.InstanceIDToObject(id) as Transform : null;
+                    if (t != null) s_Avatar = t;
+                    s_Dirty = true;
+                };
+            }
+        }
+
         /// <summary>Keeps clothing bones on their body bones every editor frame (also while scrubbing animations).</summary>
         static void SyncTick()
         {
-            if (EditorApplication.isPlayingOrWillChangePlaymode || s_Avatar == null || !SyncClothing) return;
+            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling || EditorApplication.isUpdating) return;
+            if (EditorApplication.timeSinceStartup < s_SettleUntil) return;
+            if (s_Avatar == null || !SyncClothing) return;
             var linker = Linker;
             if (linker == null || !linker.HasClothing) return;
             if (linker.Apply()) SceneView.RepaintAll();
@@ -103,6 +132,10 @@ namespace AviCreatorEssentials
             get
             {
                 if (s_Avatar == null) return null;
+                // Never work out a rest pose or clothing offsets in Play mode (the avatar is animated) or while the
+                // editor is still putting the scene back afterwards.
+                if (EditorApplication.isPlayingOrWillChangePlaymode) return null;
+                if (EditorApplication.timeSinceStartup < s_SettleUntil && s_Pose == null) return null;
                 if (s_Dirty || s_Pose == null || s_Pose.Root != s_Avatar) Rebuild();
                 return s_Pose;
             }
@@ -176,6 +209,7 @@ namespace AviCreatorEssentials
                     if (bt != null && bt.IsChildOf(s_Avatar)) human[APUtil.GetPath(bt, s_Avatar)] = (HumanBodyBones)i;
                 }
             }
+            LoadModelRest(s_Avatar);
             s_Pose = new PoseSystem();
             s_Pose.Build(s_Avatar, human);
             s_Pose.SetRest(RestOf);
@@ -184,12 +218,7 @@ namespace AviCreatorEssentials
             foreach (var kv in human)
                 if (kv.Value == HumanBodyBones.Hips) hips = APUtil.FindPath(s_Avatar, kv.Key);
             s_Linker = ArmatureLinker.Detect(s_Avatar, hips);
-            s_Linker.CaptureOffsets(t =>
-            {
-                var o = PrefabUtility.GetCorrespondingObjectFromOriginalSource(t);
-                if (o == null || o == t) return null;
-                return (o.localRotation, o.localPosition);
-            });
+            s_Linker.CaptureOffsets(RestOfTransform);
             LoadMergeRecord();
             bool sync = SyncClothing && s_Linker.HasClothing;
             s_Pose.SetLinkHidden(t => (sync && s_Linker.IsLinkedClothBone(t)) || IsMergedCloth(t));
@@ -268,7 +297,7 @@ namespace AviCreatorEssentials
             var rec = new MergeRecord();
             foreach (var l in linker.Links)
             {
-                if (l.body == null || l.cloth == null || l.cloth.parent == l.body) continue;
+                if (!l.valid || l.body == null || l.cloth == null || l.cloth.parent == l.body) continue;
                 rec.entries.Add(new MergeEntry
                 {
                     child = l.cloth.GetInstanceID(),
@@ -278,7 +307,7 @@ namespace AviCreatorEssentials
             }
             foreach (var l in linker.Links)
             {
-                if (l.body == null || l.cloth == null || l.cloth.parent == l.body) continue;
+                if (!l.valid || l.body == null || l.cloth == null || l.cloth.parent == l.body) continue;
                 // Snap onto the body bone's current pose first so the outfit sits exactly where it should.
                 Undo.RecordObject(l.cloth, "Merge clothing armatures");
                 l.cloth.SetPositionAndRotation(l.body.TransformPoint(l.offsetPos), l.body.rotation * l.offsetRot);
@@ -325,9 +354,53 @@ namespace AviCreatorEssentials
         /// <summary>Rest pose of a bone: the value from the avatar's prefab or model file when there is one.</summary>
         static (Quaternion rot, Vector3 pos)? RestOf(Bone b)
         {
-            var src = PrefabUtility.GetCorrespondingObjectFromOriginalSource(b.t);
-            if (src != null && src != b.t) return (src.localRotation, src.localPosition);
+            return RestOfTransform(b.t);
+        }
+
+        /// <summary>
+        /// Rest pose of any transform: from its prefab or model, and when there is no prefab link (an unpacked or duplicated
+        /// avatar, for example a Quest copy) from the T-pose stored in the humanoid Avatar's model file. Without this, a
+        /// bone with no known rest silently took whatever pose the avatar was in at that moment as its "rest", so Reset
+        /// could never bring a bad pose back.
+        /// </summary>
+        static (Quaternion rot, Vector3 pos)? RestOfTransform(Transform t)
+        {
+            if (t == null) return null;
+            var src = PrefabUtility.GetCorrespondingObjectFromOriginalSource(t);
+            if (src != null && src != t) return (src.localRotation, src.localPosition);
+            if (s_ModelRest != null && s_ModelRest.TryGetValue(t.name, out var r)) return r;
             return null;
+        }
+
+        /// <summary>Reads the T-pose of the avatar's model file (bones with a unique name only).</summary>
+        static void LoadModelRest(Transform avatar)
+        {
+            s_ModelRest = null;
+            try
+            {
+                var animator = avatar != null ? avatar.GetComponent<Animator>() : null;
+                if (animator == null || animator.avatar == null || !animator.avatar.isHuman) return;
+                string path = AssetDatabase.GetAssetPath(animator.avatar);
+                if (string.IsNullOrEmpty(path)) return;
+                var importer = AssetImporter.GetAtPath(path) as ModelImporter;
+                if (importer == null) return;
+                var skeleton = importer.humanDescription.skeleton;
+                if (skeleton == null || skeleton.Length == 0) return;
+                var map = new Dictionary<string, (Quaternion rot, Vector3 pos)>();
+                var dup = new HashSet<string>();
+                foreach (var sb in skeleton)
+                {
+                    if (map.ContainsKey(sb.name)) dup.Add(sb.name);
+                    else map[sb.name] = (sb.rotation, sb.position);
+                }
+                foreach (var d in dup) map.Remove(d);
+                s_ModelRest = map;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("Avi Creator Essentials: couldn't read the avatar's T-pose from its model file: " + e.Message);
+                s_ModelRest = null;
+            }
         }
 
         public static Transform[] BoneTransforms()

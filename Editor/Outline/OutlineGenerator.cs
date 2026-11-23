@@ -80,6 +80,7 @@ namespace AviCreatorEssentials
             public int vertices;
             public long bytes;
             public int blendShapes;
+            public bool cancelled;
             public readonly List<string> warnings = new List<string>();
         }
 
@@ -150,75 +151,195 @@ namespace AviCreatorEssentials
 
         // ------------------------------------------------------------------ generation
 
+        /// <summary>Remembers an object's local transform so a tool run can never leave it moved.</summary>
+        class TransformGuard
+        {
+            readonly Transform m_T;
+            readonly Vector3 m_Pos, m_Scale;
+            readonly Quaternion m_Rot;
+
+            public TransformGuard(Transform t)
+            {
+                m_T = t;
+                if (t == null) return;
+                m_Pos = t.localPosition; m_Rot = t.localRotation; m_Scale = t.localScale;
+            }
+
+            /// <summary>Puts the transform back if anything moved it. Returns true when it had to.</summary>
+            public bool Restore()
+            {
+                if (m_T == null) return false;
+                bool changed = (m_T.localPosition - m_Pos).sqrMagnitude > 1e-10f
+                               || Quaternion.Angle(m_T.localRotation, m_Rot) > 0.001f
+                               || (m_T.localScale - m_Scale).sqrMagnitude > 1e-10f;
+                if (!changed) return false;
+                Undo.RecordObject(m_T, "Restore avatar position");
+                m_T.localPosition = m_Pos; m_T.localRotation = m_Rot; m_T.localScale = m_Scale;
+                return true;
+            }
+        }
+
+        static string UniqueBase(string folder, string baseName, string tail, HashSet<string> used)
+        {
+            string b = baseName;
+            int i = 2;
+            while (!used.Add(folder + "/" + b + tail)) b = baseName + "_" + (i++);
+            return b;
+        }
+
+        static List<SlotInfo> IncludedSlots(RendererInfo info)
+        {
+            var included = new List<SlotInfo>();
+            foreach (var sl in info.slots) if (sl.include) included.Add(sl);
+            return included;
+        }
+
         public static Result Generate(GameObject root, List<RendererInfo> infos, Settings s)
         {
             var result = new Result();
             if (root == null) return result;
-            if (s.replaceExisting)
+            if (EditorUtility.IsPersistent(root))
             {
-                RemoveAll(root);
-                foreach (var inf in infos) if (inf.renderer != null) inf.mesh = MeshOf(inf.renderer);
+                result.warnings.Add("Use the avatar from the scene (Hierarchy), not the one in the Project window.");
+                return result;
             }
 
-            string folder = DataFolder + "/" + Sanitize(root.name);
-            EnsureFolder(folder);
-
-            var matCache = new Dictionary<string, Material>();
+            var guard = new TransformGuard(root.transform);
             Undo.IncrementCurrentGroup();
             Undo.SetCurrentGroupName("Add outline");
             int group = Undo.GetCurrentGroup();
-
-            int done = 0;
-            bool linkWarned = false;
-            foreach (var info in infos)
+            try
             {
-                done++;
-                if (!info.include || info.renderer == null || info.mesh == null) continue;
-                var included = new List<SlotInfo>();
-                foreach (var sl in info.slots) if (sl.include) included.Add(sl);
-                if (included.Count == 0) continue;
-
-                EditorUtility.DisplayProgressBar("Outline", info.renderer.name, done / (float)infos.Count);
-                Color col = info.overrideColor ? info.color : s.color;
-                var mat = GetMaterial(folder, col, s, matCache);
-
-                Mesh hull;
-                try { hull = BuildHull(info, included, s, result); }
-                catch (Exception e)
+                if (s.replaceExisting)
                 {
-                    Debug.LogException(e);
-                    result.warnings.Add(info.renderer.name + ": " + e.Message);
-                    continue;
+                    RemoveAll(root);
+                    foreach (var inf in infos) if (inf.renderer != null) inf.mesh = MeshOf(inf.renderer);
                 }
-                if (hull == null) { result.warnings.Add(info.renderer.name + ": nothing left to outline"); continue; }
 
-                string baseName = Sanitize(info.renderer.name);
-                if (s.placement == Placement.SeparateObject)
+                string folder = DataFolder + "/" + Sanitize(root.name);
+                EnsureFolder(folder);
+
+                var todo = new List<RendererInfo>();
+                foreach (var inf in infos)
+                    if (inf.include && inf.renderer != null && inf.mesh != null && IncludedSlots(inf).Count > 0) todo.Add(inf);
+
+                var matCache = new Dictionary<string, Material>();
+                var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var links = new List<KeyValuePair<GameObject, GameObject>>();
+
+                for (int n = 0; n < todo.Count; n++)
                 {
-                    string path = folder + "/" + baseName + Suffix + ".asset";
-                    hull.name = baseName + Suffix;
-                    var saved = SaveMesh(hull, path);
-                    var outlineGo = PlaceSeparate(info, saved, mat);
-                    WriteSidecar(path, root, info, s, included);
-                    result.bytes += FileSize(path);
-                    if (s.linkBlendShapes && saved.blendShapeCount > 0)
+                    var info = todo[n];
+                    var included = IncludedSlots(info);
+                    float p = n / (float)todo.Count;
+                    string label = info.renderer.name + " (" + (n + 1) + " of " + todo.Count + ")";
+                    if (EditorUtility.DisplayCancelableProgressBar("Outline", "Building " + label, p))
                     {
-                        string linkNote = AddBlendShapeLink(outlineGo, info.renderer.gameObject);
-                        if (linkNote != null && !linkWarned) { result.warnings.Add(linkNote); linkWarned = true; }
+                        result.cancelled = true;
+                        break;
+                    }
+
+                    Color col = info.overrideColor ? info.color : s.color;
+                    var mat = GetMaterial(folder, col, s, matCache);
+
+                    HullData hull;
+                    try { hull = BuildHull(info, included, s, result); }
+                    catch (Exception e)
+                    {
+                        Debug.LogException(e);
+                        result.warnings.Add(info.renderer.name + ": " + e.Message);
+                        continue;
+                    }
+                    if (hull == null) { result.warnings.Add(info.renderer.name + ": nothing left to outline"); continue; }
+
+                    EditorUtility.DisplayProgressBar("Outline", "Saving " + label, p + 0.5f / todo.Count);
+                    try
+                    {
+                        string rawName = Sanitize(info.renderer.name);
+                        if (s.placement == Placement.SeparateObject)
+                        {
+                            string baseName = UniqueBase(folder, rawName, Suffix + ".asset", usedPaths);
+                            string path = folder + "/" + baseName + Suffix + ".asset";
+                            var saved = WriteMesh(hull, path, baseName + Suffix);
+                            var outlineGo = PlaceSeparate(info, saved, mat);
+                            WriteSidecar(path, root, info, s, included);
+                            AssetDatabase.SaveAssetIfDirty(saved);
+                            result.bytes += FileSize(path);
+                            if (s.linkBlendShapes && saved.blendShapeCount > 0)
+                                links.Add(new KeyValuePair<GameObject, GameObject>(outlineGo, info.renderer.gameObject));
+                        }
+                        else
+                        {
+                            string baseName = UniqueBase(folder, rawName, "_WithOutline.asset", usedPaths);
+                            var merged = Merge(info, hull, mat, folder, baseName, result);
+                            if (merged == null) continue;
+                            AssetDatabase.SaveAssetIfDirty(merged);
+                        }
+                        result.renderers++;
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogException(e);
+                        result.warnings.Add(info.renderer.name + ": couldn't save the outline (" + e.Message + ")");
                     }
                 }
-                else
+
+                // The VRCFury blend shape links go in last, in one pass, so a problem with them can never stop outlines from being made.
+                if (links.Count > 0 && !result.cancelled)
                 {
-                    var merged = Merge(info, hull, mat, folder, baseName, result);
-                    if (merged == null) continue;
-                    Object.DestroyImmediate(hull);
+                    var noted = new HashSet<string>();
+                    for (int i = 0; i < links.Count; i++)
+                    {
+                        if (links[i].Key == null || links[i].Value == null) continue;
+                        EditorUtility.DisplayProgressBar("Outline", "Linking blend shapes (" + (i + 1) + " of " + links.Count + ")", i / (float)links.Count);
+                        string note;
+                        try { note = AddBlendShapeLink(links[i].Key, links[i].Value); }
+                        catch (Exception e) { note = "Couldn't add the VRCFury blend shape link: " + e.Message; }
+                        if (note != null && noted.Add(note)) result.warnings.Add(note);
+                    }
                 }
-                result.renderers++;
+
+                EditorUtility.DisplayProgressBar("Outline", "Saving assets…", 1f);
+                AssetDatabase.SaveAssets();
             }
-            EditorUtility.ClearProgressBar();
-            Undo.CollapseUndoOperations(group);
-            AssetDatabase.SaveAssets();
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+                if (guard.Restore()) result.warnings.Add("The avatar's position was changed during the run, so it was put back.");
+                Undo.CollapseUndoOperations(group);
+            }
             return result;
+        }
+
+        /// <summary>Copies the source's blend shape weights onto every separate outline of the avatar, by name. Returns how many outlines were updated.</summary>
+        public static int SyncWeights(GameObject root)
+        {
+            if (root == null) return 0;
+            int n = 0;
+            foreach (var r in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                if (!r.name.EndsWith(Suffix, StringComparison.Ordinal)) continue;
+                var parent = r.transform.parent;
+                var source = parent != null ? parent.GetComponent<SkinnedMeshRenderer>() : null;
+                if (source == null) continue;
+                Undo.RecordObject(r, "Match outline blend shapes");
+                CopyWeights(r, source);
+                n++;
+            }
+            return n;
+        }
+
+        /// <summary>Sets each of dst's blend shape weights to the same-named weight on srcRenderer.</summary>
+        static void CopyWeights(SkinnedMeshRenderer dst, SkinnedMeshRenderer srcRenderer)
+        {
+            if (dst == null || srcRenderer == null) return;
+            var dm = dst.sharedMesh; var sm = srcRenderer.sharedMesh;
+            if (dm == null || sm == null) return;
+            for (int i = 0; i < dm.blendShapeCount; i++)
+            {
+                int idx = sm.GetBlendShapeIndex(dm.GetBlendShapeName(i));
+                if (idx >= 0) dst.SetBlendShapeWeight(i, srcRenderer.GetBlendShapeWeight(idx));
+            }
         }
 
         /// <summary>Removes every outline object this tool made under the avatar, and restores merged meshes.</summary>
@@ -226,9 +347,10 @@ namespace AviCreatorEssentials
         {
             if (root == null) return 0;
             int removed = 0;
+            var guard = new TransformGuard(root.transform);
             var toDelete = new List<GameObject>();
             foreach (var t in root.GetComponentsInChildren<Transform>(true))
-                if (t != root.transform && t.name.EndsWith(Suffix, StringComparison.Ordinal)) toDelete.Add(t.gameObject);
+                if (t != root.transform && t.name.EndsWith(Suffix, StringComparison.Ordinal) && t.GetComponent<Renderer>() != null) toDelete.Add(t.gameObject);
             foreach (var go in toDelete)
             {
                 if (go == null) continue;
@@ -262,6 +384,7 @@ namespace AviCreatorEssentials
                 }
                 removed++;
             }
+            guard.Restore();
             return removed;
         }
 
@@ -313,21 +436,22 @@ namespace AviCreatorEssentials
 
         // ------------------------------------------------------------------ hull building
 
-        /// <summary>Intermediate outline geometry before optimization and writing.</summary>
+        /// <summary>Intermediate outline geometry before optimization and writing. Blend shapes are not held here: each hull vertex remembers the source vertex it came from (src), and the deltas are read straight from the source mesh when the mesh is written.</summary>
         class Hull
         {
             public List<Vector3> pos = new List<Vector3>();
             public List<Vector3> nrm = new List<Vector3>();
             public List<BoneWeight> bw = new List<BoneWeight>();
             public List<int> tris = new List<int>();
-            public List<Shape> shapes = new List<Shape>();
+            public List<int> src = new List<int>();
         }
 
-        class Shape
+        /// <summary>A blend shape of the source mesh that the outline follows.</summary>
+        class ShapeRef
         {
+            public int index;
             public string name;
-            public List<float> weights = new List<float>();
-            public List<Vector3[]> deltas = new List<Vector3[]>(); // per frame, per hull vertex
+            public int frames;
         }
 
         /// <summary>Front half of a hull build: the hull with UNPUSHED base positions, plus per hull vertex the push direction, factor and scale. Pushing a hull vertex is dir * (width * factor / scale), where width is in metres.</summary>
@@ -339,6 +463,17 @@ namespace AviCreatorEssentials
             public Vector3[] pushDir;
             public float[] pushFactor;
             public float[] pushScale;
+            public List<ShapeRef> shapes = new List<ShapeRef>();
+            public ulong[] shapeHash; // per SOURCE vertex, a fingerprint of how it moves in the followed shapes; null when there are none
+        }
+
+        /// <summary>A finished hull, ready to be written into a mesh asset.</summary>
+        class HullData
+        {
+            public Hull hull;
+            public Mesh source;
+            public bool skinned;
+            public List<ShapeRef> shapes;
         }
 
         static HullBase BuildHullBase(RendererInfo info, List<SlotInfo> included, Settings s, Result result)
@@ -354,10 +489,7 @@ namespace AviCreatorEssentials
             // Triangles of the included slots, in original vertex indices.
             var srcTris = new List<int>();
             foreach (var sl in included)
-            {
-                var idx = mesh.GetTriangles(sl.index);
-                srcTris.AddRange(idx);
-            }
+                srcTris.AddRange(mesh.GetTriangles(sl.index));
             if (srcTris.Count == 0) return null;
 
             // World-space size of one mesh-space unit at every vertex, so the width is a real length.
@@ -421,7 +553,6 @@ namespace AviCreatorEssentials
             var map = new int[verts.Length];
             for (int i = 0; i < map.Length; i++) map[i] = -1;
             var hull = new Hull();
-            var srcOfHull = new List<int>();
             var pushDir = new List<Vector3>();
             var pushFactor = new List<float>();
             var pushScaleList = new List<float>();
@@ -429,16 +560,15 @@ namespace AviCreatorEssentials
             {
                 int a = srcTris[t], b = srcTris[t + 1], c = srcTris[t + 2];
                 if (!alive[a] && !alive[b] && !alive[c]) continue;
-                int na = UseBase(a, map, hull, srcOfHull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
-                int nb = UseBase(b, map, hull, srcOfHull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
-                int nc = UseBase(c, map, hull, srcOfHull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
+                int na = UseBase(a, map, hull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
+                int nb = UseBase(b, map, hull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
+                int nc = UseBase(c, map, hull, pushDir, pushFactor, pushScaleList, verts, smooth, dir, factor, pushScale, weights, skinned);
                 // Flipped winding: this is what turns the copy into an outline.
                 hull.tris.Add(na); hull.tris.Add(nc); hull.tris.Add(nb);
             }
             if (hull.tris.Count == 0) return null;
 
-            if (s.copyBlendShapes && mesh.blendShapeCount > 0) CopyShapes(mesh, srcOfHull, scale, s, hull, result);
-            return new HullBase
+            var baseData = new HullBase
             {
                 hull = hull,
                 sourceMesh = mesh,
@@ -447,9 +577,15 @@ namespace AviCreatorEssentials
                 pushFactor = pushFactor.ToArray(),
                 pushScale = pushScaleList.ToArray(),
             };
+            if (s.copyBlendShapes && mesh.blendShapeCount > 0)
+            {
+                baseData.shapeHash = SelectShapes(mesh, hull.src, scale, s, baseData.shapes);
+                result.blendShapes += baseData.shapes.Count;
+            }
+            return baseData;
         }
 
-        static Mesh BuildHull(RendererInfo info, List<SlotInfo> included, Settings s, Result result)
+        static HullData BuildHull(RendererInfo info, List<SlotInfo> included, Settings s, Result result)
         {
             var b = BuildHullBase(info, included, s, result);
             if (b == null) return null;
@@ -458,7 +594,7 @@ namespace AviCreatorEssentials
             for (int i = 0; i < hull.pos.Count; i++)
                 hull.pos[i] = hull.pos[i] + b.pushDir[i] * (width * b.pushFactor[i] / b.pushScale[i]);
 
-            if (s.weldVertices) Weld(hull);
+            if (s.weldVertices) Weld(hull, b.shapeHash);
             float cell = s.simplifyMm * 0.001f;
             if (cell > 0f) Cluster(hull, cell);
             if (s.triangleBudget > 0)
@@ -476,15 +612,15 @@ namespace AviCreatorEssentials
             if (hull.tris.Count == 0) return null;
             result.triangles += hull.tris.Count / 3;
             result.vertices += hull.pos.Count;
-            return ToMesh(hull, b.sourceMesh, b.skinned);
+            return new HullData { hull = hull, source = b.sourceMesh, skinned = b.skinned, shapes = b.shapes };
         }
 
-        static int UseBase(int v, int[] map, Hull h, List<int> srcOfHull, List<Vector3> pushDir, List<float> pushFactor, List<float> pushScale,
+        static int UseBase(int v, int[] map, Hull h, List<Vector3> pushDir, List<float> pushFactor, List<float> pushScale,
             Vector3[] verts, Vector3[] smooth, Vector3[] dir, float[] factor, float[] scale, BoneWeight[] bw, bool skinned)
         {
             if (map[v] >= 0) return map[v];
             map[v] = h.pos.Count;
-            srcOfHull.Add(v);
+            h.src.Add(v);
             h.pos.Add(verts[v]);
             h.nrm.Add(-smooth[v].normalized);
             h.bw.Add(skinned ? bw[v] : default(BoneWeight));
@@ -651,6 +787,22 @@ namespace AviCreatorEssentials
             if (excluded[bone]) ex += weight;
         }
 
+        /// <summary>A position rounded to 0.01 mm (when the mesh is in metres), usable as an exact dictionary key.</summary>
+        struct IntKey : IEquatable<IntKey>
+        {
+            public readonly int x, y, z;
+            public IntKey(Vector3 v)
+            {
+                const float q = 100000f;
+                x = Mathf.RoundToInt(v.x * q);
+                y = Mathf.RoundToInt(v.y * q);
+                z = Mathf.RoundToInt(v.z * q);
+            }
+            public bool Equals(IntKey o) { return x == o.x && y == o.y && z == o.z; }
+            public override bool Equals(object o) { return o is IntKey && Equals((IntKey)o); }
+            public override int GetHashCode() { unchecked { return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791); } }
+        }
+
         /// <summary>Angle-weighted vertex normals, averaged across vertices that share a position (UV seams, hard edges).</summary>
         static Vector3[] SmoothNormals(Vector3[] verts, List<int> tris)
         {
@@ -666,10 +818,12 @@ namespace AviCreatorEssentials
                 acc[b] += n * Angle(pc - pb, pa - pb);
                 acc[c] += n * Angle(pa - pc, pb - pc);
             }
-            var groups = new Dictionary<long, Vector3>();
+            var groups = new Dictionary<IntKey, Vector3>(verts.Length);
+            var keys = new IntKey[verts.Length];
             for (int i = 0; i < verts.Length; i++)
             {
-                long k = Key(verts[i]);
+                var k = new IntKey(verts[i]);
+                keys[i] = k;
                 Vector3 cur;
                 groups.TryGetValue(k, out cur);
                 groups[k] = cur + acc[i];
@@ -677,7 +831,7 @@ namespace AviCreatorEssentials
             var result = new Vector3[verts.Length];
             for (int i = 0; i < verts.Length; i++)
             {
-                var n = groups[Key(verts[i])];
+                var n = groups[keys[i]];
                 result[i] = n.sqrMagnitude > 1e-12f ? n.normalized : Vector3.up;
             }
             return result;
@@ -688,90 +842,144 @@ namespace AviCreatorEssentials
             return Mathf.Acos(Mathf.Clamp(Vector3.Dot(a.normalized, b.normalized), -1f, 1f));
         }
 
-        static long Key(Vector3 v)
-        {
-            const float q = 100000f; // 0.01 mm in metres
-            long x = Mathf.RoundToInt(v.x * q) & 0x1FFFFF;
-            long y = Mathf.RoundToInt(v.y * q) & 0x1FFFFF;
-            long z = Mathf.RoundToInt(v.z * q) & 0x1FFFFF;
-            return (x << 42) | (y << 21) | z;
-        }
+        // ------------------------------------------------------------------ blend shapes
 
-        static void CopyShapes(Mesh mesh, List<int> srcOfHull, float[] scale, Settings s, Hull hull, Result result)
+        /// <summary>
+        /// Decides which of the source's blend shapes the outline follows (the ones that move it by at least the minimum),
+        /// and fingerprints how every source vertex moves in them, so welding never merges two vertices that move differently.
+        /// Nothing is copied here: the deltas are read from the source again when the mesh is written, which keeps memory flat
+        /// however many blend shapes the avatar has.
+        /// </summary>
+        static ulong[] SelectShapes(Mesh mesh, List<int> srcOfHull, float[] scale, Settings s, List<ShapeRef> kept)
         {
-            int n = srcOfHull.Count;
             int total = mesh.vertexCount;
+            int n = srcOfHull.Count;
             var dv = new Vector3[total];
             var dn = new Vector3[total];
             var dt = new Vector3[total];
+            var hash = new ulong[total];
+            var tmp = new ulong[total];
             float minMove = s.blendShapeMinMoveMm * 0.001f;
             for (int bs = 0; bs < mesh.blendShapeCount; bs++)
             {
                 int frames = mesh.GetBlendShapeFrameCount(bs);
-                var shape = new Shape { name = mesh.GetBlendShapeName(bs) };
                 float biggest = 0f;
                 for (int f = 0; f < frames; f++)
                 {
                     mesh.GetBlendShapeFrameVertices(bs, f, dv, dn, dt);
-                    var d = new Vector3[n];
                     for (int i = 0; i < n; i++)
                     {
-                        d[i] = dv[srcOfHull[i]];
-                        float m = d[i].magnitude * scale[srcOfHull[i]];
+                        int v = srcOfHull[i];
+                        Vector3 d = dv[v];
+                        float m = d.magnitude * scale[v];
                         if (m > biggest) biggest = m;
+                        tmp[v] = MixDelta(tmp[v], d, f);
                     }
-                    shape.weights.Add(mesh.GetBlendShapeFrameWeight(bs, f));
-                    shape.deltas.Add(d);
                 }
-                if (biggest < minMove) continue; // doesn't visibly move the outline
-                hull.shapes.Add(shape);
+                if (biggest >= minMove)
+                {
+                    unchecked
+                    {
+                        ulong salt = (ulong)(bs + 1) * 0x9E3779B97F4A7C15UL;
+                        for (int i = 0; i < n; i++)
+                        {
+                            int v = srcOfHull[i];
+                            hash[v] = (hash[v] ^ (tmp[v] + salt)) * 1099511628211UL;
+                        }
+                    }
+                    kept.Add(new ShapeRef { index = bs, name = mesh.GetBlendShapeName(bs), frames = frames });
+                }
+                for (int i = 0; i < n; i++) tmp[srcOfHull[i]] = 0UL;
             }
-            result.blendShapes += hull.shapes.Count;
+            return hash;
+        }
+
+        static ulong MixDelta(ulong h, Vector3 d, int frame)
+        {
+            unchecked
+            {
+                h = (h ^ (uint)Mathf.RoundToInt(d.x * 100000f) ^ ((ulong)frame << 40)) * 1099511628211UL;
+                h = (h ^ (uint)Mathf.RoundToInt(d.y * 100000f)) * 1099511628211UL;
+                h = (h ^ (uint)Mathf.RoundToInt(d.z * 100000f)) * 1099511628211UL;
+                return h;
+            }
         }
 
         // ------------------------------------------------------------------ optimization
 
-        static bool SameWeights(BoneWeight a, BoneWeight b)
+        /// <summary>Two hull vertices are the same when they sit at the same position with the same skinning and the same blend shape movement.</summary>
+        struct WeldKey : IEquatable<WeldKey>
         {
-            return a.boneIndex0 == b.boneIndex0 && a.boneIndex1 == b.boneIndex1 && a.boneIndex2 == b.boneIndex2 && a.boneIndex3 == b.boneIndex3
-                && Mathf.Abs(a.weight0 - b.weight0) < 1e-4f && Mathf.Abs(a.weight1 - b.weight1) < 1e-4f
-                && Mathf.Abs(a.weight2 - b.weight2) < 1e-4f && Mathf.Abs(a.weight3 - b.weight3) < 1e-4f;
+            readonly int x, y, z, b0, b1, b2, b3, w0, w1, w2, w3;
+            readonly ulong shape;
+            public WeldKey(Vector3 p, BoneWeight w, ulong shape)
+            {
+                const float q = 100000f;
+                x = Mathf.RoundToInt(p.x * q);
+                y = Mathf.RoundToInt(p.y * q);
+                z = Mathf.RoundToInt(p.z * q);
+                w0 = Mathf.RoundToInt(w.weight0 * 10000f);
+                w1 = Mathf.RoundToInt(w.weight1 * 10000f);
+                w2 = Mathf.RoundToInt(w.weight2 * 10000f);
+                w3 = Mathf.RoundToInt(w.weight3 * 10000f);
+                b0 = w0 > 0 ? w.boneIndex0 : 0;
+                b1 = w1 > 0 ? w.boneIndex1 : 0;
+                b2 = w2 > 0 ? w.boneIndex2 : 0;
+                b3 = w3 > 0 ? w.boneIndex3 : 0;
+                this.shape = shape;
+            }
+            public bool Equals(WeldKey o)
+            {
+                return x == o.x && y == o.y && z == o.z && shape == o.shape
+                    && b0 == o.b0 && b1 == o.b1 && b2 == o.b2 && b3 == o.b3
+                    && w0 == o.w0 && w1 == o.w1 && w2 == o.w2 && w3 == o.w3;
+            }
+            public override bool Equals(object o) { return o is WeldKey && Equals((WeldKey)o); }
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int h = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
+                    h = h * 31 + b0; h = h * 31 + b1; h = h * 31 + w0; h = h * 31 + w1;
+                    h = h * 31 + (int)(shape ^ (shape >> 32));
+                    return h;
+                }
+            }
         }
 
         /// <summary>Merges vertices at the same position with the same skinning and blend shape movement.</summary>
-        static void Weld(Hull h)
+        static void Weld(Hull h, ulong[] shapeHash)
         {
             int n = h.pos.Count;
             var remap = new int[n];
-            var buckets = new Dictionary<long, List<int>>();
-            var keep = new List<int>();
+            var keep = new List<int>(n);
+            var map = new Dictionary<WeldKey, int>(n);
             for (int i = 0; i < n; i++)
             {
-                long k = Key(h.pos[i]);
-                List<int> list;
-                if (!buckets.TryGetValue(k, out list)) { list = new List<int>(); buckets[k] = list; }
-                int found = -1;
-                foreach (int j in list)
-                {
-                    if (!SameWeights(h.bw[i], h.bw[j])) continue;
-                    if (!SameShapeDeltas(h, i, j)) continue;
-                    found = remap[j];
-                    break;
-                }
-                if (found >= 0) { remap[i] = found; continue; }
+                var k = new WeldKey(h.pos[i], h.bw[i], shapeHash != null ? shapeHash[h.src[i]] : 0UL);
+                int found;
+                if (map.TryGetValue(k, out found)) { remap[i] = found; continue; }
                 remap[i] = keep.Count;
+                map[k] = keep.Count;
                 keep.Add(i);
-                list.Add(i);
             }
+            if (keep.Count == n) return;
             Compact(h, remap, keep);
         }
 
-        static bool SameShapeDeltas(Hull h, int a, int b)
+        struct CellKey : IEquatable<CellKey>
         {
-            foreach (var sh in h.shapes)
-                foreach (var f in sh.deltas)
-                    if ((f[a] - f[b]).sqrMagnitude > 1e-10f) return false;
-            return true;
+            readonly int x, y, z, bone;
+            public CellKey(Vector3 p, float cell, int bone)
+            {
+                x = Mathf.FloorToInt(p.x / cell);
+                y = Mathf.FloorToInt(p.y / cell);
+                z = Mathf.FloorToInt(p.z / cell);
+                this.bone = bone;
+            }
+            public bool Equals(CellKey o) { return x == o.x && y == o.y && z == o.z && bone == o.bone; }
+            public override bool Equals(object o) { return o is CellKey && Equals((CellKey)o); }
+            public override int GetHashCode() { unchecked { return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ (bone * 83492797); } }
         }
 
         /// <summary>Vertex clustering: vertices in the same small cell (and with the same main bone) become one.</summary>
@@ -779,14 +987,14 @@ namespace AviCreatorEssentials
         {
             int n = h.pos.Count;
             var remap = new int[n];
-            var cellMap = new Dictionary<string, int>();
+            var cellMap = new Dictionary<CellKey, int>(n);
             var keep = new List<int>();
             var sums = new List<Vector3>();
             var counts = new List<int>();
             for (int i = 0; i < n; i++)
             {
                 var p = h.pos[i];
-                string k = Mathf.FloorToInt(p.x / cell) + "," + Mathf.FloorToInt(p.y / cell) + "," + Mathf.FloorToInt(p.z / cell) + "," + MainBone(h.bw[i]);
+                var k = new CellKey(p, cell, MainBone(h.bw[i]));
                 int idx;
                 if (!cellMap.TryGetValue(k, out idx))
                 {
@@ -819,14 +1027,8 @@ namespace AviCreatorEssentials
             var pos = new List<Vector3>(keep.Count);
             var nrm = new List<Vector3>(keep.Count);
             var bw = new List<BoneWeight>(keep.Count);
-            foreach (int i in keep) { pos.Add(h.pos[i]); nrm.Add(h.nrm[i]); bw.Add(h.bw[i]); }
-            foreach (var sh in h.shapes)
-                for (int f = 0; f < sh.deltas.Count; f++)
-                {
-                    var d = new Vector3[keep.Count];
-                    for (int c = 0; c < keep.Count; c++) d[c] = sh.deltas[f][keep[c]];
-                    sh.deltas[f] = d;
-                }
+            var src = new List<int>(keep.Count);
+            foreach (int i in keep) { pos.Add(h.pos[i]); nrm.Add(h.nrm[i]); bw.Add(h.bw[i]); src.Add(h.src[i]); }
             var tris = new List<int>(h.tris.Count);
             for (int t = 0; t + 2 < h.tris.Count; t += 3)
             {
@@ -834,88 +1036,64 @@ namespace AviCreatorEssentials
                 if (a == b || b == c || a == c) continue; // collapsed
                 tris.Add(a); tris.Add(b); tris.Add(c);
             }
-            h.pos = pos; h.nrm = nrm; h.bw = bw; h.tris = tris;
+            h.pos = pos; h.nrm = nrm; h.bw = bw; h.src = src; h.tris = tris;
         }
 
         // ------------------------------------------------------------------ writing
 
-        static Mesh ToMesh(Hull h, Mesh source, bool skinned)
+        /// <summary>Writes the hull into a mesh. The mesh is cleared first, so reusing an existing asset leaves no stale data behind.</summary>
+        static void FillMesh(Mesh m, HullData d)
         {
-            var m = new Mesh();
-            if (h.pos.Count > 65000) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            var h = d.hull;
+            m.Clear(false);
+            m.ClearBlendShapes();
+            m.indexFormat = h.pos.Count > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
             m.SetVertices(h.pos);
             m.SetNormals(h.nrm);
+            m.subMeshCount = 1;
             m.SetTriangles(h.tris, 0);
-            if (skinned)
+            if (d.skinned)
             {
-                m.bindposes = source.bindposes;
+                m.bindposes = d.source.bindposes;
                 m.boneWeights = h.bw.ToArray();
             }
-            foreach (var sh in h.shapes)
-                for (int f = 0; f < sh.deltas.Count; f++)
-                    m.AddBlendShapeFrame(sh.name, sh.weights[f], sh.deltas[f], null, null);
+            else
+            {
+                m.bindposes = new Matrix4x4[0];
+            }
+            if (d.shapes != null && d.shapes.Count > 0) AddShapes(m, d.source, d.shapes, h.src.ToArray());
             m.RecalculateBounds();
-            return m;
         }
 
-        static Mesh SaveMesh(Mesh mesh, string path)
+        /// <summary>Adds the followed blend shapes to the hull mesh, reading each frame's deltas from the source mesh for just the vertices the hull uses.</summary>
+        static void AddShapes(Mesh target, Mesh source, List<ShapeRef> shapes, int[] srcOfHull)
         {
-            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
-            if (existing == null)
+            int total = source.vertexCount;
+            var dv = new Vector3[total];
+            var dn = new Vector3[total];
+            var dt = new Vector3[total];
+            var d = new Vector3[srcOfHull.Length];
+            foreach (var sh in shapes)
             {
-                AssetDatabase.CreateAsset(mesh, path);
-                return mesh;
-            }
-            // Rebuild the existing asset in place (same GUID, every reference survives) instead of
-            // EditorUtility.CopySerialized. CopySerialized does not reliably replace a mesh's
-            // blend-shape frames when the new mesh has a different vertex count or blend shapes
-            // than the old asset, so a regenerated outline could keep stale frames whose delta
-            // arrays were sized for the old vertex count. The SkinnedMeshRenderer then refuses
-            // to render it ("data does not match the expected mesh data size and vertex stride").
-            // Rebuilding through the Mesh API guarantees the saved data exactly matches the new mesh.
-            Undo.RecordObject(existing, "Add outline");
-            CopyMeshInto(mesh, existing);
-            Object.DestroyImmediate(mesh);
-            return existing;
-        }
-
-        /// <summary>Copies every part of a mesh into another mesh object through the Mesh API, so the destination ends up exactly equal to the source with no stale data left over.</summary>
-        static void CopyMeshInto(Mesh src, Mesh dst)
-        {
-            dst.ClearBlendShapes();
-            dst.Clear(false);
-            dst.indexFormat = src.indexFormat;
-            dst.SetVertices(new List<Vector3>(src.vertices));
-            var nrm = src.normals;
-            if (nrm != null && nrm.Length > 0) dst.SetNormals(new List<Vector3>(nrm));
-            dst.subMeshCount = src.subMeshCount;
-            for (int i = 0; i < src.subMeshCount; i++)
-            {
-                var desc = src.GetSubMesh(i);
-                dst.SetIndices(src.GetIndices(i), desc.topology, i);
-            }
-            var bind = src.bindposes;
-            if (bind != null && bind.Length > 0) dst.bindposes = bind;
-            var bw = src.boneWeights;
-            if (bw != null && bw.Length > 0) dst.boneWeights = bw;
-            int count = src.blendShapeCount;
-            if (count > 0)
-            {
-                var dv = new Vector3[src.vertexCount];
-                var dn = new Vector3[src.vertexCount];
-                var dt = new Vector3[src.vertexCount];
-                for (int i = 0; i < count; i++)
+                for (int f = 0; f < sh.frames; f++)
                 {
-                    string name = src.GetBlendShapeName(i);
-                    int frames = src.GetBlendShapeFrameCount(i);
-                    for (int f = 0; f < frames; f++)
-                    {
-                        src.GetBlendShapeFrameVertices(i, f, dv, dn, dt);
-                        dst.AddBlendShapeFrame(name, src.GetBlendShapeFrameWeight(i, f), dv, dn, dt);
-                    }
+                    source.GetBlendShapeFrameVertices(sh.index, f, dv, dn, dt);
+                    for (int i = 0; i < d.Length; i++) d[i] = dv[srcOfHull[i]];
+                    target.AddBlendShapeFrame(sh.name, source.GetBlendShapeFrameWeight(sh.index, f), d, null, null);
                 }
             }
-            dst.bounds = src.bounds;
+        }
+
+        /// <summary>Writes the hull to a mesh asset. An existing asset is rebuilt in place (same GUID, so every reference survives); no Undo is recorded for it, because snapshotting a mesh with many blend shapes for Undo is what made big avatars crawl.</summary>
+        static Mesh WriteMesh(HullData d, string path, string meshName)
+        {
+            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            Mesh m = existing != null ? existing : new Mesh();
+            FillMesh(m, d);
+            m.name = meshName;
+            if (existing == null) AssetDatabase.CreateAsset(m, path);
+            else EditorUtility.SetDirty(m);
+            return m;
         }
 
         /// <summary>Saves what one separate-object outline was built from, next to its hull asset, so its width can be rebuilt later.</summary>
@@ -1015,9 +1193,13 @@ namespace AviCreatorEssentials
             {
                 var r = go.AddComponent<SkinnedMeshRenderer>();
                 r.sharedMesh = hull;
-                r.bones = smr.bones;
+                if (hull.bindposes.Length > 0) r.bones = smr.bones;
                 r.rootBone = smr.rootBone;
-                r.localBounds = smr.localBounds;
+                // The source's bounds, grown a little for the outline's thickness. (The mesh's own bounds
+                // are in bind-pose space, not relative to the root bone, so they must not be used here.)
+                var bounds = smr.localBounds;
+                bounds.Expand(0.02f);
+                r.localBounds = bounds;
                 r.updateWhenOffscreen = smr.updateWhenOffscreen;
                 r.quality = smr.quality;
                 r.sharedMaterials = new[] { mat };
@@ -1029,11 +1211,7 @@ namespace AviCreatorEssentials
                 // Copy the source's blend shape weights so the outline matches in the editor.
                 // At runtime VRChat animates the source's weights only, so the outline follows
                 // toggles through the VRCFury BlendShape Link added at Generate time (or merged placement).
-                for (int i = 0; i < hull.blendShapeCount; i++)
-                {
-                    int idx = smr.sharedMesh.GetBlendShapeIndex(hull.GetBlendShapeName(i));
-                    if (idx >= 0) r.SetBlendShapeWeight(i, smr.GetBlendShapeWeight(idx));
-                }
+                CopyWeights(r, smr);
             }
             else
             {
@@ -1061,72 +1239,107 @@ namespace AviCreatorEssentials
             return null;
         }
 
-        /// <summary>Adds a VRCFury BlendShape Link to an outline object, so the outline's blend shapes follow the source's at runtime. VRCFury rewrites every animation clip at upload, after its own toggles are baked, to drive the linked mesh's same-named blend shapes. That is the only way to follow toggles: the toggle clips don't exist in the editor, so no editor-time clip edit could cover them. The link lives on the outline object, so Remove outlines takes it away too. Field names are from VRCFury's BlendShapeLink model (VF.Model.Feature.BlendShapeLink) and its VRCFury component (VF.Model.VRCFury, content field); re-check them if VRCFury changes the model. Returns null on success, or a short reason it was skipped.</summary>
+        static SerializedProperty FindFirst(SerializedProperty parent, params string[] names)
+        {
+            if (parent == null) return null;
+            foreach (var n in names)
+            {
+                var p = parent.FindPropertyRelative(n);
+                if (p != null) return p;
+            }
+            return null;
+        }
+
+        /// <summary>Points a serialized field at a GameObject, or at the renderer / transform on it, depending on what type the field is. Strings get the object's name.</summary>
+        static bool AssignRef(SerializedProperty p, GameObject go)
+        {
+            if (p == null || go == null) return false;
+            if (p.propertyType == SerializedPropertyType.ObjectReference)
+            {
+                string t = p.type ?? "";
+                UnityEngine.Object value = go;
+                if (t.Contains("SkinnedMeshRenderer")) value = go.GetComponent<SkinnedMeshRenderer>();
+                else if (t.Contains("Renderer")) value = go.GetComponent<Renderer>();
+                else if (t.Contains("Transform")) value = go.transform;
+                if (value == null) return false;
+                p.objectReferenceValue = value;
+                return p.objectReferenceValue == value;
+            }
+            if (p.propertyType == SerializedPropertyType.String)
+            {
+                p.stringValue = go.name;
+                return true;
+            }
+            return false;
+        }
+
+        static string DiscardLink(Component comp, string message)
+        {
+            if (comp != null) Undo.DestroyObjectImmediate(comp);
+            return message;
+        }
+
+        /// <summary>Adds a VRCFury BlendShape Link to an outline object, so the outline's blend shapes follow the source's at runtime. VRCFury rewrites every animation clip at upload, after its own toggles are baked, to drive the linked mesh's same-named blend shapes. That is the only way to follow toggles: the toggle clips don't exist in the editor, so no editor-time clip edit could cover them. The link lives on the outline object, so Remove outlines takes it away too. It is built defensively: field names and types are checked, and if anything doesn't match VRCFury's model, the half-made component is removed again (a VRCFury component with empty content would only cause errors). Returns null on success, or a short reason it was skipped.</summary>
         public static string AddBlendShapeLink(GameObject outlineObject, GameObject sourceObject)
         {
-            var outlineSmr = outlineObject != null ? outlineObject.GetComponent<SkinnedMeshRenderer>() : null;
-            if (outlineSmr == null) return null; // not skinned, so no blend shapes to link
-            if (outlineSmr.sharedMesh == null || outlineSmr.sharedMesh.blendShapeCount == 0) return null;
+            if (outlineObject == null || sourceObject == null) return null;
+            var outlineSmr = outlineObject.GetComponent<SkinnedMeshRenderer>();
+            if (outlineSmr == null || outlineSmr.sharedMesh == null || outlineSmr.sharedMesh.blendShapeCount == 0) return null;
             var vrcFuryType = FindType("VF.Model.VRCFury");
             var linkType = FindType("VF.Model.Feature.BlendShapeLink");
             if (vrcFuryType == null || linkType == null)
-                return "VRCFury is not installed, so the outline's blend shapes won't follow toggles. Install VRCFury and re-run Generate to link them.";
-            // Drop any BlendShape Link already on this outline, so re-running never stacks duplicates.
+                return "VRCFury isn't installed, so the outlines won't follow blend shape toggles at runtime. Install VRCFury, or use merged placement.";
+
+            // Replace any link left on this object (including broken ones from earlier versions).
             var contentField = vrcFuryType.GetField("content");
-            if (contentField != null)
+            foreach (var old in outlineObject.GetComponents(vrcFuryType))
             {
-                foreach (var c in outlineObject.GetComponents(vrcFuryType))
-                {
-                    var existing = contentField.GetValue(c);
-                    if (existing != null && existing.GetType() == linkType)
-                        Undo.DestroyObjectImmediate(c);
-                }
+                if (old == null) continue;
+                object content = contentField != null ? contentField.GetValue(old) : null;
+                if (content == null || linkType.IsInstanceOfType(content)) Undo.DestroyObjectImmediate(old);
             }
-            var comp = outlineObject.AddComponent(vrcFuryType);
-            Undo.RegisterCreatedObjectUndo(comp, "Add outline");
-            object model;
-            try { model = Activator.CreateInstance(linkType, nonPublic: true); }
+
+            Component comp = null;
+            try
+            {
+                comp = Undo.AddComponent(outlineObject, vrcFuryType);
+                if (comp == null) return "Couldn't add a VRCFury component to the outline.";
+                var so = new SerializedObject(comp);
+                var contentProp = so.FindProperty("content");
+                if (contentProp == null) return DiscardLink(comp, "VRCFury's component doesn't have the expected content field, so the blend shape link couldn't be added.");
+                contentProp.managedReferenceValue = Activator.CreateInstance(linkType, true);
+                so.ApplyModifiedPropertiesWithoutUndo();
+                so.Update();
+
+                contentProp = so.FindProperty("content");
+                var baseProp = FindFirst(contentProp, "baseObj", "baseSkin", "baseMesh", "baseRenderer");
+                var skinsProp = FindFirst(contentProp, "linkSkins", "linkedSkins", "skins");
+                if (baseProp == null || skinsProp == null || !skinsProp.isArray)
+                    return DiscardLink(comp, "VRCFury's BlendShape Link doesn't have the expected fields, so the blend shape link couldn't be added.");
+                if (!AssignRef(baseProp, sourceObject))
+                    return DiscardLink(comp, "Couldn't point VRCFury's BlendShape Link at the original mesh.");
+                var includeProp = FindFirst(contentProp, "includeAll");
+                if (includeProp != null && includeProp.propertyType == SerializedPropertyType.Boolean) includeProp.boolValue = true;
+                skinsProp.arraySize = 1;
+                var skinProp = FindFirst(skinsProp.GetArrayElementAtIndex(0), "renderer", "skin", "smr");
+                if (skinProp == null || skinProp.propertyType != SerializedPropertyType.ObjectReference)
+                    return DiscardLink(comp, "VRCFury's BlendShape Link doesn't have the expected fields, so the blend shape link couldn't be added.");
+                skinProp.objectReferenceValue = outlineSmr;
+                so.ApplyModifiedPropertiesWithoutUndo();
+
+                // Read it back: only keep the link if it really took.
+                so.Update();
+                var checkSkins = FindFirst(so.FindProperty("content"), "linkSkins", "linkedSkins", "skins");
+                var checkSkin = checkSkins != null && checkSkins.arraySize == 1 ? FindFirst(checkSkins.GetArrayElementAtIndex(0), "renderer", "skin", "smr") : null;
+                if (checkSkin == null || checkSkin.objectReferenceValue != outlineSmr)
+                    return DiscardLink(comp, "The blend shape link didn't save correctly, so it was removed.");
+                return null;
+            }
             catch (Exception e)
             {
-                Undo.DestroyObjectImmediate(comp);
-                return "Couldn't create the VRCFury BlendShape Link: " + e.Message;
+                Debug.LogException(e);
+                return DiscardLink(comp, "Couldn't add the VRCFury blend shape link (" + e.Message + ").");
             }
-            var so = new SerializedObject(comp);
-            var content = so.FindProperty("content");
-            if (content == null)
-            {
-                Undo.DestroyObjectImmediate(comp);
-                return "VRCFury's component has no content field, so the blend shape link couldn't be added.";
-            }
-            content.managedReferenceValue = model;
-            so.ApplyModifiedProperties();
-            so.Update();
-            content = so.FindProperty("content");
-            if (content == null)
-            {
-                Undo.DestroyObjectImmediate(comp);
-                return "VRCFury's component has no content field, so the blend shape link couldn't be added.";
-            }
-            var baseProp = content.FindPropertyRelative("baseObj");
-            var skinsProp = content.FindPropertyRelative("linkSkins");
-            var includeProp = content.FindPropertyRelative("includeAll");
-            if (baseProp == null || skinsProp == null || includeProp == null)
-            {
-                Undo.DestroyObjectImmediate(comp);
-                return "VRCFury's BlendShape Link doesn't have the expected fields, so the blend shape link couldn't be added.";
-            }
-            baseProp.stringValue = sourceObject != null ? sourceObject.name : "";
-            includeProp.boolValue = true;
-            skinsProp.arraySize = 1;
-            var skinProp = skinsProp.GetArrayElementAtIndex(0).FindPropertyRelative("renderer");
-            if (skinProp == null)
-            {
-                Undo.DestroyObjectImmediate(comp);
-                return "VRCFury's BlendShape Link doesn't have the expected fields, so the blend shape link couldn't be added.";
-            }
-            skinProp.objectReferenceValue = outlineSmr;
-            so.ApplyModifiedProperties();
-            return null;
         }
 
         /// <summary>Rebuilds one separate-object outline's hull from its sidecar with a new width. Returns null on success, or an error message.</summary>
@@ -1153,54 +1366,46 @@ namespace AviCreatorEssentials
             var info = InfoForResize(sourceRenderer, sidecar);
             info.widthMultiplier = newWidthMultiplier;
             if (info.mesh == null) return "The source has no mesh.";
-            var included = new List<SlotInfo>();
-            foreach (var sl in info.slots) if (sl.include) included.Add(sl);
+            var included = IncludedSlots(info);
             if (included.Count == 0) return "No material slots were outlined for this object.";
             var s = SettingsFromSidecar(sidecar, newWidthCm, sourceRenderer);
 
             Undo.IncrementCurrentGroup();
             Undo.SetCurrentGroupName("Resize outline");
             int group = Undo.GetCurrentGroup();
-
-            var result = new Result();
-            Mesh newHull;
-            try { newHull = BuildHull(info, included, s, result); }
-            catch (Exception e)
+            try
             {
-                Debug.LogException(e);
-                Undo.CollapseUndoOperations(group);
-                return "Rebuild failed: " + e.Message;
-            }
-            if (newHull == null)
-            {
-                Undo.CollapseUndoOperations(group);
-                return "Nothing left to outline with these settings.";
-            }
-            newHull.name = Path.GetFileNameWithoutExtension(hullPath);
-            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(hullPath);
-            if (existing != null) Undo.RecordObject(existing, "Resize outline");
-            var saved = SaveMesh(newHull, hullPath);
-            Undo.RecordObject(outlineRenderer, "Resize outline");
-            var outlineSmr = outlineRenderer as SkinnedMeshRenderer;
-            if (outlineSmr != null)
-            {
-                outlineSmr.localBounds = saved.bounds;
-                var sourceSmr = sourceRenderer as SkinnedMeshRenderer;
-                if (sourceSmr != null && sourceSmr.sharedMesh != null)
+                var result = new Result();
+                HullData data;
+                try { data = BuildHull(info, included, s, result); }
+                catch (Exception e)
                 {
-                    for (int i = 0; i < saved.blendShapeCount; i++)
-                    {
-                        int idx = sourceSmr.sharedMesh.GetBlendShapeIndex(saved.GetBlendShapeName(i));
-                        if (idx >= 0) outlineSmr.SetBlendShapeWeight(i, sourceSmr.GetBlendShapeWeight(idx));
-                    }
+                    Debug.LogException(e);
+                    return "Rebuild failed: " + e.Message;
                 }
+                if (data == null) return "Nothing left to outline with these settings.";
+
+                // Rebuilt in place, with no Undo snapshot of the mesh (see WriteMesh).
+                var saved = WriteMesh(data, hullPath, Path.GetFileNameWithoutExtension(hullPath));
+                Undo.RecordObject(outlineRenderer, "Resize outline");
+                var outlineSmr = outlineRenderer as SkinnedMeshRenderer;
+                if (outlineSmr != null)
+                {
+                    // Re-assign so the renderer picks up the rebuilt mesh's blend shape list.
+                    outlineSmr.sharedMesh = null;
+                    outlineSmr.sharedMesh = saved;
+                    CopyWeights(outlineSmr, sourceRenderer as SkinnedMeshRenderer);
+                }
+                sidecar.widthCm = newWidthCm;
+                sidecar.widthMultiplier = newWidthMultiplier;
+                File.WriteAllText(sidecarPath, JsonUtility.ToJson(sidecar));
+                AssetDatabase.SaveAssetIfDirty(saved);
+                return null;
             }
-            sidecar.widthCm = newWidthCm;
-            sidecar.widthMultiplier = newWidthMultiplier;
-            File.WriteAllText(sidecarPath, JsonUtility.ToJson(sidecar));
-            Undo.CollapseUndoOperations(group);
-            AssetDatabase.SaveAssets();
-            return null;
+            finally
+            {
+                Undo.CollapseUndoOperations(group);
+            }
         }
 
         // ------------------------------------------------------------------ live width preview
@@ -1213,7 +1418,6 @@ namespace AviCreatorEssentials
             public Renderer sourceRenderer;
             public string sourceName;
             public Mesh originalMesh;
-            public Bounds originalLocalBounds;
             public Mesh tempMesh;
             public Vector3[] basePos;
             public Vector3[] pushDir;
@@ -1246,10 +1450,12 @@ namespace AviCreatorEssentials
 
             var info = InfoForResize(sourceRenderer, sidecar);
             if (info.mesh == null) return "The source has no mesh.";
-            var included = new List<SlotInfo>();
-            foreach (var sl in info.slots) if (sl.include) included.Add(sl);
+            var included = IncludedSlots(info);
             if (included.Count == 0) return "No material slots were outlined for this object.";
             var s = SettingsFromSidecar(sidecar, sidecar.widthCm, sourceRenderer);
+            // The drag preview only needs the shape of the hull, so it skips the blend shapes (the expensive part).
+            // The real rebuild when the drag ends includes them.
+            s.copyBlendShapes = false;
 
             var result = new Result();
             HullBase b;
@@ -1280,25 +1486,14 @@ namespace AviCreatorEssentials
             float width = sidecar.widthCm * 0.01f * Mathf.Max(0.01f, sidecar.widthMultiplier);
             for (int i = 0; i < b.hull.pos.Count; i++)
                 b.hull.pos[i] = b.hull.pos[i] + b.pushDir[i] * (width * b.pushFactor[i] / b.pushScale[i]);
-            p.tempMesh = ToMesh(b.hull, b.sourceMesh, b.skinned);
+            p.tempMesh = new Mesh();
+            FillMesh(p.tempMesh, new HullData { hull = b.hull, source = b.sourceMesh, skinned = b.skinned, shapes = null });
             p.tempMesh.name = hull.name + " preview";
 
             var outlineSmr = outlineRenderer as SkinnedMeshRenderer;
-            if (outlineSmr != null) p.originalLocalBounds = outlineSmr.localBounds;
             if (outlineSmr != null)
             {
                 outlineSmr.sharedMesh = p.tempMesh;
-                outlineSmr.localBounds = p.tempMesh.bounds;
-                // Follow the original's blend shape weights while previewing, same as the placed outline does.
-                var sourceSmr = sourceRenderer as SkinnedMeshRenderer;
-                if (sourceSmr != null && sourceSmr.sharedMesh != null)
-                {
-                    for (int i = 0; i < p.tempMesh.blendShapeCount; i++)
-                    {
-                        int idx = sourceSmr.sharedMesh.GetBlendShapeIndex(p.tempMesh.GetBlendShapeName(i));
-                        if (idx >= 0) outlineSmr.SetBlendShapeWeight(i, sourceSmr.GetBlendShapeWeight(idx));
-                    }
-                }
             }
             else
             {
@@ -1319,9 +1514,6 @@ namespace AviCreatorEssentials
             for (int i = 0; i < pos.Length; i++)
                 pos[i] = p.basePos[i] + p.pushDir[i] * (width * p.pushFactor[i] / p.pushScale[i]);
             p.tempMesh.SetVertices(pos);
-            p.tempMesh.RecalculateBounds();
-            var smr = p.outlineRenderer as SkinnedMeshRenderer;
-            if (smr != null) smr.localBounds = p.tempMesh.bounds;
         }
 
         /// <summary>Ends a live width preview: the original mesh is always put back, and the temp mesh is destroyed. When commit is true, the final width is saved with a full rebuild, like Resize Outline.</summary>
@@ -1335,7 +1527,7 @@ namespace AviCreatorEssentials
                 if (smr != null)
                 {
                     smr.sharedMesh = p.originalMesh;
-                    smr.localBounds = p.originalLocalBounds;
+                    CopyWeights(smr, p.sourceRenderer as SkinnedMeshRenderer);
                 }
                 else
                 {
@@ -1410,20 +1602,43 @@ namespace AviCreatorEssentials
         }
 
         /// <summary>Appends the hull to the original mesh as one more submesh, so it costs no extra renderer.</summary>
-        static Mesh Merge(RendererInfo info, Mesh hull, Material mat, string folder, string baseName, Result result)
+        static Mesh Merge(RendererInfo info, HullData data, Material mat, string folder, string baseName, Result result)
         {
             var src = info.mesh;
+            var hull = data.hull;
             string srcPath = AssetDatabase.GetAssetPath(src);
             string path = folder + "/" + baseName + "_WithOutline.asset";
-            var combined = new Mesh { name = baseName + "_WithOutline" };
+            if (srcPath == path)
+            {
+                result.warnings.Add(info.renderer.name + ": already uses an outline mesh. Turn on \"Replace existing outlines\" (or Remove outlines first).");
+                return null;
+            }
 
             int vCount = src.vertexCount;
-            int hCount = hull.vertexCount;
-            if (vCount + hCount > 65000) combined.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            int hCount = hull.pos.Count;
+            var smr = info.renderer as SkinnedMeshRenderer;
+            BoneWeight[] srcBw = null;
+            if (smr != null)
+            {
+                srcBw = src.boneWeights;
+                if (srcBw.Length != vCount)
+                {
+                    result.warnings.Add(info.renderer.name + ": has no bone weights, can't merge");
+                    return null;
+                }
+            }
 
-            var verts = new List<Vector3>(src.vertices); verts.AddRange(hull.vertices);
+            // Rebuilt in place when the asset already exists (same GUID), with no Undo snapshot of the mesh.
+            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            var combined = existing != null ? existing : new Mesh();
+            combined.Clear(false);
+            combined.ClearBlendShapes();
+            combined.name = baseName + "_WithOutline";
+            combined.indexFormat = vCount + hCount > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
+
+            var verts = new List<Vector3>(src.vertices); verts.AddRange(hull.pos);
             var nrm = new List<Vector3>(); var srcN = src.normals;
-            if (srcN.Length == vCount) { nrm.AddRange(srcN); nrm.AddRange(hull.normals); }
+            if (srcN.Length == vCount) { nrm.AddRange(srcN); nrm.AddRange(hull.nrm); }
             var tan = new List<Vector4>(); var srcT = src.tangents;
             if (srcT.Length == vCount) { tan.AddRange(srcT); for (int i = 0; i < hCount; i++) tan.Add(new Vector4(1, 0, 0, 1)); }
             var col = new List<Color32>(); var srcC = src.colors32;
@@ -1447,52 +1662,49 @@ namespace AviCreatorEssentials
             combined.subMeshCount = src.subMeshCount + 1;
             for (int i = 0; i < src.subMeshCount; i++)
             {
-                var d = src.GetSubMesh(i);
+                var sm = src.GetSubMesh(i);
                 var idx = src.GetIndices(i);
-                combined.SetIndices(idx, d.topology, i, false, 0);
+                combined.SetIndices(idx, sm.topology, i, false, 0);
             }
-            var hullTris = hull.triangles;
+            var hullTris = hull.tris.ToArray();
             for (int i = 0; i < hullTris.Length; i++) hullTris[i] += vCount;
             combined.SetTriangles(hullTris, src.subMeshCount, false);
 
-            var smr = info.renderer as SkinnedMeshRenderer;
             if (smr != null)
             {
                 combined.bindposes = src.bindposes;
-                var bw = new List<BoneWeight>(src.boneWeights);
-                if (bw.Count != vCount) { Object.DestroyImmediate(combined); result.warnings.Add(info.renderer.name + ": has no bone weights, can't merge"); return null; }
-                bw.AddRange(hull.boneWeights);
+                var bw = new List<BoneWeight>(srcBw);
+                bw.AddRange(hull.bw);
                 combined.boneWeights = bw.ToArray();
             }
 
-            // Blend shapes: original ones keep their deltas, the hull's copies follow the same names.
+            // Blend shapes: every original shape keeps its deltas, and the followed ones also move the hull part,
+            // using the deltas of the source vertex each hull vertex came from.
+            var followed = new bool[src.blendShapeCount];
+            if (data.shapes != null)
+                foreach (var sh in data.shapes) if (sh.index >= 0 && sh.index < followed.Length) followed[sh.index] = true;
+            var hullSrc = hull.src.ToArray();
             var srcDv = new Vector3[vCount]; var srcDn = new Vector3[vCount]; var srcDt = new Vector3[vCount];
-            var hullIndex = new Dictionary<string, int>();
-            for (int i = 0; i < hull.blendShapeCount; i++) hullIndex[hull.GetBlendShapeName(i)] = i;
-            var hv = new Vector3[hCount]; var hn = new Vector3[hCount]; var ht = new Vector3[hCount];
             var dvAll = new Vector3[vCount + hCount]; var dnAll = new Vector3[vCount + hCount]; var dtAll = new Vector3[vCount + hCount];
             for (int bs = 0; bs < src.blendShapeCount; bs++)
             {
                 string name = src.GetBlendShapeName(bs);
-                int hs;
-                bool has = hullIndex.TryGetValue(name, out hs);
                 int frames = src.GetBlendShapeFrameCount(bs);
                 for (int f = 0; f < frames; f++)
                 {
                     src.GetBlendShapeFrameVertices(bs, f, srcDv, srcDn, srcDt);
-                    Array.Clear(dvAll, 0, dvAll.Length); Array.Clear(dnAll, 0, dnAll.Length); Array.Clear(dtAll, 0, dtAll.Length);
                     Array.Copy(srcDv, dvAll, vCount); Array.Copy(srcDn, dnAll, vCount); Array.Copy(srcDt, dtAll, vCount);
-                    if (has && f < hull.GetBlendShapeFrameCount(hs))
-                    {
-                        hull.GetBlendShapeFrameVertices(hs, f, hv, hn, ht);
-                        Array.Copy(hv, 0, dvAll, vCount, hCount);
-                    }
+                    if (followed[bs])
+                        for (int i = 0; i < hCount; i++) dvAll[vCount + i] = srcDv[hullSrc[i]];
+                    else
+                        Array.Clear(dvAll, vCount, hCount);
                     combined.AddBlendShapeFrame(name, src.GetBlendShapeFrameWeight(bs, f), dvAll, dnAll, dtAll);
                 }
             }
             combined.bounds = src.bounds;
 
-            var saved = SaveMesh(combined, path);
+            if (existing == null) AssetDatabase.CreateAsset(combined, path);
+            else EditorUtility.SetDirty(combined);
 
             // Remember what the original was, so "Remove outlines" can put it back.
             string side = path.Substring(0, path.Length - ".asset".Length) + ".origin.json";
@@ -1505,14 +1717,14 @@ namespace AviCreatorEssentials
             else result.warnings.Add(info.renderer.name + ": the original mesh isn't an asset, so \"Remove outlines\" can't restore it (use Ctrl+Z)");
 
             Undo.RecordObject(info.renderer, "Add outline");
-            SetMesh(info.renderer, saved);
+            SetMesh(info.renderer, combined);
             var mats = info.renderer.sharedMaterials;
             var list = new List<Material>(mats);
             while (list.Count < src.subMeshCount) list.Add(null);
             list.Add(mat);
             info.renderer.sharedMaterials = list.ToArray();
             result.bytes += FileSize(path);
-            return saved;
+            return combined;
         }
 
         // ------------------------------------------------------------------ materials
@@ -1538,15 +1750,24 @@ namespace AviCreatorEssentials
             if (shader == null) shader = Shader.Find("Standard");
 
             string path = folder + "/Outline_" + key + ".mat";
-            var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (existing != null) AssetDatabase.DeleteAsset(path);
             m = new Material(shader) { name = "Outline " + key };
             ApplyColor(m, color, s.flatLook, folder, key);
             m.renderQueue = -1;
-            AssetDatabase.CreateAsset(m, path);
+            // An existing material is overwritten in place, not deleted and recreated, so anything
+            // still pointing at it (an outline kept with "Replace existing" off) doesn't go pink.
+            var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (existing != null)
+            {
+                EditorUtility.CopySerialized(m, existing);
+                Object.DestroyImmediate(m);
+                m = existing;
+                EditorUtility.SetDirty(m);
+            }
+            else AssetDatabase.CreateAsset(m, path);
             cache[key] = m;
             return m;
         }
+
 
         static readonly string[] s_ColorProps = { "_Color", "_BaseColor", "_MainColor", "_TintColor", "_LightColor", "_DiffuseColor" };
 
@@ -1635,3 +1856,4 @@ namespace AviCreatorEssentials
         }
     }
 }
+

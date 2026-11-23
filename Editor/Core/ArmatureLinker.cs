@@ -20,6 +20,7 @@ namespace AviCreatorEssentials
             public Vector3 offsetPos;        // cloth position in body bone space
             public Quaternion offsetRot = Quaternion.identity;
             public int depth;
+            public bool valid = true;        // false when the captured offset looks wrong, so this link is never applied
         }
 
         public class Clothing
@@ -195,30 +196,54 @@ namespace AviCreatorEssentials
             var saved = new List<(Transform t, Quaternion r, Vector3 p)>();
             if (restOf != null)
             {
-                var touched = new HashSet<Transform>();
+                // Rest values are only used when EVERY bone of EVERY link has one. Putting some bones at rest while the
+                // others stay posed gives nonsense offsets, which later throw the clothing bones across the scene.
+                var rests = new List<(Transform t, (Quaternion rot, Vector3 pos) rest)>();
+                var seen = new HashSet<Transform>();
+                bool complete = true;
                 foreach (var l in m_All)
                 {
                     foreach (var t in new[] { l.body, l.cloth })
                     {
-                        if (t == null || !touched.Add(t)) continue;
+                        if (t == null || !seen.Add(t)) continue;
                         var rest = restOf(t);
-                        if (!rest.HasValue) continue;
-                        saved.Add((t, t.localRotation, t.localPosition));
-                        t.localRotation = rest.Value.rot;
-                        t.localPosition = rest.Value.pos;
+                        if (!rest.HasValue) { complete = false; break; }
+                        rests.Add((t, rest.Value));
+                    }
+                    if (!complete) break;
+                }
+                if (complete)
+                {
+                    foreach (var r in rests)
+                    {
+                        saved.Add((r.t, r.t.localRotation, r.t.localPosition));
+                        r.t.localRotation = r.rest.rot;
+                        r.t.localPosition = r.rest.pos;
                     }
                 }
             }
+
+            // A clothing bone sits on (or very near) its body bone. If it is much further away, the capture is wrong.
+            float maxDist = 0.3f * Mathf.Max(0.01f, root != null ? root.lossyScale.y : 1f);
             foreach (var l in m_All)
             {
+                l.valid = true;
                 if (l.body == null || l.cloth == null) continue;
                 l.offsetPos = l.body.InverseTransformPoint(l.cloth.position);
                 l.offsetRot = Quaternion.Inverse(l.body.rotation) * l.cloth.rotation;
+                if ((l.cloth.position - l.body.position).magnitude > maxDist) l.valid = false;
             }
             for (int i = saved.Count - 1; i >= 0; i--)
             {
                 saved[i].t.localRotation = saved[i].r;
                 saved[i].t.localPosition = saved[i].p;
+            }
+            // One bad link means the whole outfit was matched or captured wrongly: leave that outfit alone.
+            foreach (var c in clothing)
+            {
+                bool anyBad = false;
+                foreach (var l in c.links) if (!l.valid) { anyBad = true; break; }
+                if (anyBad) foreach (var l in c.links) l.valid = false;
             }
         }
 
@@ -228,9 +253,10 @@ namespace AviCreatorEssentials
             bool moved = false;
             foreach (var l in m_All)
             {
-                if (l.body == null || l.cloth == null) continue;
+                if (!l.valid || l.body == null || l.cloth == null) continue;
                 var pos = l.body.TransformPoint(l.offsetPos);
                 var rot = l.body.rotation * l.offsetRot;
+                if (float.IsNaN(pos.x) || float.IsNaN(pos.y) || float.IsNaN(pos.z)) continue;
                 if ((l.cloth.position - pos).sqrMagnitude > 1e-12f || Quaternion.Angle(l.cloth.rotation, rot) > 0.001f)
                 {
                     l.cloth.SetPositionAndRotation(pos, rot);
