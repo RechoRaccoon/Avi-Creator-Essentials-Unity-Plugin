@@ -181,7 +181,7 @@ namespace AviCreatorEssentials
         }
 
         /// <summary>
-        /// Blender-style polygon loop (Alt+click): from the clicked polygon, runs across the polygon edge nearest the
+        /// Blender-style polygon loop (Alt+click): from the clicked polygon, runs along the polygon edge nearest the
         /// click and keeps going through opposite edges, stopping at a boundary, a triangle, a fork or when it
         /// closes into a ring. Works on quads (two triangles sharing a diagonal). Whole polygons are used, not islands.
         /// </summary>
@@ -203,7 +203,7 @@ namespace AviCreatorEssentials
                 return;
             }
 
-            // The edge of the quad nearest the click: the loop crosses it.
+            // The edge of the quad nearest the click: the loop runs along it (click near a top/bottom edge for a horizontal loop).
             var idx = e.submeshIndices[tri.submesh];
             var pos = e.ObjectPositions;
             var click = pos[idx[tri.first]] * bary.x + pos[idx[tri.first + 1]] * bary.y + pos[idx[tri.first + 2]] * bary.z;
@@ -220,7 +220,7 @@ namespace AviCreatorEssentials
             for (int dir = 0; dir < 2; dir++)
             {
                 int cur = q;
-                int exit = dir == 0 ? nearest : (nearest + 2) % 4;
+                int exit = dir == 0 ? (nearest + 1) % 4 : (nearest + 3) % 4;   // leave through the sides next to the nearest edge, so the loop runs along it
                 while (true)
                 {
                     int a = topo.ring[cur * 4 + exit];

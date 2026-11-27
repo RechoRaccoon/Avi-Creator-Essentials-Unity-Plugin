@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.1
+
+- Fixed the direction of Alt+click polygon loops: the loop now runs along the polygon edge nearest the click (click near a top or bottom edge for a horizontal loop, near a left or right edge for a vertical one), as in Blender. It was running across that edge, the opposite way.
+
 ## 0.20.0
 
 - New Blender-style **polygon loop select**: with the Select tool, **Alt+click** a polygon in the 3D view or the texture view to select the loop of polygons through it. The loop runs across the polygon edge nearest your click and continues through opposite edges until it reaches a boundary, a triangle or a fork, or closes into a ring. Every Alt+click adds to the current selection, and **Ctrl+Alt+click** removes a loop. Alt+drag still orbits (3D) or pans (texture view). Loops always use whole polygons (not UV islands) and follow quads, so they work best on quad-based meshes.
