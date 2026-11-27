@@ -37,6 +37,7 @@ namespace AviCreatorEssentials
         public Vector3[] worldNormals = Array.Empty<Vector3>();
         public int[][] submeshIndices = Array.Empty<int[]>();
         public Bounds worldBounds;
+        public Dictionary<int, QuadTopology> quadTopo = new Dictionary<int, QuadTopology>();   // per submesh, built on first loop select
         public string path;
         public string displayName;
         readonly Vector2[][] m_UVs = new Vector2[4][];

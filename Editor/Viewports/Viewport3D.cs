@@ -22,6 +22,7 @@ namespace AviCreatorEssentials
             Gizmo,
             BoneMove,
             Select,
+            LoopSelect,
             Transform,
             Gradient,
             Stripes,
@@ -98,6 +99,7 @@ namespace AviCreatorEssentials
         public bool MouseInside => m_Inside;
         readonly List<Vector2> m_SelPoints = new List<Vector2>();
         SelectOp m_SelOp;
+        SelectOp m_LoopOp;
         public bool InModal => m_Modal != Modal.None;
 
         public Viewport3D(PainterContext context) : base(context)
@@ -284,7 +286,16 @@ namespace AviCreatorEssentials
             float pressure = PressureOf(evt);
             m_DragStart = m_DragLast = m_Mouse;
 
-            if (evt.button == 0 && alt) BeginNav(Drag.Orbit);
+            if (evt.button == 0 && alt)
+            {
+                // Alt+click with the Select tool picks a polygon loop; Alt+drag still orbits.
+                if (!ctx.PoseMode && ctx.Tool == PaintTool.Select)
+                {
+                    m_Drag = Drag.LoopSelect;
+                    m_LoopOp = ctrl ? SelectOp.Subtract : SelectOp.Add;
+                }
+                else BeginNav(Drag.Orbit);
+            }
             else if (evt.button == 2) BeginNav(ctrl ? Drag.Zoom : Drag.Pan);
             else if (evt.button == 1)
             {
@@ -388,6 +399,9 @@ namespace AviCreatorEssentials
                 case Drag.Stripes:
                     DragStripes();
                     break;
+                case Drag.LoopSelect:
+                    if (Vector2.Distance(m_Mouse, m_DragStart) >= ClickSlop) BeginNav(Drag.Orbit);
+                    break;
                 case Drag.Select:
                     if (ctx.selectLasso && Vector2.Distance(m_SelPoints[m_SelPoints.Count - 1], m_Mouse) > 3f) m_SelPoints.Add(m_Mouse);
                     break;
@@ -431,6 +445,9 @@ namespace AviCreatorEssentials
                     break;
                 case Drag.Select:
                     if (!cancelled) FinishSelect();
+                    break;
+                case Drag.LoopSelect:
+                    if (!cancelled) FinishLoopSelect();
                     break;
                 case Drag.Gradient:
                     EndGradient(cancelled);
@@ -1187,6 +1204,20 @@ namespace AviCreatorEssentials
             ctx.Render();
         }
 
+        /// <summary>Alt+click: select (Ctrl+Alt: deselect) the loop of polygons through the clicked polygon, keeping the rest of the selection.</summary>
+        void FinishLoopSelect()
+        {
+            var s = ctx.session;
+            if (!Raycast(m_Mouse, out var h)) return;
+            var hitSet = s.SetForUser(h.entry, h.submesh, s.ActiveSet != null ? s.ActiveSet.property : null);
+            if (hitSet == null) return;
+            if (hitSet != s.ActiveSet) s.ActiveSet = hitSet;
+            var set = s.ActiveSet;
+            if (!set.initialized) s.InitializeSet(set);
+            s.SelectFaceLoop(set, new TriRef(h.entry, h.submesh, h.triangle), h.barycentric, m_LoopOp);
+            ctx.Render();
+        }
+
         // ------------------------------------------------------------------ transform tool
 
         Vector2 m_TfStartCenter;
@@ -1820,7 +1851,7 @@ namespace AviCreatorEssentials
                 case PaintTool.Picker: hudRight.text = "Color picker"; break;
                 case PaintTool.Image: hudRight.text = "Image  ·  drag to move, Shift scale, Ctrl rotate"; break;
                 case PaintTool.Transform: hudRight.text = "Transform  ·  click a color to pick it up, drag it to move, Enter applies"; break;
-                case PaintTool.Select: hudRight.text = "Select " + (ctx.selectIslands ? "UV islands" : "polygons") + "  ·  Shift add, Ctrl remove"; break;
+                case PaintTool.Select: hudRight.text = "Select " + (ctx.selectIslands ? "UV islands" : "polygons") + "  ·  Shift add, Ctrl remove, Alt+click loop"; break;
                 case PaintTool.Gradient: hudRight.text = "Gradient  ·  " + ObjectNames.NicifyVariableName(ctx.gradientShape.ToString()) + "  ·  drag across the model"; break;
                 case PaintTool.Stripes: hudRight.text = "Stripes  ·  " + ObjectNames.NicifyVariableName(ctx.stripeOrientation.ToString()) + "  ·  drag across the model"; break;
                 case PaintTool.ColorRecolor: hudRight.text = "Color recolor  ·  click a color, then shift Hue in Adjust"; break;

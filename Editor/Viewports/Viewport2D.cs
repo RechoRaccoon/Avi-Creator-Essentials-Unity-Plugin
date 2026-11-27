@@ -18,6 +18,7 @@ namespace AviCreatorEssentials
             ImageScale,
             ImageRotate,
             Select,
+            LoopSelect,
             Transform,
             LassoRecolor,
         }
@@ -55,6 +56,7 @@ namespace AviCreatorEssentials
         readonly List<Vector2> m_SelPoints = new List<Vector2>();
         readonly List<Vector2> m_LassoPoints = new List<Vector2>();
         SelectOp m_SelOp;
+        SelectOp m_LoopOp;
 
         public Viewport2D(PainterContext context) : base(context)
         {
@@ -165,7 +167,13 @@ namespace AviCreatorEssentials
             m_DragStart = m_DragLast = m_Mouse;
             bool alt = evt.altKey, ctrl = evt.actionKey, shift = evt.shiftKey;
 
-            if (evt.button == 2 || (evt.button == 0 && alt) || (evt.button == 1 && !ctrl))
+            if (evt.button == 0 && alt && !ctx.PoseMode && ctx.Tool == PaintTool.Select)
+            {
+                // Alt+click picks a polygon loop; Alt+drag still pans.
+                m_Drag = Drag.LoopSelect;
+                m_LoopOp = ctrl ? SelectOp.Subtract : SelectOp.Add;
+            }
+            else if (evt.button == 2 || (evt.button == 0 && alt) || (evt.button == 1 && !ctrl))
             {
                 m_Drag = Drag.Pan;
                 rightClickPending = evt.button == 1 && !alt && !shift && !ctx.PoseMode;
@@ -239,6 +247,14 @@ namespace AviCreatorEssentials
             var delta = m_Mouse - m_DragLast;
             switch (m_Drag)
             {
+                case Drag.LoopSelect:
+                    if (Vector2.Distance(m_Mouse, m_DragStart) >= ClickSlop)
+                    {
+                        m_Drag = Drag.Pan;
+                        m_Center -= new Vector2(delta.x / SX, -delta.y / SY);
+                        RequestRender();
+                    }
+                    break;
                 case Drag.Pan:
                     m_Center -= new Vector2(delta.x / SX, -delta.y / SY);
                     RequestRender();
@@ -296,6 +312,7 @@ namespace AviCreatorEssentials
             else if (m_Drag == Drag.Picker) ctx.colors.Use(ctx.primary);
             else if (m_Drag == Drag.BrushSize) ctx.NotifyBrushChanged();
             else if (m_Drag == Drag.Select) FinishSelect();
+            else if (m_Drag == Drag.LoopSelect) FinishLoopSelect();
             else if (m_Drag == Drag.LassoRecolor) FinishLassoRecolor();
             else if (m_Drag == Drag.Transform) EndTransform();
             m_Drag = Drag.None;
@@ -638,6 +655,34 @@ namespace AviCreatorEssentials
             }
             m_SelPoints.Clear();
             ctx.Render();
+        }
+
+        /// <summary>Alt+click: select (Ctrl+Alt: deselect) the loop of polygons through the clicked polygon, keeping the rest of the selection.</summary>
+        void FinishLoopSelect()
+        {
+            var s = ctx.session;
+            var set = Set;
+            if (s == null || set == null) return;
+            if (!set.initialized) s.InitializeSet(set);
+            var uv = LocalToUV(m_Mouse);
+            if (!FindTriangle(set, uv, out var e, out int sub, out int first)) return;
+            var uvs = e.GetUVs(set.uvChannel);
+            var idx = e.submeshIndices[sub];
+            uv.x -= Mathf.Floor(uv.x);
+            uv.y -= Mathf.Floor(uv.y);
+            var bary = Barycentric(uv, uvs[idx[first]], uvs[idx[first + 1]], uvs[idx[first + 2]]);
+            s.SelectFaceLoop(set, new TriRef(e.index, sub, first), bary, m_LoopOp);
+            ctx.Render();
+        }
+
+        static Vector3 Barycentric(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+        {
+            var v0 = b - a; var v1 = c - a; var v2 = p - a;
+            float den = v0.x * v1.y - v1.x * v0.y;
+            if (Mathf.Abs(den) < 1e-12f) return new Vector3(1f / 3f, 1f / 3f, 1f / 3f);
+            float v = (v2.x * v1.y - v1.x * v2.y) / den;
+            float w = (v0.x * v2.y - v2.x * v0.y) / den;
+            return new Vector3(1f - v - w, v, w);
         }
 
         /// <summary>Lasso recolor: close the freehand loop and recolor what's inside it on the active layer.</summary>

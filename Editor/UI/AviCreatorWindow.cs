@@ -1546,6 +1546,7 @@ namespace AviCreatorEssentials
                 { "B  E  G  I  T  S  V  L", "Brush, eraser, fill, color picker, image, select, transform, lasso recolor" },
                 { "Enter  /  Esc (transform)", "Apply / cancel the floating piece" },
                 { "Ctrl+A  /  Ctrl+D  /  Ctrl+I", "Select all / clear / invert the UV selection" },
+                { "Alt+click (Select tool)", "Add a loop of polygons through the clicked one (Ctrl+Alt+click removes it); Alt+drag still orbits" },
                 { "[  ]", "Brush size (Shift: hardness)" },
                 { "Ctrl+Right-drag / Ctrl+scroll", "Brush size (drag up/down for hardness; scroll down grows)" },
                 { "Right-click", "Quick color wheel with recent colors under the cursor" },

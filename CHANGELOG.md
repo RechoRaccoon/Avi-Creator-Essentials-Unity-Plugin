@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.0
+
+- New Blender-style **polygon loop select**: with the Select tool, **Alt+click** a polygon in the 3D view or the texture view to select the loop of polygons through it. The loop runs across the polygon edge nearest your click and continues through opposite edges until it reaches a boundary, a triangle or a fork, or closes into a ring. Every Alt+click adds to the current selection, and **Ctrl+Alt+click** removes a loop. Alt+drag still orbits (3D) or pans (texture view). Loops always use whole polygons (not UV islands) and follow quads, so they work best on quad-based meshes.
+
 ## 0.19.5
 
 - Fixed an avatar (seen on a Quest copy) being left in an idle or scrambled pose after leaving Play mode, with its clothing and hair stretched across the scene, and Reset not bringing it back. Two causes in the Pose tool and the clothing sync:
