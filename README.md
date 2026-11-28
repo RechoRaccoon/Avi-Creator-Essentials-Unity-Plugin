@@ -29,6 +29,18 @@ The tool checks GitHub once a day. When a new version is out, an **Update** butt
 - **Git URL:** the button updates it for you.
 - **Manual copy:** the button offers to switch you to the VCC listing, so future updates are one click.
 
+## Ear Shaper
+
+Open it from **Tools › Avi Creator Essentials › Ear Shaper (Bunny Ears)…**, or right-click a mesh in the Hierarchy › **Avi Creator Essentials › Reshape Ears…**. It reshapes ears (for example cat ears into bunny ears) on the mesh itself, without touching bones, bone weights or UVs.
+
+1. Pick the avatar root, add the mesh(es) that contain the ears (the head/body mesh, plus a separate hair or ear mesh if the fluff is on one), and press **Start shaping**. If it says the mesh isn't readable, press the Read/Write button it shows.
+2. **Select**: paint over the ears in the Scene view (left-drag, **Ctrl** removes). Symmetry paints both ears at once. You can also press **Find ear bones** then **Select vertices weighted to these bones**. **Blend into head** controls how softly the change fades out around the selection.
+3. **Bunny shape**: the tool finds each ear's base and direction. Drag the orange arrow (or use **Length**) to make them taller, raise **Bunny profile** to turn the pointed triangle into a rounded oval, and use Width, Thickness, Curl, Bend, Twist and Tilt to taste. **Apply shape** locks it in.
+4. **Sculpt**: Grab, Smooth and Inflate (Shift deflates) for hand finishing. It only affects the selection and its blend zone, so the head stays safe.
+5. **Finish**: choose **Blend shape** (the original ears are kept and the bunny ears are a shape you can toggle in-game, on by default) or **Bake**. The new mesh is saved in `Assets/AviCreatorEssentials/Generated/EarShaper` and the original mesh is not changed.
+
+Because bone weights stay where they are, the ears keep moving with your ear bones. Stretching ears stretches their texture, which you can repaint in the Avatar Painter.
+
 ## Avatar Painter
 
 Open it from **Tools › Avi Creator Essentials › Avatar Painter**, or right-click your avatar in the Hierarchy › **Avi Creator Essentials › Paint This Avatar**. Then press **Start painting**.

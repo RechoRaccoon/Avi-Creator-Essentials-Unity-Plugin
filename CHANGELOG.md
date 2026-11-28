@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.0
+
+- New **Ear Shaper** (Tools › Avi Creator Essentials › Ear Shaper (Bunny Ears)…, or right-click a mesh › Reshape Ears…): reshapes ears, for example cat ears into long bunny ears, directly on the mesh. Only vertex positions move, so the armature, bone weights, UVs and other blend shapes are untouched. Vertices that sit at the same position (UV seams) are welded and always move together, so polygons can't split apart. Normals and tangents are turned along with the surface, so hard edges stay hard.
+  - **Select**: paint the ears in the Scene view (Ctrl removes, symmetry on by default), or select by ear bones' weights. A soft blend zone fades the change into the head.
+  - **Bunny shape**: finds each ear's base, direction and width profile, then gives live sliders for length, width, thickness, bunny profile (cat triangle to rounded oval), curl, bend, twist and tilt, a drag-arrow for length, and Standing / Tall & slim / Lop presets.
+  - **Sculpt**: Grab, Smooth and Inflate brushes with symmetry, limited to the selection so the head is protected.
+  - **Finish**: saved as a new mesh asset in `Assets/AviCreatorEssentials/Generated/EarShaper`, as a blend shape (toggle the bunny ears in-game, can be on by default) or baked into the mesh. The original mesh is never changed, and the swap is one undo step.
+
 ## 0.20.1
 
 - Fixed the direction of Alt+click polygon loops: the loop now runs along the polygon edge nearest the click (click near a top or bottom edge for a horizontal loop, near a left or right edge for a vertical one), as in Blender. It was running across that edge, the opposite way.
