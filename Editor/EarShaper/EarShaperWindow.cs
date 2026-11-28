@@ -78,7 +78,7 @@ namespace AviCreatorEssentials
             public Vector3[] lut = new Vector3[LutK + 1];
         }
 
-        class Snap { public Vector3[][] pos, nrm; public Vector4[][] tan; }
+        class Snap { public Vector3[][] pos, nrm; public Vector4[][] tan; public bool[][] sel; public bool selOnly; }
         struct Entry { public ShapeTarget t; public int g; public float w; public bool mirrored; }
 
         // setup
@@ -510,7 +510,16 @@ namespace AviCreatorEssentials
                 s.tan[i] = t.HasTan ? (Vector4[])t.tanBase.Clone() : null;
             }
             m_Undo.Add(s);
-            if (m_Undo.Count > 12) m_Undo.RemoveAt(0);
+            if (m_Undo.Count > 30) m_Undo.RemoveAt(0);
+        }
+
+        /// <summary>Remembers the current selection so painting, Grow, Shrink, Clear and bone-select can be undone.</summary>
+        void PushSelUndo()
+        {
+            var s = new Snap { selOnly = true, sel = new bool[m_Sess.Count][] };
+            for (int i = 0; i < m_Sess.Count; i++) s.sel[i] = (bool[])m_Sess[i].sel.Clone();
+            m_Undo.Add(s);
+            if (m_Undo.Count > 30) m_Undo.RemoveAt(0);
         }
 
         void SyncBaseToWork()
@@ -528,6 +537,19 @@ namespace AviCreatorEssentials
             if (m_Undo.Count == 0) return;
             var s = m_Undo[m_Undo.Count - 1];
             m_Undo.RemoveAt(m_Undo.Count - 1);
+            if (s.selOnly)
+            {
+                for (int i = 0; i < m_Sess.Count; i++)
+                {
+                    m_Sess[i].sel = s.sel[i];
+                    RebuildMask(m_Sess[i]);
+                }
+                if (m_Mode == Mode.Bunny) { RefitEars(); RefreshBunny(); }
+                m_OverlayDirty = true;
+                Repaint();
+                SceneView.RepaintAll();
+                return;
+            }
             for (int i = 0; i < m_Sess.Count; i++)
             {
                 var t = m_Sess[i];
@@ -955,6 +977,7 @@ namespace AviCreatorEssentials
                 if (!m_HasHover) return;
                 m_StrokeRemove = e.control || e.command;
                 m_Stroking = true;
+                PushSelUndo();
                 PaintSelectAt(m_Hover);
                 return;
             }
@@ -1461,9 +1484,9 @@ namespace AviCreatorEssentials
 
             EditorGUILayout.Space(4);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Grow")) { Grow(); }
-            if (GUILayout.Button("Shrink")) { Shrink(); }
-            if (GUILayout.Button("Clear")) { foreach (var t in m_Sess) { Array.Clear(t.sel, 0, t.sel.Length); RebuildMask(t); } }
+            if (GUILayout.Button("Grow")) { PushSelUndo(); Grow(); }
+            if (GUILayout.Button("Shrink")) { PushSelUndo(); Shrink(); }
+            if (GUILayout.Button("Clear")) { PushSelUndo(); foreach (var t in m_Sess) { Array.Clear(t.sel, 0, t.sel.Length); RebuildMask(t); } }
             EditorGUILayout.EndHorizontal();
             int count = 0;
             foreach (var t in m_Sess) foreach (bool b in t.sel) if (b) count++;
@@ -1491,6 +1514,7 @@ namespace AviCreatorEssentials
             foreach (var b in m_EarBones) if (b != null) foreach (var c in b.GetComponentsInChildren<Transform>(true)) set.Add(c);
             if (set.Count == 0) { m_Status = "Add at least one bone first."; return; }
             int picked = 0;
+            PushSelUndo();
             foreach (var t in m_Sess)
             {
                 if (t.smr == null || t.bw == null || t.bw.Length != t.n) continue;
