@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.22.1
+
+- **Ear Shaper undo covers everything.** It now uses Unity's own Undo, so Ctrl+Z / Ctrl+Y and Edit › Undo / Redo work from anywhere (Scene view or window), and there are Undo and Redo buttons. Slider drags (each drag is one step, typing in a field too), the length arrow, presets, blend distance, part type changes, selection, linking and sculpting are all undoable.
+- Fixed: **Twist** now turns the two ears in opposite directions so they stay mirrored.
+
+## 0.22.0
+
+- **Ear Shaper can be reopened.** Select the shaped mesh again and press **Resume shaping** to pick up exactly where you left off: same parts, selections, sliders and sculpting, all still adjustable. Applying again updates the same mesh asset in place. The settings are saved as `…_EarShaperSettings.asset` next to the generated mesh (keep it with the mesh; it is not part of the avatar).
+- **Parts.** The ear and its inner fluff are now separate parts, each with its own selection, colour, blend distance and settings. Add more if you need them.
+- **Linked select (Blender's L).** Pick a whole connected piece at once, by UV island or by connected mesh part, the same two modes as the painter. Click with the Linked tool, or press L over a piece (Shift+L removes). Symmetry picks the matching piece on the other side.
+- **Inner fluff settings:** stretch with the ear (0 keeps the fluff's own length), natural position or exact start/end along the ear, width, follow ear width, thickness, and push into the ear so it doesn't poke through.
+- Shaping is now non-destructive (original, then part settings, then a sculpt layer), so changing sliders after sculpting keeps the sculpting. Undo covers selection, sliders and sculpting.
+
 ## 0.21.1
 
 - Fixed the Ear Shaper selection not being undoable: painting, Grow, Shrink, Clear and bone-select can now be undone. The undo stack was also raised from 12 to 30 steps.
