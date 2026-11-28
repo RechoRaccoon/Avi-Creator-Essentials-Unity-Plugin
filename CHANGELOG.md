@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.21.1
+
+- Fixed the Ear Shaper selection not being undoable: painting, Grow, Shrink, Clear and bone-select can now be undone. The undo stack was also raised from 12 to 30 steps.
+
 ## 0.21.0
 
 - New **Ear Shaper** (Tools › Avi Creator Essentials › Ear Shaper (Bunny Ears)…, or right-click a mesh › Reshape Ears…): reshapes ears, for example cat ears into long bunny ears, directly on the mesh. Only vertex positions move, so the armature, bone weights, UVs and other blend shapes are untouched. Vertices that sit at the same position (UV seams) are welded and always move together, so polygons can't split apart. Normals and tangents are turned along with the surface, so hard edges stay hard.
